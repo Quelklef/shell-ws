@@ -44,6 +44,7 @@ export default function WorkspaceEdge({
           className="edge-toolbar nodrag nopan"
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+            pointerEvents: "all",
           }}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
