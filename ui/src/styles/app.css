@@ -323,11 +323,36 @@ textarea {
 
 .node-meta {
   display: flex;
-  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 18px;
+  padding-right: 28px;
   color: var(--text-soft);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
+}
+
+.node-kind-label {
+  min-width: 0;
+}
+
+.node-state-pill {
+  margin-left: auto;
+  padding: 2px 6px;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 232, 214, 0.16);
+  background: rgba(12, 14, 16, 0.58);
+  white-space: nowrap;
+}
+
+.node-state-pill.is-running {
+  border-color: rgba(242, 192, 120, 0.28);
+  color: var(--accent-soft);
+}
+
+.node-state-pill.is-idle {
+  color: var(--text-soft);
 }
 
 .autorun-shell {

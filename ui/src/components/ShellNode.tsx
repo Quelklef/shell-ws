@@ -194,8 +194,10 @@ export default function ShellNode({ data, selected }: NodeProps) {
           ×
         </button>
         <div className="node-meta">
-          <span>{model.kind.replaceAll("_", " ")}</span>
-          <span>{runtime.running ? "running" : "idle"}</span>
+          <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
+          <span className={`node-state-pill ${runtime.running ? "is-running" : "is-idle"}`}>
+            {runtime.running ? "running" : "idle"}
+          </span>
         </div>
 
         {(model.kind === "script" || model.kind === "merge_shell") && (
