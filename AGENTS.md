@@ -14,7 +14,7 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - Use `rg` for search.
 - Use `apply_patch` for manual edits.
 - Initialize and use git in this repo. Create frequent, meaningful commits.
-- Commit messages must include `WHAT:`, `WHY:`, and `HOW:` sections.
+- Commit messages must use a short summary headline, with `WHAT:`, `WHY:`, and `HOW:` sections in the commit body.
 
 ## Architecture Notes
 
