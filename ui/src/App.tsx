@@ -710,7 +710,11 @@ function WorkspaceCanvas() {
         }}
       >
         <ReactFlow<FlowNode, FlowEdge>
-          defaultViewport={workspaceMeta.ui}
+          defaultViewport={{
+            x: workspaceMeta.ui.viewportX,
+            y: workspaceMeta.ui.viewportY,
+            zoom: workspaceMeta.ui.zoom,
+          }}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
