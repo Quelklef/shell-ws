@@ -14,6 +14,7 @@ import {
   type NodeChange,
   useEdgesState,
   useNodesState,
+  useReactFlow,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -203,12 +204,15 @@ function WorkspaceCanvas() {
     y: number;
   } | null>(null);
   const socketRef = useRef<ReturnType<typeof connectKernel> | null>(null);
+  const canvasRef = useRef<HTMLElement | null>(null);
   const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "ui"> | null>(
     null,
   );
   const nodesRef = useRef<FlowNode[]>([]);
   const edgesRef = useRef<FlowEdge[]>([]);
   const autorunRef = useRef<Map<string, AutorunHandle>>(new Map());
+
+  const flow = useReactFlow<FlowNode, FlowEdge>();
 
   const [nodes, setNodes] = useNodesState<FlowNode>([]);
   const [edges, setEdges] = useEdgesState<FlowEdge>([]);
@@ -666,18 +670,25 @@ function WorkspaceCanvas() {
 
   const addNode = useCallback(
     (kind: NodeKind) => {
+      const canvasBounds = canvasRef.current?.getBoundingClientRect();
+      const centeredPosition = canvasBounds
+        ? flow.screenToFlowPosition({
+            x: canvasBounds.left + canvasBounds.width / 2,
+            y: canvasBounds.top + canvasBounds.height / 2,
+          })
+        : null;
       setNodes((current) => {
-        const nextNode = toFlowNode(
-          makeNode(kind, current.length + 1),
-          runtime,
-          handlers,
-        );
+        const nextNodeModel = makeNode(kind, current.length + 1);
+        if (centeredPosition) {
+          nextNodeModel.position = centeredPosition;
+        }
+        const nextNode = toFlowNode(nextNodeModel, runtime, handlers);
         const next = [...current, nextNode];
         persistSoon(next, edgesRef.current);
         return next;
       });
     },
-    [handlers, persistSoon, runtime, setNodes],
+    [flow, handlers, persistSoon, runtime, setNodes],
   );
 
   const runLayout = useCallback(() => {
@@ -737,6 +748,7 @@ function WorkspaceCanvas() {
       </aside>
 
       <main
+        ref={canvasRef}
         className="canvas-shell"
         onContextMenu={(event) => {
           const selectedCount = nodes.filter((node) => node.selected).length;
