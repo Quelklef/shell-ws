@@ -463,8 +463,8 @@ impl ExecutionContext {
                 self.emit_finished(&node.id, Some(0));
                 self.clone().complete_node(&node.id).await?;
             }
-            NodeKind::Cat => {
-                self.clone().run_cat_node(node).await?;
+            NodeKind::File => {
+                self.clone().run_file_node(node).await?;
             }
             NodeKind::Display => {
                 self.emit_started(&node.id);
@@ -578,7 +578,7 @@ impl ExecutionContext {
             .await
     }
 
-    async fn run_cat_node(self: Arc<Self>, node: Node) -> Result<(), String> {
+    async fn run_file_node(self: Arc<Self>, node: Node) -> Result<(), String> {
         self.emit_started(&node.id);
         let path = node
             .path
@@ -595,8 +595,7 @@ impl ExecutionContext {
             }
             Err(error) => {
                 let message = format!(
-                    "cat {}: {error}
-",
+                    "file {}: {error}\n",
                     path
                 )
                 .into_bytes();
@@ -1046,7 +1045,7 @@ impl ExecutionContext {
                     self.clone().complete_node(&target.id).await?;
                 }
             }
-            NodeKind::Text | NodeKind::Cat => {}
+            NodeKind::Text | NodeKind::File => {}
         }
         Ok(())
     }

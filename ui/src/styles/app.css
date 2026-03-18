@@ -583,3 +583,25 @@ textarea {
   background: rgba(9, 11, 13, 0.46);
   border: 1px solid rgba(244, 236, 223, 0.08);
 }
+
+.file-input-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.file-picker-button {
+  align-self: stretch;
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
+  border-radius: 12px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+
+.file-picker-button:hover {
+  border-color: var(--line-strong);
+  background: rgba(240, 138, 93, 0.12);
+}

@@ -26,6 +26,7 @@ import {
   createWorkspace,
   getWorkspace,
   listWorkspaces,
+  pickFilePath,
   saveWorkspace,
 } from "./lib/api";
 import { layoutSelectedNodes } from "./lib/layout";
@@ -67,7 +68,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     shell: "bash",
     script:
       kind === "script" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
-    path: kind === "exec" || kind === "cat" ? "" : null,
+    path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "shell-ws\n" : null,
     autoRun: null,
@@ -83,7 +84,7 @@ function paletteGroups(): {
       label: "sources",
       items: [
         { kind: "text", label: "text", help: "Emit literal text on stdout." },
-        { kind: "cat", label: "cat", help: "Read a file path and emit its bytes." },
+        { kind: "file", label: "file", help: "Read a file path and emit its bytes." },
       ],
     },
     {
@@ -202,6 +203,7 @@ function syncNodeData(
       onRun: handlers.onRun,
       onStop: handlers.onStop,
       onDelete: handlers.onDelete,
+      onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
     },
   }));
@@ -212,7 +214,7 @@ function toFlowNode(
   runtime: Record<string, NodeRuntimeState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "onStop" | "onDelete" | "onToggleAutorun"
+    "onUpdate" | "onRun" | "onStop" | "onDelete" | "onPickFile" | "onToggleAutorun"
   >,
   edges: FlowEdge[],
 ): FlowNode {
@@ -229,6 +231,7 @@ function toFlowNode(
       onRun: handlers.onRun,
       onStop: handlers.onStop,
       onDelete: handlers.onDelete,
+      onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
     },
     width: node.size.width,
@@ -295,6 +298,7 @@ type ShellNodeActions = {
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onStop: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
+  onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
 };
 
@@ -460,6 +464,31 @@ function WorkspaceCanvas() {
           persistSoon(next, nextEdges);
           return next;
         });
+      },
+      onPickFile: async (nodeId) => {
+        try {
+          const result = await pickFilePath();
+          setNodes((current) => {
+            const next = current.map((node) =>
+              node.id === nodeId
+                ? {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      model: {
+                        ...node.data.model,
+                        path: result.path,
+                      },
+                    },
+                  }
+                : node,
+            );
+            persistSoon(next, edgesRef.current);
+            return next;
+          });
+        } catch (error) {
+          setToast(String(error));
+        }
       },
       onToggleAutorun: (nodeId, next) => {
         setNodes((current) => {

@@ -3,7 +3,7 @@ import type { Edge, Node } from "@xyflow/react";
 export type NodeKind =
   | "script"
   | "exec"
-  | "cat"
+  | "file"
   | "display"
   | "text"
   | "tee"
@@ -144,6 +144,7 @@ export interface ShellNodeData extends Record<string, unknown> {
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onStop: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
+  onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
 }
 

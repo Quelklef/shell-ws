@@ -109,7 +109,8 @@ pub enum NodeKind {
     #[serde(alias = "process")]
     Script,
     Exec,
-    Cat,
+    #[serde(alias = "cat")]
+    File,
     Display,
     Text,
     Tee,
@@ -298,6 +299,13 @@ mod tests {
         let kind: super::NodeKind =
             serde_json::from_str("\"process\"").expect("deserialize legacy process kind");
         assert_eq!(kind, super::NodeKind::Script);
+    }
+
+    #[test]
+    fn legacy_cat_kind_deserializes_as_file() {
+        let kind: super::NodeKind =
+            serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
+        assert_eq!(kind, super::NodeKind::File);
     }
 
     #[test]

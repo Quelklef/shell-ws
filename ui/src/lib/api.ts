@@ -50,3 +50,7 @@ export function saveWorkspace(workspace: Workspace) {
     body: JSON.stringify(workspace),
   });
 }
+
+export function pickFilePath() {
+  return request<{ path: string }>(`${kernelOrigin()}/api/pick-file`, { method: "POST" });
+}

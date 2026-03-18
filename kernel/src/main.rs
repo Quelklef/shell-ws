@@ -2,7 +2,7 @@ mod execution;
 mod model;
 mod workspace_store;
 
-use std::net::SocketAddr;
+use std::{net::SocketAddr, process::Stdio};
 
 use axum::{
     extract::{
@@ -11,7 +11,7 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post},
     Json, Router,
 };
 use execution::ExecutionManager;
@@ -62,6 +62,7 @@ async fn main() {
                 .put(save_workspace)
                 .delete(delete_workspace),
         )
+        .route("/api/pick-file", post(pick_file))
         .route("/ws", get(ws_handler))
         .fallback_service(ServeDir::new("ui/dist").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
@@ -119,6 +120,56 @@ async fn delete_workspace(
 ) -> Result<StatusCode, AppError> {
     state.store.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+
+#[derive(serde::Serialize)]
+struct PickedPath {
+    path: String,
+}
+
+async fn pick_file() -> Result<Json<PickedPath>, AppError> {
+    Ok(Json(PickedPath {
+        path: pick_file_path().await?,
+    }))
+}
+
+async fn pick_file_path() -> Result<String, AppError> {
+    let pickers: [(&str, &[&str]); 3] = [
+        ("zenity", &["--file-selection", "--title=shell-ws file picker"]),
+        ("kdialog", &["--getopenfilename"]),
+        ("yad", &["--file-selection", "--title=shell-ws file picker"]),
+    ];
+
+    let mut saw_picker = false;
+    for (program, args) in pickers {
+        let output = tokio::process::Command::new(program)
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .await;
+        match output {
+            Ok(output) => {
+                saw_picker = true;
+                if output.status.success() {
+                    let path = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    if !path.is_empty() {
+                        return Ok(path);
+                    }
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(AppError::Io(error)),
+        }
+    }
+
+    if saw_picker {
+        Err(AppError::Message("file picker cancelled".to_string()))
+    } else {
+        Err(AppError::Message(
+            "no supported native file picker found (tried zenity, kdialog, yad)".to_string(),
+        ))
+    }
 }
 
 async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
@@ -204,6 +255,8 @@ enum AppError {
     Io(#[from] std::io::Error),
     #[error("{0}")]
     Json(#[from] serde_json::Error),
+    #[error("{0}")]
+    Message(String),
 }
 
 impl IntoResponse for AppError {

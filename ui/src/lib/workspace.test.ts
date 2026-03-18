@@ -4,6 +4,27 @@ import type { Workspace } from "./types";
 import { sanitizeWorkspace } from "./workspace";
 
 describe("sanitizeWorkspace", () => {
+  it("renames legacy cat nodes to file nodes", () => {
+    const workspace = {
+      id: "w",
+      name: "w",
+      ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+      nodes: [
+        {
+          id: "cat-1",
+          kind: "cat",
+          title: "",
+          comment: "",
+          position: { x: 0, y: 0 },
+          size: { width: 300, height: 200 },
+        },
+      ],
+      edges: [],
+    } as unknown as Workspace;
+
+    expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("file");
+  });
+
   it("drops legacy unslotted argv edges", () => {
     const workspace: Workspace = {
       id: "w",

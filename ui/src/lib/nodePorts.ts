@@ -1,7 +1,7 @@
 import type { NodeKind, PortKind } from "./types";
 
 export function nodeHasInputPort(kind: NodeKind) {
-  return kind !== "text" && kind !== "cat";
+  return kind !== "text" && kind !== "file";
 }
 
 export function nodeHasArgvPort(kind: NodeKind) {

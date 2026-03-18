@@ -145,7 +145,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         ))}
       {(model.kind === "script" ||
         model.kind === "exec" ||
-        model.kind === "cat" ||
+        model.kind === "file" ||
         model.kind === "text" ||
         model.kind === "display" ||
         model.kind.startsWith("merge_")) &&
@@ -161,7 +161,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         )}
       {(model.kind === "script" ||
         model.kind === "exec" ||
-        model.kind === "cat") &&
+        model.kind === "file") &&
         outputHandle("stderr", 128, "stderr", runtime.portActivity.stderr)}
 
       <div className="node-comment-floating">
@@ -244,16 +244,25 @@ export default function ShellNode({ data, selected }: NodeProps) {
           </>
         )}
 
-        {model.kind === "cat" && (
-          <input
-            className="shell-input nodrag nopan"
-            value={model.path ?? ""}
-            onWheelCapture={(event) => event.stopPropagation()}
-            onChange={(event) =>
-              typedData.onUpdate(model.id, { path: event.target.value })
-            }
-            placeholder="file path"
-          />
+        {model.kind === "file" && (
+          <div className="file-input-row">
+            <input
+              className="shell-input nodrag nopan"
+              value={model.path ?? ""}
+              onWheelCapture={(event) => event.stopPropagation()}
+              onChange={(event) =>
+                typedData.onUpdate(model.id, { path: event.target.value })
+              }
+              placeholder="file path"
+            />
+            <button
+              type="button"
+              className="nodrag nopan file-picker-button"
+              onClick={() => void typedData.onPickFile(model.id)}
+            >
+              pick
+            </button>
+          </div>
         )}
 
         {model.kind === "text" && (
