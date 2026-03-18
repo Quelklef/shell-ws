@@ -336,6 +336,20 @@ textarea {
   color: var(--text-soft);
 }
 
+.display-empty,
+.display-code,
+.display-markdown,
+.display-markdown * {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.display-code,
+.display-markdown,
+.display-empty {
+  cursor: text;
+}
+
 .display-code {
   margin: 0;
   overflow: auto;

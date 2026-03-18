@@ -255,7 +255,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
 
         {model.kind === "display" && (
           <div
-            className="display-pane"
+            className="display-pane nodrag nopan"
             onWheelCapture={(event) => event.stopPropagation()}
           >
             <div className="display-label">{display?.label ?? "display"}</div>
