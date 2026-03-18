@@ -268,9 +268,9 @@ mod tests {
     #[test]
     fn buffering_mode_serializes_with_expected_underscore() {
         let value = serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
-        assert_eq!(value, ""line_or_1024"");
+        assert_eq!(value, "\"line_or_1024\"");
 
-        let parsed: super::BufferingMode = serde_json::from_str(""line_or1024"").expect("deserialize legacy mode");
+        let parsed: super::BufferingMode = serde_json::from_str("\"line_or1024\"").expect("deserialize legacy mode");
         assert_eq!(parsed, super::BufferingMode::LineOr1024);
     }
 
