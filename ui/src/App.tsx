@@ -63,15 +63,32 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
   };
 }
 
-function kindChoices(): { kind: NodeKind; label: string }[] {
+function paletteGroups(): {
+  label: string;
+  items: { kind: NodeKind; label: string }[];
+}[] {
   return [
-    { kind: "process", label: "process" },
-    { kind: "text", label: "text" },
-    { kind: "display", label: "display" },
-    { kind: "merge_concat", label: "merge concat" },
-    { kind: "merge_line", label: "merge line" },
-    { kind: "merge_byte", label: "merge byte" },
-    { kind: "merge_shell", label: "merge shell" },
+    {
+      label: "sources",
+      items: [{ kind: "text", label: "text" }],
+    },
+    {
+      label: "process",
+      items: [{ kind: "process", label: "process" }],
+    },
+    {
+      label: "merge",
+      items: [
+        { kind: "merge_concat", label: "concat" },
+        { kind: "merge_line", label: "line" },
+        { kind: "merge_byte", label: "byte" },
+        { kind: "merge_shell", label: "shell" },
+      ],
+    },
+    {
+      label: "sinks",
+      items: [{ kind: "display", label: "display" }],
+    },
   ];
 }
 
@@ -660,42 +677,28 @@ function WorkspaceCanvas() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <div className="sidebar-header">
-          <div>
-            <div className="eyebrow">shell-ws</div>
-            <h1>{workspaceMeta.name}</h1>
-          </div>
-          <span
-            className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}
-          >
-            {kernelConnected ? "kernel online" : "kernel offline"}
-          </span>
-        </div>
-        <p className="sidebar-copy">
-          Place processes on the canvas, wire stdout and stderr to downstream
-          stdin, and execute with push, pull, or timed auto-run.
-        </p>
-        <div className="node-palette">
-          {kindChoices().map((choice) => (
-            <button
-              key={choice.kind}
-              type="button"
-              onClick={() => addNode(choice.kind)}
-            >
-              {choice.label}
-            </button>
+        <span
+          className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}
+        >
+          {kernelConnected ? "kernel online" : "kernel offline"}
+        </span>
+        <div className="node-palette-groups">
+          {paletteGroups().map((group) => (
+            <section key={group.label} className="node-palette-group">
+              <div className="node-palette-label">{group.label}</div>
+              <div className="node-palette">
+                {group.items.map((choice) => (
+                  <button
+                    key={choice.kind}
+                    type="button"
+                    onClick={() => addNode(choice.kind)}
+                  >
+                    {choice.label}
+                  </button>
+                ))}
+              </div>
+            </section>
           ))}
-        </div>
-        <div className="sidebar-notes">
-          <div>Rules</div>
-          <p>
-            Non-merge nodes accept a single stdin wire. Use merge nodes for
-            fan-in.
-          </p>
-          <p>
-            Click an edge to cycle buffering: newline or 1024, on completion, or
-            unbuffered.
-          </p>
         </div>
       </aside>
 

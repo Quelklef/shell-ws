@@ -58,7 +58,10 @@ textarea {
 
 .sidebar {
   position: relative;
-  padding: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(240, 138, 93, 0.08), transparent 16%),
@@ -66,37 +69,11 @@ textarea {
   backdrop-filter: blur(18px);
 }
 
-.sidebar-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 12px;
-}
-
-.eyebrow {
-  font-size: 11px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--accent-soft);
-  margin-bottom: 8px;
-}
-
-.sidebar h1 {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 600;
-}
-
-.sidebar-copy {
-  color: var(--text-soft);
-  line-height: 1.5;
-  margin: 14px 0 24px;
-}
-
 .kernel-pill {
+  align-self: flex-start;
   border: 1px solid var(--line);
   border-radius: 999px;
-  padding: 7px 12px;
+  padding: 6px 10px;
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -112,9 +89,29 @@ textarea {
   color: #f1b0b0;
 }
 
+.node-palette-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.node-palette-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.node-palette-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-soft);
+}
+
 .node-palette {
-  display: grid;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
 }
 
 .node-palette button,
@@ -138,20 +135,6 @@ textarea {
   transform: translateY(-1px);
   border-color: var(--line-strong);
   background: rgba(240, 138, 93, 0.12);
-}
-
-.sidebar-notes {
-  margin-top: 28px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
-  color: var(--text-soft);
-}
-
-.sidebar-notes div {
-  color: var(--text);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-size: 10px;
 }
 
 .canvas-shell {
@@ -430,4 +413,11 @@ textarea {
 .shell-handle-stdin.is-active {
   background: var(--accent-soft);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(242, 192, 120, 0.9);
+}
+
+.node-palette button {
+  padding: 5px 7px;
+  border-radius: 9px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
 }
