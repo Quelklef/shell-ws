@@ -3,6 +3,7 @@ import {
   ConnectionLineType,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   SelectionMode,
@@ -1228,7 +1229,8 @@ function WorkspaceCanvas() {
           onConnect={onConnect}
           selectionOnDrag
           selectionMode={SelectionMode.Partial}
-          panOnScroll
+          zoomOnScroll
+          panOnScroll={false}
           panOnDrag={[1, 2]}
           colorMode="dark"
           connectionLineType={ConnectionLineType.SmoothStep}
@@ -1249,6 +1251,9 @@ function WorkspaceCanvas() {
         >
           <MiniMap pannable zoomable className="minimap" />
           <Controls />
+          <Panel position="bottom-right" className="zoom-wheel-note">
+            scroll wheel: zoom
+          </Panel>
           <Background gap={28} size={1} color="rgba(250, 244, 233, 0.08)" />
         </ReactFlow>
         {contextMenu && (

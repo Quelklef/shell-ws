@@ -734,3 +734,15 @@ textarea {
   border-color: var(--line-strong);
   background: rgba(240, 138, 93, 0.12);
 }
+
+.zoom-wheel-note {
+  margin-bottom: 48px;
+  padding: 6px 8px;
+  border: 1px solid rgba(244, 236, 223, 0.14);
+  border-radius: 10px;
+  background: rgba(10, 11, 12, 0.86);
+  color: var(--text-soft);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
