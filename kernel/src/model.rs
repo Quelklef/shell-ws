@@ -23,7 +23,7 @@ impl Workspace {
                     id: "text-1".to_string(),
                     kind: NodeKind::Text,
                     title: "Seed".to_string(),
-                    comment: "Edit this text node and push it into the graph.".to_string(),
+                    comment: "".to_string(),
                     position: Position { x: 80.0, y: 120.0 },
                     size: Size {
                         width: 320.0,
@@ -38,7 +38,7 @@ impl Workspace {
                     id: "display-1".to_string(),
                     kind: NodeKind::Display,
                     title: "Display".to_string(),
-                    comment: "Display nodes show stdin and auto-detect common formats.".to_string(),
+                    comment: "".to_string(),
                     position: Position { x: 520.0, y: 120.0 },
                     size: Size {
                         width: 360.0,
