@@ -649,6 +649,19 @@ impl ExecutionContext {
 
         match target.kind {
             NodeKind::Display => {
+                let started = {
+                    let mut states = self.node_states.lock();
+                    let state = states.entry(target.id.clone()).or_default();
+                    if state.running {
+                        false
+                    } else {
+                        state.running = true;
+                        true
+                    }
+                };
+                if started {
+                    self.emit_started(&target.id);
+                }
                 self.update_display(&target.id, payload, completed);
             }
             NodeKind::Process => {
@@ -744,6 +757,19 @@ impl ExecutionContext {
                 Some(NodeKind::Display)
             ) {
                 self.update_display(&edge.to.node_id, Vec::new(), true);
+                let finished = {
+                    let mut states = self.node_states.lock();
+                    let state = states.entry(edge.to.node_id.clone()).or_default();
+                    if state.running {
+                        state.running = false;
+                        true
+                    } else {
+                        false
+                    }
+                };
+                if finished {
+                    self.emit_finished(&edge.to.node_id, Some(0));
+                }
             }
         }
         Ok(())
