@@ -128,32 +128,30 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "cat") &&
         outputHandle("stderr", 128, runtime.portActivity.stderr)}
 
+      <div className="node-comment-floating">
+        <textarea
+          className="nodrag nopan"
+          value={model.comment}
+          placeholder="Add a comment"
+          onWheelCapture={(event) => event.stopPropagation()}
+          onChange={(event) =>
+            typedData.onUpdate(model.id, {
+              comment: event.target.value,
+            })
+          }
+        />
+      </div>
+
       <div className="node-card">
-        <div className="node-comment">
-          <textarea
-            className="nodrag nopan"
-            value={model.comment}
-            placeholder="comment"
-            onWheelCapture={(event) => event.stopPropagation()}
-            onChange={(event) =>
-              typedData.onUpdate(model.id, {
-                comment: event.target.value,
-              })
-            }
-          />
-        </div>
-        <div className="node-header-row">
-          <div className="node-title">{model.title}</div>
-          <button
-            type="button"
-            className="node-delete nodrag nopan"
-            onClick={() => typedData.onDelete(model.id)}
-            aria-label="delete node"
-            title="delete node"
-          >
-            ×
-          </button>
-        </div>
+        <button
+          type="button"
+          className="node-delete nodrag nopan"
+          onClick={() => typedData.onDelete(model.id)}
+          aria-label="delete node"
+          title="delete node"
+        >
+          ×
+        </button>
         <div className="node-meta">
           <span>{model.kind.replaceAll("_", " ")}</span>
           <span>{runtime.running ? "running" : "idle"}</span>

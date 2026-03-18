@@ -163,8 +163,10 @@ textarea {
 }
 
 .shell-node {
+  position: relative;
   width: 100%;
   height: 100%;
+  overflow: visible;
 }
 
 .shell-node.is-running .node-card {
@@ -199,6 +201,7 @@ textarea {
 }
 
 .node-card {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -218,16 +221,14 @@ textarea {
   box-shadow: var(--shadow);
 }
 
-.node-comment textarea,
 .script-editor,
 .display-code,
 .merge-help {
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
 }
 
-.node-comment textarea,
-.script-editor,
 .shell-input,
+.script-editor,
 .autorun-controls input,
 .autorun-controls select {
   width: 100%;
@@ -239,19 +240,6 @@ textarea {
   font-size: 12px;
 }
 
-.node-comment textarea {
-  min-height: 56px;
-  resize: vertical;
-  color: var(--accent-soft);
-}
-
-.node-title {
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  color: var(--text);
-}
-
 .shell-input {
   min-height: 42px;
 }
@@ -259,6 +247,35 @@ textarea {
 .script-editor {
   min-height: 112px;
   resize: vertical;
+}
+
+.node-comment-floating {
+  position: absolute;
+  left: 0;
+  right: 28px;
+  top: -34px;
+  z-index: 6;
+}
+
+.node-comment-floating textarea {
+  width: 100%;
+  min-height: 26px;
+  max-height: 90px;
+  resize: vertical;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 0;
+  overflow: hidden;
+}
+
+.node-comment-floating textarea::placeholder {
+  color: var(--text-soft);
+  font-style: italic;
+  font-weight: 400;
 }
 
 .node-meta {
@@ -472,14 +489,10 @@ textarea {
 }
 
 
-.node-header-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
 .node-delete {
+  position: absolute;
+  top: 10px;
+  right: 10px;
   width: 18px;
   height: 18px;
   display: grid;
