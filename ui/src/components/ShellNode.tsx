@@ -1,5 +1,9 @@
+import CodeMirror from "@uiw/react-codemirror";
+import { StreamLanguage } from "@codemirror/language";
+import { shell } from "@codemirror/legacy-modes/mode/shell";
+import { oneDark } from "@codemirror/theme-one-dark";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { renderDisplay } from "../lib/format";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
@@ -78,6 +82,7 @@ function outputHandle(
 export default function ShellNode({ data, selected }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
+  const shellExtensions = useMemo(() => [StreamLanguage.define(shell)], []);
   const autoRun = model.autoRun ?? {
     enabled: false,
     mode: "push" as const,
@@ -204,15 +209,26 @@ export default function ShellNode({ data, selected }: NodeProps) {
               }
               placeholder="shell"
             />
-            <textarea
-              className="script-editor nodrag nopan"
-              value={model.script ?? ""}
-              placeholder="shell snippet"
+            <div
+              className="script-editor-codemirror nodrag nopan"
               onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) =>
-                typedData.onUpdate(model.id, { script: event.target.value })
-              }
-            />
+            >
+              <CodeMirror
+                value={model.script ?? ""}
+                height="132px"
+                theme={oneDark}
+                extensions={shellExtensions}
+                basicSetup={{
+                  lineNumbers: false,
+                  foldGutter: false,
+                  highlightActiveLine: false,
+                  highlightActiveLineGutter: false,
+                }}
+                onChange={(value) =>
+                  typedData.onUpdate(model.id, { script: value })
+                }
+              />
+            </div>
           </>
         )}
 

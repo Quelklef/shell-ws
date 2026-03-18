@@ -271,6 +271,27 @@ textarea {
   resize: vertical;
 }
 
+.script-editor-codemirror {
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.54);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.script-editor-codemirror .cm-editor {
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  font-size: 12px;
+  background: transparent;
+}
+
+.script-editor-codemirror .cm-scroller {
+  font-family: inherit;
+}
+
+.script-editor-codemirror .cm-gutters {
+  display: none;
+}
+
 .node-comment-floating {
   position: absolute;
   left: 0;
