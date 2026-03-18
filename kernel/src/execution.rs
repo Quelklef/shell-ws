@@ -1245,8 +1245,11 @@ mod tests {
     use std::time::Duration;
 
     use tokio::{sync::broadcast, time::timeout};
+    use tokio_util::sync::CancellationToken;
 
-    use super::{interleave_bytes, interleave_lines, EdgeBufferState, ExecutionManager};
+    use super::{
+        interleave_bytes, interleave_lines, EdgeBufferState, ExecutionContext, ExecutionManager,
+    };
     use crate::model::{
         BufferingMode, Edge, ExecutionMode, Node, NodeKind, PortKind, PortRef, Position,
         ServerEvent, Size, Workspace, WorkspaceUi,
