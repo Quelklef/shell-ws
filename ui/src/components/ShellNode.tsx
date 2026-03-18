@@ -310,7 +310,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
 
         <div className="port-preview-shell">
           <div className="port-preview-tabs">
-              {previewTabs.map((port) => (
+            {previewTabs.map((port) => (
                 <button
                   key={port}
                   type="button"
