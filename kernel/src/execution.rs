@@ -163,7 +163,7 @@ impl ExecutionContext {
         for node in workspace.nodes.iter().filter(|node| {
             matches!(
                 node.kind,
-                NodeKind::Process | NodeKind::Display | NodeKind::Text
+                NodeKind::Script | NodeKind::Exec | NodeKind::Display | NodeKind::Text | NodeKind::Tee
             )
         }) {
             let count = incoming.get(&node.id).map_or(0, Vec::len);
@@ -328,6 +328,9 @@ impl ExecutionContext {
                 self.emit_finished(&node.id, Some(0));
                 self.clone().complete_node(&node.id).await?;
             }
+            NodeKind::Cat => {
+                self.clone().run_cat_node(node).await?;
+            }
             NodeKind::Display => {
                 self.emit_started(&node.id);
                 if !initial_input.is_empty() {
@@ -353,17 +356,79 @@ impl ExecutionContext {
             | NodeKind::MergeShell => {
                 self.clone().run_merge_node(node, initial_input).await?;
             }
-            NodeKind::Process => {
-                self.clone().run_process_node(node, initial_input).await?;
+            NodeKind::Script => {
+                self.clone().run_script_node(node, initial_input).await?;
+            }
+            NodeKind::Exec => {
+                self.clone().run_exec_node(node, initial_input).await?;
             }
         }
         Ok(())
     }
 
-    async fn run_process_node(
+    async fn run_script_node(
         self: Arc<Self>,
         node: Node,
         initial_input: Vec<u8>,
+    ) -> Result<(), String> {
+        let mut command = Command::new(node.shell_value());
+        command
+            .arg("-c")
+            .arg(node.script.clone().unwrap_or_default());
+        self.spawn_command_node(node, initial_input, command).await
+    }
+
+    async fn run_exec_node(
+        self: Arc<Self>,
+        node: Node,
+        initial_input: Vec<u8>,
+    ) -> Result<(), String> {
+        let path = node
+            .path
+            .clone()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("{} is missing a binary path", node.title))?;
+        let mut command = Command::new(path);
+        for arg in node.args.clone().unwrap_or_default() {
+            command.arg(arg);
+        }
+        self.spawn_command_node(node, initial_input, command).await
+    }
+
+    async fn run_cat_node(self: Arc<Self>, node: Node) -> Result<(), String> {
+        self.emit_started(&node.id);
+        let path = node
+            .path
+            .clone()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| format!("{} is missing a file path", node.title))?;
+        match tokio::fs::read(&path).await {
+            Ok(data) => {
+                self.emit_port_activity(&node.id, PortKind::Stdout, data.len());
+                self.clone()
+                    .forward_output(&node.id, PortKind::Stdout, data)
+                    .await?;
+                self.emit_finished(&node.id, Some(0));
+            }
+            Err(error) => {
+                let message = format!("cat {}: {error}
+", path).into_bytes();
+                self.emit_port_activity(&node.id, PortKind::Stderr, message.len());
+                self.clone()
+                    .forward_output(&node.id, PortKind::Stderr, message)
+                    .await?;
+                self.emit_finished(&node.id, Some(1));
+            }
+        }
+        self.clone().complete_node(&node.id).await?;
+        Ok(())
+    }
+
+    async fn spawn_command_node(
+        self: Arc<Self>,
+        node: Node,
+        initial_input: Vec<u8>,
+        mut command: Command,
     ) -> Result<(), String> {
         let mut states = self.node_states.lock();
         let state = states.entry(node.id.clone()).or_default();
@@ -381,10 +446,6 @@ impl ExecutionContext {
 
         self.emit_started(&node.id);
 
-        let mut command = Command::new(node.shell_value());
-        command
-            .arg("-c")
-            .arg(node.script.clone().unwrap_or_default());
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
@@ -675,7 +736,7 @@ impl ExecutionContext {
                 }
                 self.update_display(&target.id, payload, completed);
             }
-            NodeKind::Process => {
+            NodeKind::Script | NodeKind::Exec => {
                 let existing_writer = self
                     .node_states
                     .lock()
@@ -754,7 +815,7 @@ impl ExecutionContext {
                     self.clone().complete_node(&target.id).await?;
                 }
             }
-            NodeKind::Text => {}
+            NodeKind::Text | NodeKind::Cat => {}
         }
         Ok(())
     }

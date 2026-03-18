@@ -102,7 +102,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         lineClassName="node-resizer-line"
         handleClassName="node-resizer-handle"
       />
-      {model.kind !== "text" && (
+      {model.kind !== "text" && model.kind !== "cat" && (
         <Handle
           id="stdin"
           type="target"
@@ -116,14 +116,16 @@ export default function ShellNode({ data, selected }: NodeProps) {
           style={{ top: 96 }}
         />
       )}
-      {(model.kind === "process" ||
+      {(model.kind === "script" ||
+        model.kind === "exec" ||
+        model.kind === "cat" ||
         model.kind === "text" ||
         model.kind === "tee" ||
         model.kind.startsWith("merge_")) &&
         outputHandle("stdout", 84, runtime.portActivity.stdout)}
-      {model.kind !== "text" &&
-        model.kind !== "display" &&
-        model.kind !== "tee" &&
+      {(model.kind === "script" ||
+        model.kind === "exec" ||
+        model.kind === "cat") &&
         outputHandle("stderr", 128, runtime.portActivity.stderr)}
 
       <div className="node-card">
@@ -157,7 +159,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
           <span>{runtime.running ? "running" : "idle"}</span>
         </div>
 
-        {(model.kind === "process" || model.kind === "merge_shell") && (
+        {(model.kind === "script" || model.kind === "merge_shell") && (
           <>
             <input
               className="shell-input nodrag nopan"
@@ -178,6 +180,46 @@ export default function ShellNode({ data, selected }: NodeProps) {
               }
             />
           </>
+        )}
+
+        {model.kind === "exec" && (
+          <>
+            <input
+              className="shell-input nodrag nopan"
+              value={model.path ?? ""}
+              onWheelCapture={(event) => event.stopPropagation()}
+              onChange={(event) =>
+                typedData.onUpdate(model.id, { path: event.target.value })
+              }
+              placeholder="binary path"
+            />
+            <textarea
+              className="script-editor nodrag nopan"
+              value={(model.args ?? []).join("\n")}
+              placeholder="arguments, one per line"
+              onWheelCapture={(event) => event.stopPropagation()}
+              onChange={(event) =>
+                typedData.onUpdate(model.id, {
+                  args: event.target.value
+                    .split("\n")
+                    .map((value) => value.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          </>
+        )}
+
+        {model.kind === "cat" && (
+          <input
+            className="shell-input nodrag nopan"
+            value={model.path ?? ""}
+            onWheelCapture={(event) => event.stopPropagation()}
+            onChange={(event) =>
+              typedData.onUpdate(model.id, { path: event.target.value })
+            }
+            placeholder="file path"
+          />
         )}
 
         {model.kind === "text" && (
@@ -264,7 +306,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
           )}
         </div>
 
-        {model.kind === "process" && (
+        {(model.kind === "script" || model.kind === "exec") && (
           <div className="port-preview-shell">
             <div className="port-preview-tabs">
               {(["stdin", "stdout", "stderr"] as PortKind[]).map((port) => (

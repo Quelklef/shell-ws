@@ -1,7 +1,9 @@
 import type { Edge, Node } from "@xyflow/react";
 
 export type NodeKind =
-  | "process"
+  | "script"
+  | "exec"
+  | "cat"
   | "display"
   | "text"
   | "tee"
@@ -35,6 +37,8 @@ export interface WorkspaceNode {
   size: { width: number; height: number };
   shell?: string | null;
   script?: string | null;
+  path?: string | null;
+  args?: string[] | null;
   text?: string | null;
   autoRun?: AutoRunConfig | null;
 }

@@ -58,13 +58,13 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
   return {
     id: encodeId(kind),
     kind,
-    title: `${kind.replaceAll("_", " ")} ${count}`,
+    title: "",
     comment: "",
     position: { x: 140 + count * 30, y: 140 + count * 24 },
     size: { width: 320, height: kind === "display" ? 300 : 230 },
     shell: "bash",
     script:
-      kind === "process" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
+      kind === "script" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
     text: kind === "text" ? "shell-ws\n" : null,
     autoRun: null,
   };
@@ -79,12 +79,16 @@ function paletteGroups(): {
       label: "sources",
       items: [
         { kind: "text", label: "text" },
-        { kind: "tee", label: "tee" },
+        { kind: "cat", label: "cat" },
       ],
     },
     {
-      label: "process",
-      items: [{ kind: "process", label: "process" }],
+      label: "run",
+      items: [
+        { kind: "script", label: "script" },
+        { kind: "exec", label: "exec" },
+        { kind: "tee", label: "tee" },
+      ],
     },
     {
       label: "merge",
@@ -451,7 +455,7 @@ function WorkspaceCanvas() {
                       ? { bytes: new Uint8Array(), completed: false }
                       : current[event.node_id]?.display,
                   previews:
-                    nodeKind === "process"
+                    nodeKind === "script" || nodeKind === "exec"
                       ? {
                           stdin: resetCompletedPreview("stdin"),
                           stdout: { bytes: new Uint8Array(), completed: false },

@@ -31,6 +31,8 @@ impl Workspace {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    path: None,
+                    args: None,
                     text: Some("hello from shell-ws\n".to_string()),
                     auto_run: None,
                 },
@@ -46,6 +48,8 @@ impl Workspace {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    path: None,
+                    args: None,
                     text: None,
                     auto_run: None,
                 },
@@ -82,6 +86,10 @@ pub struct Node {
     #[serde(default)]
     pub script: Option<String>,
     #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub args: Option<Vec<String>>,
+    #[serde(default)]
     pub text: Option<String>,
     #[serde(default, alias = "auto_run")]
     pub auto_run: Option<AutoRunConfig>,
@@ -96,7 +104,10 @@ impl Node {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
-    Process,
+    #[serde(alias = "process")]
+    Script,
+    Exec,
+    Cat,
     Display,
     Text,
     Tee,
@@ -273,6 +284,13 @@ mod tests {
 
         let parsed: super::BufferingMode = serde_json::from_str("\"line_or1024\"").expect("deserialize legacy mode");
         assert_eq!(parsed, super::BufferingMode::LineOr1024);
+    }
+
+    #[test]
+    fn legacy_process_kind_deserializes_as_script() {
+        let kind: super::NodeKind = serde_json::from_str("\"process\"")
+            .expect("deserialize legacy process kind");
+        assert_eq!(kind, super::NodeKind::Script);
     }
 
     #[test]

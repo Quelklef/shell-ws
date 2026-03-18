@@ -19,7 +19,7 @@ describe("layoutSelectedNodes", () => {
         },
         {
           id: "b",
-          kind: "process",
+          kind: "script",
           title: "B",
           comment: "",
           position: { x: 0, y: 0 },
