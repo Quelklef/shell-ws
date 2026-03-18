@@ -21,6 +21,7 @@ function AutoRunControls({
       <select
         className="nodrag nopan"
         value={config.mode}
+        onWheelCapture={(event) => event.stopPropagation()}
         onChange={(event) =>
           onChange({
             ...config,
@@ -37,6 +38,7 @@ function AutoRunControls({
         min={100}
         step={100}
         value={config.intervalMs}
+        onWheelCapture={(event) => event.stopPropagation()}
         onChange={(event) =>
           onChange({
             ...config,
@@ -113,6 +115,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
             className="nodrag nopan"
             value={model.comment}
             placeholder="comment"
+            onWheelCapture={(event) => event.stopPropagation()}
             onChange={(event) =>
               typedData.onUpdate(model.id, {
                 comment: event.target.value,
@@ -142,6 +145,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
             <input
               className="shell-input nodrag nopan"
               value={model.shell ?? "bash"}
+              onWheelCapture={(event) => event.stopPropagation()}
               onChange={(event) =>
                 typedData.onUpdate(model.id, { shell: event.target.value })
               }
@@ -151,6 +155,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               className="script-editor nodrag nopan"
               value={model.script ?? ""}
               placeholder="shell snippet"
+              onWheelCapture={(event) => event.stopPropagation()}
               onChange={(event) =>
                 typedData.onUpdate(model.id, { script: event.target.value })
               }
@@ -163,6 +168,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
             className="script-editor nodrag nopan"
             value={model.text ?? ""}
             placeholder="text output"
+            onWheelCapture={(event) => event.stopPropagation()}
             onChange={(event) =>
               typedData.onUpdate(model.id, { text: event.target.value })
             }
@@ -170,7 +176,10 @@ export default function ShellNode({ data, selected }: NodeProps) {
         )}
 
         {model.kind === "display" && (
-          <div className="display-pane">
+          <div
+            className="display-pane"
+            onWheelCapture={(event) => event.stopPropagation()}
+          >
             <div className="display-label">{display?.label ?? "display"}</div>
             {display?.content ?? (
               <div className="display-empty">stdin is quiet</div>
