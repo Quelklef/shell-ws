@@ -262,6 +262,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               <div className="display-empty">stdin is quiet</div>
             )}
           </div>
+        )}
 
         <div className="node-toolbar">
           <button
@@ -311,35 +312,34 @@ export default function ShellNode({ data, selected }: NodeProps) {
         <div className="port-preview-shell">
           <div className="port-preview-tabs">
             {previewTabs.map((port) => (
-                <button
-                  key={port}
-                  type="button"
-                  className={`port-preview-tab nodrag nopan ${
-                    activePreviewTab === port ? "is-active" : ""
-                  }`}
-                  onClick={() =>
-                    setActivePreviewTab((current) =>
-                      current === port ? null : port,
-                    )
-                  }
-                >
-                  {port}
-                </button>
-              ))}
-            </div>
-            {activePreviewTab && renderedPreview && (
-              <div
-                className="port-preview-pane nodrag nopan"
-                onWheelCapture={(event) => event.stopPropagation()}
+              <button
+                key={port}
+                type="button"
+                className={`port-preview-tab nodrag nopan ${
+                  activePreviewTab === port ? "is-active" : ""
+                }`}
+                onClick={() =>
+                  setActivePreviewTab((current) =>
+                    current === port ? null : port,
+                  )
+                }
               >
-                <div className="display-label">
-                  {activePreviewTab} · {renderedPreview.label}
-                </div>
-                {renderedPreview.content}
-              </div>
-            )}
+                {port}
+              </button>
+            ))}
           </div>
-        )}
+          {activePreviewTab && renderedPreview && (
+            <div
+              className="port-preview-pane nodrag nopan"
+              onWheelCapture={(event) => event.stopPropagation()}
+            >
+              <div className="display-label">
+                {activePreviewTab} · {renderedPreview.label}
+              </div>
+              {renderedPreview.content}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
