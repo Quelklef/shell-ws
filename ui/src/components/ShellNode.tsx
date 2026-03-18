@@ -99,10 +99,12 @@ export default function ShellNode({ data, selected }: NodeProps) {
       )}
       {(model.kind === "process" ||
         model.kind === "text" ||
+        model.kind === "tee" ||
         model.kind.startsWith("merge_")) &&
         outputHandle("stdout", 84, runtime.portActivity.stdout)}
       {model.kind !== "text" &&
         model.kind !== "display" &&
+        model.kind !== "tee" &&
         outputHandle("stderr", 128, runtime.portActivity.stderr)}
 
       <div className="node-card">
@@ -173,6 +175,12 @@ export default function ShellNode({ data, selected }: NodeProps) {
             {display?.content ?? (
               <div className="display-empty">stdin is quiet</div>
             )}
+          </div>
+        )}
+
+        {model.kind === "tee" && (
+          <div className="merge-help">
+            duplicate stdin onto every connected stdout wire
           </div>
         )}
 

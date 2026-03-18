@@ -4,6 +4,7 @@ export type NodeKind =
   | "process"
   | "display"
   | "text"
+  | "tee"
   | "merge_concat"
   | "merge_line"
   | "merge_byte"

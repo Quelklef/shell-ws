@@ -77,7 +77,10 @@ function paletteGroups(): {
   return [
     {
       label: "sources",
-      items: [{ kind: "text", label: "text" }],
+      items: [
+        { kind: "text", label: "text" },
+        { kind: "tee", label: "tee" },
+      ],
     },
     {
       label: "process",

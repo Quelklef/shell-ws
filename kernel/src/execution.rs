@@ -336,6 +336,17 @@ impl ExecutionContext {
                 self.emit_finished(&node.id, Some(0));
                 self.clone().complete_node(&node.id).await?;
             }
+            NodeKind::Tee => {
+                self.emit_started(&node.id);
+                if !initial_input.is_empty() {
+                    self.emit_port_activity(&node.id, PortKind::Stdout, initial_input.len());
+                    self.clone()
+                        .forward_output(&node.id, PortKind::Stdout, initial_input)
+                        .await?;
+                }
+                self.emit_finished(&node.id, Some(0));
+                self.clone().complete_node(&node.id).await?;
+            }
             NodeKind::MergeConcat
             | NodeKind::MergeLine
             | NodeKind::MergeByte
@@ -716,6 +727,31 @@ impl ExecutionContext {
                 if completed {
                     sleep(Duration::from_millis(250)).await;
                     self.clone().run_merge_node(target, Vec::new()).await?;
+                }
+            }
+            NodeKind::Tee => {
+                let started = {
+                    let mut states = self.node_states.lock();
+                    let state = states.entry(target.id.clone()).or_default();
+                    if state.running {
+                        false
+                    } else {
+                        state.running = true;
+                        true
+                    }
+                };
+                if started {
+                    self.emit_started(&target.id);
+                }
+                if !payload.is_empty() {
+                    self.emit_port_activity(&target.id, PortKind::Stdout, payload.len());
+                    self.clone()
+                        .forward_output(&target.id, PortKind::Stdout, payload)
+                        .await?;
+                }
+                if completed {
+                    self.emit_finished(&target.id, Some(0));
+                    self.clone().complete_node(&target.id).await?;
                 }
             }
             NodeKind::Text => {}

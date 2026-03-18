@@ -99,6 +99,7 @@ pub enum NodeKind {
     Process,
     Display,
     Text,
+    Tee,
     MergeConcat,
     MergeLine,
     MergeByte,
