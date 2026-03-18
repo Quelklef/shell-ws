@@ -29,10 +29,16 @@ export default function WorkspaceEdge({
     borderRadius: 18,
   });
   const typedData = (data ?? {}) as FlowEdgeData;
+  const edgeStyle = {
+    stroke: "rgba(242, 192, 120, 0.95)",
+    strokeWidth: 3.4,
+    filter: "drop-shadow(0 0 8px rgba(242, 192, 120, 0.26))",
+    ...(style ?? {}),
+  };
 
   return (
     <>
-      <BaseEdge id={id} path={path} style={style} markerEnd={markerEnd} />
+      <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} />
       <EdgeLabelRenderer>
         <button
           type="button"
