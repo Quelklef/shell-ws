@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
 import ShellNode from "./components/ShellNode";
-import WorkspaceEdge from "./components/WorkspaceEdge";
+import WorkspaceEdgeView from "./components/WorkspaceEdge";
 import {
   createWorkspace,
   getWorkspace,
@@ -49,7 +49,7 @@ const nodeTypes = {
 };
 
 const edgeTypes = {
-  workspace: WorkspaceEdge,
+  workspace: WorkspaceEdgeView,
 };
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {

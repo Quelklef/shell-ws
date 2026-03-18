@@ -144,4 +144,4 @@ export interface FlowEdgeData extends Record<string, unknown> {
 }
 
 export type FlowNode = Node<ShellNodeData, "shell">;
-export type FlowEdge = Edge<FlowEdgeData, "smoothstep">;
+export type FlowEdge = Edge<FlowEdgeData, string>;
