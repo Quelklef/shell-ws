@@ -45,6 +45,7 @@ import type {
   WorkspaceNode,
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
+import { sanitizeWorkspace } from "./lib/workspace";
 import { concatBytes, encodeId, fromBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -488,10 +489,11 @@ function WorkspaceCanvas() {
     let disposed = false;
     listWorkspaces()
       .then(async (summaries) => {
-        const loaded =
+        const loaded = sanitizeWorkspace(
           summaries.length > 0
             ? await getWorkspace(summaries[0].id)
-            : await createWorkspace();
+            : await createWorkspace(),
+        );
         if (disposed) {
           return;
         }

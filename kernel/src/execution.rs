@@ -35,6 +35,11 @@ fn node_accepts_argv(kind: &NodeKind) -> bool {
     matches!(kind, NodeKind::Script | NodeKind::Exec)
 }
 
+
+fn is_legacy_unslotted_argv_edge(edge: &Edge) -> bool {
+    edge.to.port == PortKind::Argv && edge.to.slot.is_none()
+}
+
 fn parse_argv_value(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
         .trim_end_matches(['\n', '\r'])
@@ -150,11 +155,15 @@ struct ExecutionContext {
 impl ExecutionContext {
     fn new(
         exec_id: String,
-        workspace: Workspace,
+        mut workspace: Workspace,
         mode: ExecutionMode,
         broadcaster: broadcast::Sender<ServerEvent>,
         cancel: CancellationToken,
     ) -> Result<Self, String> {
+        workspace
+            .edges
+            .retain(|edge| !is_legacy_unslotted_argv_edge(edge));
+
         let nodes: HashMap<String, Node> = workspace
             .nodes
             .iter()
@@ -1258,6 +1267,79 @@ mod tests {
             },
             buffering: mode,
         }
+    }
+
+    #[test]
+    fn legacy_unslotted_argv_edges_are_ignored() {
+        let workspace = Workspace {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![
+                Node {
+                    id: "text-1".to_string(),
+                    kind: NodeKind::Text,
+                    title: "".to_string(),
+                    comment: "".to_string(),
+                    position: Position { x: 0.0, y: 0.0 },
+                    size: Size {
+                        width: 200.0,
+                        height: 120.0,
+                    },
+                    shell: Some("bash".to_string()),
+                    script: None,
+                    path: None,
+                    args: None,
+                    text: Some("hello
+".to_string()),
+                    auto_run: None,
+                },
+                Node {
+                    id: "script-1".to_string(),
+                    kind: NodeKind::Script,
+                    title: "".to_string(),
+                    comment: "".to_string(),
+                    position: Position { x: 240.0, y: 0.0 },
+                    size: Size {
+                        width: 200.0,
+                        height: 120.0,
+                    },
+                    shell: Some("bash".to_string()),
+                    script: Some("true".to_string()),
+                    path: None,
+                    args: None,
+                    text: None,
+                    auto_run: None,
+                },
+            ],
+            edges: vec![Edge {
+                id: "legacy-argv".to_string(),
+                from: PortRef {
+                    node_id: "text-1".to_string(),
+                    port: PortKind::Stdout,
+                    slot: None,
+                },
+                to: PortRef {
+                    node_id: "script-1".to_string(),
+                    port: PortKind::Argv,
+                    slot: None,
+                },
+                buffering: BufferingMode::LineOr1024,
+            }],
+            ui: WorkspaceUi::default(),
+        };
+
+        let (tx, _) = broadcast::channel(16);
+        let context = ExecutionContext::new(
+            "exec".to_string(),
+            workspace,
+            ExecutionMode::Push,
+            tx,
+            CancellationToken::new(),
+        )
+        .expect("execution context should ignore legacy argv edges");
+
+        assert!(context.workspace.edges.is_empty());
+        assert!(context.incoming.get("script-1").is_none());
     }
 
     #[test]
