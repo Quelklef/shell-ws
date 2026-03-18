@@ -429,11 +429,14 @@ function WorkspaceCanvas() {
         setRuntime((current) => {
           switch (event.type) {
             case "exec_started": {
-              const isDisplay = nodesRef.current.some(
-                (node) =>
-                  node.id === event.node_id &&
-                  node.data.model.kind === "display",
-              );
+              const nodeKind = nodesRef.current.find(
+                (node) => node.id === event.node_id,
+              )?.data.model.kind;
+              const previews = current[event.node_id]?.previews;
+              const resetCompletedPreview = (port: PortKind) =>
+                previews?.[port]?.completed
+                  ? { bytes: new Uint8Array(), completed: false }
+                  : previews?.[port];
               return {
                 ...current,
                 [event.node_id]: {
@@ -443,9 +446,18 @@ function WorkspaceCanvas() {
                   }),
                   running: true,
                   lastExecId: event.exec_id,
-                  display: isDisplay
-                    ? { bytes: new Uint8Array(), completed: false }
-                    : current[event.node_id]?.display,
+                  display:
+                    nodeKind === "display"
+                      ? { bytes: new Uint8Array(), completed: false }
+                      : current[event.node_id]?.display,
+                  previews:
+                    nodeKind === "process"
+                      ? {
+                          stdin: resetCompletedPreview("stdin"),
+                          stdout: { bytes: new Uint8Array(), completed: false },
+                          stderr: { bytes: new Uint8Array(), completed: false },
+                        }
+                      : current[event.node_id]?.previews,
                 },
               };
             }
@@ -458,6 +470,16 @@ function WorkspaceCanvas() {
                     portActivity: {},
                   }),
                   running: false,
+                  previews: current[event.node_id]?.previews
+                    ? Object.fromEntries(
+                        Object.entries(
+                          current[event.node_id]?.previews ?? {},
+                        ).map(([port, preview]) => [
+                          port,
+                          preview ? { ...preview, completed: true } : preview,
+                        ]),
+                      )
+                    : current[event.node_id]?.previews,
                 },
               };
             case "port_activity":
@@ -474,6 +496,57 @@ function WorkspaceCanvas() {
                   },
                 },
               };
+            case "stream_chunk": {
+              const nextBytes = fromBase64(event.data_base64);
+              const nextState = { ...current };
+              const sourceExists = nodesRef.current.some(
+                (node) => node.id === event.from_node_id,
+              );
+              const targetExists = nodesRef.current.some(
+                (node) => node.id === event.to_node_id,
+              );
+
+              if (sourceExists) {
+                const previous =
+                  current[event.from_node_id]?.previews?.[event.port]?.bytes ??
+                  new Uint8Array();
+                nextState[event.from_node_id] = {
+                  ...(nextState[event.from_node_id] ?? {
+                    running: false,
+                    portActivity: {},
+                  }),
+                  previews: {
+                    ...(nextState[event.from_node_id]?.previews ?? {}),
+                    [event.port]: {
+                      bytes: concatBytes(previous, nextBytes),
+                      completed: false,
+                    },
+                  },
+                };
+              }
+
+              if (targetExists) {
+                const previous =
+                  current[event.to_node_id]?.previews?.stdin?.bytes ??
+                  new Uint8Array();
+                nextState[event.to_node_id] = {
+                  ...(nextState[event.to_node_id] ?? {
+                    running: false,
+                    portActivity: {},
+                  }),
+                  previews: {
+                    ...(nextState[event.to_node_id]?.previews ?? {}),
+                    stdin: {
+                      bytes: concatBytes(previous, nextBytes),
+                      completed: false,
+                    },
+                  },
+                };
+              }
+
+              return nextState;
+            }
+
             case "display_update": {
               const nextBytes = fromBase64(event.data_base64);
               const previous =

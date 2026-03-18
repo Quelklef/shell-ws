@@ -1,4 +1,5 @@
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
+import { useState } from "react";
 
 import { renderDisplay } from "../lib/format";
 import type {
@@ -73,6 +74,16 @@ export default function ShellNode({ data, selected }: NodeProps) {
     intervalMs: 1000,
   };
   const display = runtime.display ? renderDisplay(runtime.display.bytes) : null;
+  const [activePreviewTab, setActivePreviewTab] = useState<PortKind>("stdout");
+  const activePreview = runtime.previews?.[activePreviewTab];
+  const renderedPreview = activePreview
+    ? renderDisplay(activePreview.bytes)
+    : {
+        label: activePreviewTab,
+        content: (
+          <div className="display-empty">no recent {activePreviewTab}</div>
+        ),
+      };
 
   return (
     <div
@@ -201,6 +212,34 @@ export default function ShellNode({ data, selected }: NodeProps) {
               "interleave upstream inputs line by line"}
             {model.kind === "merge_byte" &&
               "interleave upstream inputs byte by byte"}
+          </div>
+        )}
+
+        {model.kind === "process" && (
+          <div className="port-preview-shell">
+            <div className="port-preview-tabs">
+              {(["stdin", "stdout", "stderr"] as PortKind[]).map((port) => (
+                <button
+                  key={port}
+                  type="button"
+                  className={`port-preview-tab nodrag nopan ${
+                    activePreviewTab === port ? "is-active" : ""
+                  }`}
+                  onClick={() => setActivePreviewTab(port)}
+                >
+                  {port}
+                </button>
+              ))}
+            </div>
+            <div
+              className="port-preview-pane nodrag nopan"
+              onWheelCapture={(event) => event.stopPropagation()}
+            >
+              <div className="display-label">
+                {activePreviewTab} · {renderedPreview.label}
+              </div>
+              {renderedPreview.content}
+            </div>
           </div>
         )}
 

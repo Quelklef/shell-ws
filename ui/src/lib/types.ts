@@ -128,6 +128,7 @@ export interface NodeRuntimeState {
   lastExecId?: string;
   portActivity: Partial<Record<PortKind, number>>;
   display?: DisplayState;
+  previews?: Partial<Record<PortKind, DisplayState>>;
 }
 
 export interface ShellNodeData extends Record<string, unknown> {

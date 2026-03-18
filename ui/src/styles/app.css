@@ -498,3 +498,44 @@ textarea {
   color: #f4c3c3;
   background: rgba(46, 18, 18, 0.95);
 }
+
+
+.port-preview-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.port-preview-tabs {
+  display: flex;
+  gap: 4px;
+}
+
+.port-preview-tab {
+  border: 1px solid rgba(244, 232, 214, 0.16);
+  background: rgba(9, 11, 13, 0.4);
+  color: var(--text-soft);
+  border-radius: 8px;
+  padding: 4px 7px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.port-preview-tab.is-active {
+  border-color: rgba(242, 192, 120, 0.45);
+  color: var(--text);
+  background: rgba(56, 41, 16, 0.7);
+}
+
+.port-preview-pane {
+  min-height: 112px;
+  max-height: 190px;
+  overflow: auto;
+  padding: 10px;
+  border-radius: 12px;
+  background: rgba(9, 11, 13, 0.46);
+  border: 1px solid rgba(244, 236, 223, 0.08);
+}
