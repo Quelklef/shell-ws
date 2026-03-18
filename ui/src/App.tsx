@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "@xyflow/react/dist/style.css";
 
 import ShellNode from "./components/ShellNode";
+import WorkspaceEdge from "./components/WorkspaceEdge";
 import {
   createWorkspace,
   getWorkspace,
@@ -45,6 +46,10 @@ import { concatBytes, encodeId, fromBase64 } from "./lib/utils";
 
 const nodeTypes = {
   shell: ShellNode,
+};
+
+const edgeTypes = {
+  workspace: WorkspaceEdge,
 };
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {
@@ -125,16 +130,19 @@ function toFlowNode(
   };
 }
 
-function toFlowEdge(edge: WorkspaceEdge): FlowEdge {
+function toFlowEdge(
+  edge: WorkspaceEdge,
+  onDelete?: (edgeId: string) => void,
+): FlowEdge {
   return {
     id: edge.id,
     source: edge.from.nodeId,
     sourceHandle: edge.from.port,
     target: edge.to.nodeId,
     targetHandle: edge.to.port,
-    type: "smoothstep",
+    type: "workspace",
     animated: edge.buffering === "unbuffered",
-    data: { buffering: edge.buffering },
+    data: { buffering: edge.buffering, onDelete },
     label: edge.buffering.replaceAll("_", " "),
   };
 }
@@ -363,7 +371,7 @@ function WorkspaceCanvas() {
           ),
         );
         setNodes(loaded.nodes.map((node) => toFlowNode(node, {}, handlers)));
-        setEdges(loaded.edges.map(toFlowEdge));
+        setEdges(loaded.edges.map((edge) => toFlowEdge(edge, deleteEdge)));
       })
       .catch((error) => setToast(String(error)));
 
@@ -565,6 +573,17 @@ function WorkspaceCanvas() {
     [persistSoon, setEdges],
   );
 
+  const deleteEdge = useCallback(
+    (edgeId: string) => {
+      setEdges((current) => {
+        const next = current.filter((edge) => edge.id !== edgeId);
+        persistSoon(nodesRef.current, next);
+        return next;
+      });
+    },
+    [persistSoon, setEdges],
+  );
+
   const cycleEdgeBuffering = useCallback(
     (edgeId: string) => {
       const nextMode: Record<BufferingMode, BufferingMode> = {
@@ -584,7 +603,7 @@ function WorkspaceCanvas() {
             ];
           return {
             ...edge,
-            data: { buffering },
+            data: { buffering, onDelete: deleteEdge },
             animated: buffering === "unbuffered",
             label: buffering.replaceAll("_", " "),
           };
@@ -617,8 +636,8 @@ function WorkspaceCanvas() {
           {
             id: encodeId("edge"),
             ...connection,
-            type: "smoothstep",
-            data: { buffering: "line_or_1024" },
+            type: "workspace",
+            data: { buffering: "line_or_1024", onDelete: deleteEdge },
             label: "line or 1024",
           },
           current,
@@ -721,6 +740,7 @@ function WorkspaceCanvas() {
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
           onEdgeClick={(_, edge) => cycleEdgeBuffering(edge.id)}

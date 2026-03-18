@@ -421,3 +421,26 @@ textarea {
   font-size: 11px;
   letter-spacing: 0.02em;
 }
+
+
+.edge-delete {
+  position: absolute;
+  z-index: 8;
+  width: 18px;
+  height: 18px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 1px solid rgba(244, 232, 214, 0.28);
+  background: rgba(12, 14, 16, 0.92);
+  color: var(--text-soft);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.edge-delete:hover {
+  border-color: rgba(222, 93, 93, 0.65);
+  color: #f4c3c3;
+  background: rgba(46, 18, 18, 0.95);
+}
