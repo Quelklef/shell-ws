@@ -221,40 +221,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
           </div>
         )}
 
-        {model.kind === "process" && (
-          <div className="port-preview-shell">
-            <div className="port-preview-tabs">
-              {(["stdin", "stdout", "stderr"] as PortKind[]).map((port) => (
-                <button
-                  key={port}
-                  type="button"
-                  className={`port-preview-tab nodrag nopan ${
-                    activePreviewTab === port ? "is-active" : ""
-                  }`}
-                  onClick={() =>
-                    setActivePreviewTab((current) =>
-                      current === port ? null : port,
-                    )
-                  }
-                >
-                  {port}
-                </button>
-              ))}
-            </div>
-            {activePreviewTab && renderedPreview && (
-              <div
-                className="port-preview-pane nodrag nopan"
-                onWheelCapture={(event) => event.stopPropagation()}
-              >
-                <div className="display-label">
-                  {activePreviewTab} · {renderedPreview.label}
-                </div>
-                {renderedPreview.content}
-              </div>
-            )}
-          </div>
-        )}
-
         <AutoRunControls
           config={autoRun}
           onChange={(next) => typedData.onToggleAutorun(model.id, next)}
@@ -295,6 +261,40 @@ export default function ShellNode({ data, selected }: NodeProps) {
             >
               stop
             </button>
+          )}
+
+          {model.kind === "process" && (
+            <div className="port-preview-shell">
+              <div className="port-preview-tabs">
+                {(["stdin", "stdout", "stderr"] as PortKind[]).map((port) => (
+                  <button
+                    key={port}
+                    type="button"
+                    className={`port-preview-tab nodrag nopan ${
+                      activePreviewTab === port ? "is-active" : ""
+                    }`}
+                    onClick={() =>
+                      setActivePreviewTab((current) =>
+                        current === port ? null : port,
+                      )
+                    }
+                  >
+                    {port}
+                  </button>
+                ))}
+              </div>
+              {activePreviewTab && renderedPreview && (
+                <div
+                  className="port-preview-pane nodrag nopan"
+                  onWheelCapture={(event) => event.stopPropagation()}
+                >
+                  <div className="display-label">
+                    {activePreviewTab} · {renderedPreview.label}
+                  </div>
+                  {renderedPreview.content}
+                </div>
+              )}
+            </div>
           )}
         </div>
       </div>
