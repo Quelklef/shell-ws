@@ -543,11 +543,6 @@ function WorkspaceCanvas() {
               const nodeKind = nodesRef.current.find(
                 (node) => node.id === event.node_id,
               )?.data.model.kind;
-              const previews = current[event.node_id]?.previews;
-              const resetCompletedPreview = (port: PortKind) =>
-                previews?.[port]?.completed
-                  ? { bytes: new Uint8Array(), completed: false }
-                  : previews?.[port];
               return {
                 ...current,
                 [event.node_id]: {
@@ -564,7 +559,7 @@ function WorkspaceCanvas() {
                   previews:
                     nodeKind === "script" || nodeKind === "exec"
                       ? {
-                          stdin: resetCompletedPreview("stdin"),
+                          stdin: { bytes: new Uint8Array(), completed: false },
                           stdout: { bytes: new Uint8Array(), completed: false },
                           stderr: { bytes: new Uint8Array(), completed: false },
                         }
