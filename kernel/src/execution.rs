@@ -23,6 +23,14 @@ use crate::model::{
     BufferingMode, Edge, ExecutionMode, Node, NodeKind, PortKind, ServerEvent, Workspace,
 };
 
+fn node_label(node: &Node) -> &str {
+    if node.title.trim().is_empty() {
+        &node.id
+    } else {
+        &node.title
+    }
+}
+
 #[derive(Clone)]
 pub struct ExecutionManager {
     active: Arc<Mutex<HashMap<String, ExecutionHandle>>>,
@@ -163,14 +171,19 @@ impl ExecutionContext {
         for node in workspace.nodes.iter().filter(|node| {
             matches!(
                 node.kind,
-                NodeKind::Script | NodeKind::Exec | NodeKind::Display | NodeKind::Text | NodeKind::Tee
+                NodeKind::Script
+                    | NodeKind::Exec
+                    | NodeKind::Display
+                    | NodeKind::Text
+                    | NodeKind::Tee
             )
         }) {
             let count = incoming.get(&node.id).map_or(0, Vec::len);
             if count > 1 {
                 return Err(format!(
                     "Node {} has {} input wires. Use a merge node for multiple inputs.",
-                    node.title, count
+                    node_label(node),
+                    count
                 ));
             }
         }
@@ -387,7 +400,7 @@ impl ExecutionContext {
             .path
             .clone()
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("{} is missing a binary path", node.title))?;
+            .ok_or_else(|| format!("{} is missing a binary path", node_label(&node)))?;
         let mut command = Command::new(path);
         for arg in node.args.clone().unwrap_or_default() {
             command.arg(arg);
@@ -401,7 +414,7 @@ impl ExecutionContext {
             .path
             .clone()
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("{} is missing a file path", node.title))?;
+            .ok_or_else(|| format!("{} is missing a file path", node_label(&node)))?;
         match tokio::fs::read(&path).await {
             Ok(data) => {
                 self.emit_port_activity(&node.id, PortKind::Stdout, data.len());
@@ -411,8 +424,12 @@ impl ExecutionContext {
                 self.emit_finished(&node.id, Some(0));
             }
             Err(error) => {
-                let message = format!("cat {}: {error}
-", path).into_bytes();
+                let message = format!(
+                    "cat {}: {error}
+",
+                    path
+                )
+                .into_bytes();
                 self.emit_port_activity(&node.id, PortKind::Stderr, message.len());
                 self.clone()
                     .forward_output(&node.id, PortKind::Stderr, message)
@@ -452,20 +469,20 @@ impl ExecutionContext {
 
         let mut child = command
             .spawn()
-            .map_err(|error| format!("Failed to spawn {}: {error}", node.title))?;
+            .map_err(|error| format!("Failed to spawn {}: {error}", node_label(&node)))?;
 
         let stdin = child
             .stdin
             .take()
-            .ok_or_else(|| format!("Failed to open stdin for {}", node.title))?;
+            .ok_or_else(|| format!("Failed to open stdin for {}", node_label(&node)))?;
         let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| format!("Failed to open stdout for {}", node.title))?;
+            .ok_or_else(|| format!("Failed to open stdout for {}", node_label(&node)))?;
         let stderr = child
             .stderr
             .take()
-            .ok_or_else(|| format!("Failed to open stderr for {}", node.title))?;
+            .ok_or_else(|| format!("Failed to open stderr for {}", node_label(&node)))?;
 
         let (stdin_tx, mut stdin_rx) = mpsc::unbounded_channel::<StdinMessage>();
         self.node_states
@@ -639,7 +656,7 @@ impl ExecutionContext {
         let output = command
             .output()
             .await
-            .map_err(|error| format!("Failed to run shell merge {}: {error}", node.title))?;
+            .map_err(|error| format!("Failed to run shell merge {}: {error}", node_label(node)))?;
 
         let _ = tokio::fs::remove_dir_all(temp_dir).await;
         Ok(output.stdout)
@@ -1029,10 +1046,12 @@ mod tests {
             from: PortRef {
                 node_id: "a".to_string(),
                 port: PortKind::Stdout,
+                slot: None,
             },
             to: PortRef {
                 node_id: "b".to_string(),
                 port: PortKind::Stdin,
+                slot: None,
             },
             buffering: mode,
         }

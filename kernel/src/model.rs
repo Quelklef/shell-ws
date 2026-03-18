@@ -22,7 +22,7 @@ impl Workspace {
                 Node {
                     id: "text-1".to_string(),
                     kind: NodeKind::Text,
-                    title: "Seed".to_string(),
+                    title: "".to_string(),
                     comment: "".to_string(),
                     position: Position { x: 80.0, y: 120.0 },
                     size: Size {
@@ -39,7 +39,7 @@ impl Workspace {
                 Node {
                     id: "display-1".to_string(),
                     kind: NodeKind::Display,
-                    title: "Display".to_string(),
+                    title: "".to_string(),
                     comment: "".to_string(),
                     position: Position { x: 520.0, y: 120.0 },
                     size: Size {
@@ -59,10 +59,12 @@ impl Workspace {
                 from: PortRef {
                     node_id: "text-1".to_string(),
                     port: PortKind::Stdout,
+                    slot: None,
                 },
                 to: PortRef {
                     node_id: "display-1".to_string(),
                     port: PortKind::Stdin,
+                    slot: None,
                 },
                 buffering: BufferingMode::LineOr1024,
             }],
@@ -133,6 +135,8 @@ pub struct PortRef {
     #[serde(alias = "node_id")]
     pub node_id: String,
     pub port: PortKind,
+    #[serde(default)]
+    pub slot: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -279,17 +283,19 @@ mod tests {
 
     #[test]
     fn buffering_mode_serializes_with_expected_underscore() {
-        let value = serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
+        let value =
+            serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
         assert_eq!(value, "\"line_or_1024\"");
 
-        let parsed: super::BufferingMode = serde_json::from_str("\"line_or1024\"").expect("deserialize legacy mode");
+        let parsed: super::BufferingMode =
+            serde_json::from_str("\"line_or1024\"").expect("deserialize legacy mode");
         assert_eq!(parsed, super::BufferingMode::LineOr1024);
     }
 
     #[test]
     fn legacy_process_kind_deserializes_as_script() {
-        let kind: super::NodeKind = serde_json::from_str("\"process\"")
-            .expect("deserialize legacy process kind");
+        let kind: super::NodeKind =
+            serde_json::from_str("\"process\"").expect("deserialize legacy process kind");
         assert_eq!(kind, super::NodeKind::Script);
     }
 

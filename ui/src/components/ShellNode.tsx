@@ -18,45 +18,54 @@ function AutoRunControls({
   onChange: (next: AutoRunConfig) => void;
 }) {
   return (
-    <div className="autorun-controls">
-      <select
-        className="nodrag nopan"
-        value={config.mode}
-        onWheelCapture={(event) => event.stopPropagation()}
-        onChange={(event) =>
-          onChange({
-            ...config,
-            mode: event.target.value as ExecutionMode,
-          })
-        }
-      >
-        <option value="push">push</option>
-        <option value="pull">pull</option>
-      </select>
-      <input
-        className="nodrag nopan"
-        type="number"
-        min={100}
-        step={100}
-        value={config.intervalMs}
-        onWheelCapture={(event) => event.stopPropagation()}
-        onChange={(event) =>
-          onChange({
-            ...config,
-            intervalMs: clamp(Number(event.target.value) || 1000, 100, 60000),
-          })
-        }
-      />
-      <span>ms</span>
+    <div className="autorun-shell">
+      <div className="autorun-label">auto run</div>
+      <div className="autorun-controls">
+        <select
+          className="nodrag nopan"
+          value={config.mode}
+          onWheelCapture={(event) => event.stopPropagation()}
+          onChange={(event) =>
+            onChange({
+              ...config,
+              mode: event.target.value as ExecutionMode,
+            })
+          }
+        >
+          <option value="push">push</option>
+          <option value="pull">pull</option>
+        </select>
+        <input
+          className="nodrag nopan"
+          type="number"
+          min={100}
+          step={100}
+          value={config.intervalMs}
+          onWheelCapture={(event) => event.stopPropagation()}
+          onChange={(event) =>
+            onChange({
+              ...config,
+              intervalMs: clamp(Number(event.target.value) || 1000, 100, 60000),
+            })
+          }
+        />
+        <span>ms</span>
+      </div>
     </div>
   );
 }
 
-function outputHandle(port: PortKind, top: number, activeAt?: number) {
+function outputHandle(
+  port: PortKind,
+  top: number,
+  handleId: string,
+  activeAt?: number,
+) {
   const active = activeAt ? Date.now() - activeAt < 800 : false;
   return (
     <Handle
-      id={port}
+      key={handleId}
+      id={handleId}
       type="source"
       position={Position.Right}
       className={`shell-handle shell-handle-${port} ${active ? "is-active" : ""}`}
@@ -120,13 +129,21 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "exec" ||
         model.kind === "cat" ||
         model.kind === "text" ||
-        model.kind === "tee" ||
         model.kind.startsWith("merge_")) &&
-        outputHandle("stdout", 84, runtime.portActivity.stdout)}
+        outputHandle("stdout", 84, "stdout", runtime.portActivity.stdout)}
+      {model.kind === "tee" &&
+        (typedData.outputSlots ?? [1]).map((slot, index) =>
+          outputHandle(
+            "stdout",
+            70 + index * 28,
+            `stdout-${slot}`,
+            runtime.portActivity.stdout,
+          ),
+        )}
       {(model.kind === "script" ||
         model.kind === "exec" ||
         model.kind === "cat") &&
-        outputHandle("stderr", 128, runtime.portActivity.stderr)}
+        outputHandle("stderr", 128, "stderr", runtime.portActivity.stderr)}
 
       <div className="node-comment-floating">
         <textarea
@@ -244,28 +261,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
           </div>
         )}
 
-        {model.kind === "tee" && (
-          <div className="merge-help">
-            duplicate stdin onto every connected stdout wire
-          </div>
-        )}
-
-        {model.kind.startsWith("merge_") && model.kind !== "merge_shell" && (
-          <div className="merge-help">
-            {model.kind === "merge_concat" &&
-              "concatenate upstream inputs in port order"}
-            {model.kind === "merge_line" &&
-              "interleave upstream inputs line by line"}
-            {model.kind === "merge_byte" &&
-              "interleave upstream inputs byte by byte"}
-          </div>
-        )}
-
-        <AutoRunControls
-          config={autoRun}
-          onChange={(next) => typedData.onToggleAutorun(model.id, next)}
-        />
-
         <div className="node-toolbar">
           <button
             className="nodrag nopan"
@@ -291,7 +286,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               })
             }
           >
-            auto
+            {autoRun.enabled ? "auto on" : "auto"}
           </button>
           {runtime.running && (
             <button
@@ -303,6 +298,13 @@ export default function ShellNode({ data, selected }: NodeProps) {
             </button>
           )}
         </div>
+
+        {autoRun.enabled && (
+          <AutoRunControls
+            config={autoRun}
+            onChange={(next) => typedData.onToggleAutorun(model.id, next)}
+          />
+        )}
 
         {(model.kind === "script" || model.kind === "exec") && (
           <div className="port-preview-shell">

@@ -65,6 +65,8 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     shell: "bash",
     script:
       kind === "script" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
+    path: kind === "exec" || kind === "cat" ? "" : null,
+    args: kind === "exec" ? [] : null,
     text: kind === "text" ? "shell-ws\n" : null,
     autoRun: null,
   };
@@ -72,38 +74,130 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
 
 function paletteGroups(): {
   label: string;
-  items: { kind: NodeKind; label: string }[];
+  items: { kind: NodeKind; label: string; help: string }[];
 }[] {
   return [
     {
       label: "sources",
       items: [
-        { kind: "text", label: "text" },
-        { kind: "cat", label: "cat" },
+        { kind: "text", label: "text", help: "Emit literal text on stdout." },
+        { kind: "cat", label: "cat", help: "Read a file path and emit its bytes." },
       ],
     },
     {
       label: "run",
       items: [
-        { kind: "script", label: "script" },
-        { kind: "exec", label: "exec" },
-        { kind: "tee", label: "tee" },
+        {
+          kind: "script",
+          label: "script",
+          help: "Run a shell snippet with the selected shell.",
+        },
+        {
+          kind: "exec",
+          label: "exec",
+          help: "Exec a binary path with one argument per line.",
+        },
+        {
+          kind: "tee",
+          label: "tee",
+          help: "Duplicate stdin across multiple independent stdout ports.",
+        },
       ],
     },
     {
       label: "merge",
       items: [
-        { kind: "merge_concat", label: "concat" },
-        { kind: "merge_line", label: "line" },
-        { kind: "merge_byte", label: "byte" },
-        { kind: "merge_shell", label: "shell" },
+        {
+          kind: "merge_concat",
+          label: "concat",
+          help: "Concatenate all upstream inputs in order.",
+        },
+        {
+          kind: "merge_line",
+          label: "line",
+          help: "Interleave upstream inputs line by line.",
+        },
+        {
+          kind: "merge_byte",
+          label: "byte",
+          help: "Interleave upstream inputs byte by byte.",
+        },
+        {
+          kind: "merge_shell",
+          label: "shell",
+          help: "Merge inputs with a custom shell snippet.",
+        },
       ],
     },
     {
       label: "sinks",
-      items: [{ kind: "display", label: "display" }],
+      items: [
+        {
+          kind: "display",
+          label: "display",
+          help: "Render stdin with rich format detection.",
+        },
+      ],
     },
   ];
+}
+
+function formatHandleId(port: PortKind, slot?: number | null) {
+  return slot ? `${port}-${slot}` : port;
+}
+
+function parseHandleId(handleId: string | null | undefined): {
+  port: PortKind;
+  slot?: number;
+} {
+  if (!handleId) {
+    return { port: "stdout" };
+  }
+  const match = /^(stdin|stdout|stderr)-(\d+)$/.exec(handleId);
+  if (match) {
+    return {
+      port: match[1] as PortKind,
+      slot: Number(match[2]),
+    };
+  }
+  return { port: handleId as PortKind };
+}
+
+function computeOutputSlots(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
+  if (kind !== "tee") {
+    return undefined;
+  }
+  const usedSlots = edges
+    .filter((edge) => edge.source === nodeId)
+    .map((edge) =>
+      parseHandleId(edge.sourceHandle as string | null | undefined),
+    )
+    .filter((entry) => entry.port === "stdout")
+    .map((entry) => entry.slot ?? 1);
+  const maxSlot = Math.max(1, ...usedSlots);
+  return Array.from({ length: maxSlot + 1 }, (_, index) => index + 1);
+}
+
+function syncNodeData(
+  current: FlowNode[],
+  runtime: Record<string, NodeRuntimeState>,
+  handlers: ShellNodeActions,
+  edges: FlowEdge[],
+) {
+  return current.map((node) => ({
+    ...node,
+    data: {
+      ...node.data,
+      model: node.data.model,
+      runtime: runtime[node.id] ?? { running: false, portActivity: {} },
+      outputSlots: computeOutputSlots(node.id, node.data.model.kind, edges),
+      onUpdate: handlers.onUpdate,
+      onRun: handlers.onRun,
+      onStop: handlers.onStop,
+      onDelete: handlers.onDelete,
+      onToggleAutorun: handlers.onToggleAutorun,
+    },
+  }));
 }
 
 function toFlowNode(
@@ -113,6 +207,7 @@ function toFlowNode(
     ShellNodeActions,
     "onUpdate" | "onRun" | "onStop" | "onDelete" | "onToggleAutorun"
   >,
+  edges: FlowEdge[],
 ): FlowNode {
   return {
     id: node.id,
@@ -121,6 +216,7 @@ function toFlowNode(
     data: {
       model: node,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
+      outputSlots: computeOutputSlots(node.id, node.kind, edges),
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
       onStop: handlers.onStop,
@@ -148,9 +244,9 @@ function toFlowEdge(
   return {
     id: edge.id,
     source: edge.from.nodeId,
-    sourceHandle: edge.from.port,
+    sourceHandle: formatHandleId(edge.from.port, edge.from.slot),
     target: edge.to.nodeId,
-    targetHandle: edge.to.port,
+    targetHandle: formatHandleId(edge.to.port, edge.to.slot),
     type: "workspace",
     animated: edge.buffering === "unbuffered",
     data: { buffering: edge.buffering, onDelete, onCycle },
@@ -175,11 +271,11 @@ function flowEdgeToWorkspaceEdge(edge: FlowEdge): WorkspaceEdge {
     id: edge.id,
     from: {
       nodeId: edge.source,
-      port: (edge.sourceHandle as PortKind | null) ?? "stdout",
+      ...parseHandleId(edge.sourceHandle as string | null | undefined),
     },
     to: {
       nodeId: edge.target,
-      port: (edge.targetHandle as PortKind | null) ?? "stdin",
+      ...parseHandleId(edge.targetHandle as string | null | undefined),
     },
     buffering:
       (edge.data?.buffering as BufferingMode | undefined) ?? "line_or_1024",
@@ -213,6 +309,17 @@ function WorkspaceCanvas() {
   } | null>(null);
   const socketRef = useRef<ReturnType<typeof connectKernel> | null>(null);
   const canvasRef = useRef<HTMLElement | null>(null);
+  const rightDragRef = useRef<{
+    pointerId: number | null;
+    startX: number;
+    startY: number;
+    moved: boolean;
+  }>({
+    pointerId: null,
+    startX: 0,
+    startY: 0,
+    moved: false,
+  });
   const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "ui"> | null>(
     null,
   );
@@ -396,7 +503,18 @@ function WorkspaceCanvas() {
             ]),
           ),
         );
-        setNodes(loaded.nodes.map((node) => toFlowNode(node, {}, handlers)));
+        setNodes(
+          loaded.nodes.map((node) =>
+            toFlowNode(
+              node,
+              {},
+              handlers,
+              loaded.edges.map((edge) =>
+                toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
+              ),
+            ),
+          ),
+        );
         setEdges(
           loaded.edges.map((edge) =>
             toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
@@ -412,20 +530,9 @@ function WorkspaceCanvas() {
 
   useEffect(() => {
     setNodes((current) =>
-      current.map((node) => ({
-        ...node,
-        data: {
-          ...node.data,
-          runtime: runtime[node.id] ?? { running: false, portActivity: {} },
-          onUpdate: handlers.onUpdate,
-          onRun: handlers.onRun,
-          onStop: handlers.onStop,
-          onDelete: handlers.onDelete,
-          onToggleAutorun: handlers.onToggleAutorun,
-        },
-      })),
+      syncNodeData(current, runtime, handlers, edgesRef.current),
     );
-  }, [handlers, runtime, setNodes]);
+  }, [edges, handlers, runtime, setNodes]);
 
   useEffect(() => {
     const connection = connectKernel(
@@ -690,6 +797,9 @@ function WorkspaceCanvas() {
     (changes: EdgeChange<FlowEdge>[]) => {
       setEdges((current) => {
         const next = applyEdgeChanges(changes, current);
+        setNodes((nodesCurrent) =>
+          syncNodeData(nodesCurrent, runtime, handlers, next),
+        );
         const shouldPersist = changes.some(
           (change) => change.type !== "select",
         );
@@ -699,18 +809,21 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [persistSoon, setEdges],
+    [handlers, persistSoon, runtime, setEdges, setNodes],
   );
 
   const deleteEdge = useCallback(
     (edgeId: string) => {
       setEdges((current) => {
         const next = current.filter((edge) => edge.id !== edgeId);
+        setNodes((nodesCurrent) =>
+          syncNodeData(nodesCurrent, runtime, handlers, next),
+        );
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [persistSoon, setEdges],
+    [handlers, persistSoon, runtime, setEdges, setNodes],
   );
 
   const cycleEdgeBuffering = useCallback(
@@ -741,11 +854,14 @@ function WorkspaceCanvas() {
             label: buffering.replaceAll("_", " "),
           };
         });
+        setNodes((nodesCurrent) =>
+          syncNodeData(nodesCurrent, runtime, handlers, next),
+        );
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [persistSoon, setEdges],
+    [handlers, persistSoon, runtime, setEdges, setNodes],
   );
 
   const onConnect = useCallback(
@@ -753,9 +869,25 @@ function WorkspaceCanvas() {
       const targetNode = nodesRef.current.find(
         (node) => node.id === connection.target,
       );
+      const sourceNode = nodesRef.current.find(
+        (node) => node.id === connection.source,
+      );
       const hasExistingInput = edgesRef.current.some(
         (edge) => edge.target === connection.target,
       );
+      if (
+        sourceNode?.data.model.kind === "tee" &&
+        edgesRef.current.some(
+          (edge) =>
+            edge.source === connection.source &&
+            edge.sourceHandle === connection.sourceHandle,
+        )
+      ) {
+        setToast(
+          "tee output ports allow one wire each; use the next free port",
+        );
+        return;
+      }
       if (
         targetNode &&
         !targetNode.data.model.kind.startsWith("merge_") &&
@@ -779,11 +911,14 @@ function WorkspaceCanvas() {
           },
           current,
         ) as FlowEdge[];
+        setNodes((nodesCurrent) =>
+          syncNodeData(nodesCurrent, runtime, handlers, next),
+        );
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [persistSoon, setEdges],
+    [handlers, persistSoon, runtime, setEdges, setNodes],
   );
 
   const addNode = useCallback(
@@ -800,7 +935,12 @@ function WorkspaceCanvas() {
         if (centeredPosition) {
           nextNodeModel.position = centeredPosition;
         }
-        const nextNode = toFlowNode(nextNodeModel, runtime, handlers);
+        const nextNode = toFlowNode(
+          nextNodeModel,
+          runtime,
+          handlers,
+          edgesRef.current,
+        );
         const next = [...current, nextNode];
         persistSoon(next, edgesRef.current);
         return next;
@@ -854,6 +994,8 @@ function WorkspaceCanvas() {
                   <button
                     key={choice.kind}
                     type="button"
+                    title={choice.help}
+                    aria-label={`${choice.label}: ${choice.help}`}
                     onClick={() => addNode(choice.kind)}
                   >
                     {choice.label}
@@ -868,7 +1010,53 @@ function WorkspaceCanvas() {
       <main
         ref={canvasRef}
         className="canvas-shell"
+        onPointerDown={(event) => {
+          if (event.button === 2) {
+            rightDragRef.current = {
+              pointerId: event.pointerId,
+              startX: event.clientX,
+              startY: event.clientY,
+              moved: false,
+            };
+          }
+        }}
+        onPointerMove={(event) => {
+          const state = rightDragRef.current;
+          if (
+            state.pointerId !== null &&
+            state.pointerId === event.pointerId &&
+            (event.buttons & 2) === 2
+          ) {
+            const distance = Math.hypot(
+              event.clientX - state.startX,
+              event.clientY - state.startY,
+            );
+            if (distance > 6) {
+              state.moved = true;
+            }
+          }
+        }}
+        onPointerUp={() => {
+          window.setTimeout(() => {
+            rightDragRef.current = {
+              pointerId: null,
+              startX: 0,
+              startY: 0,
+              moved: false,
+            };
+          }, 0);
+        }}
         onContextMenu={(event) => {
+          if (rightDragRef.current.moved) {
+            event.preventDefault();
+            rightDragRef.current = {
+              pointerId: null,
+              startX: 0,
+              startY: 0,
+              moved: false,
+            };
+            return;
+          }
           const selectedCount = nodes.filter((node) => node.selected).length;
           if (selectedCount > 0) {
             event.preventDefault();

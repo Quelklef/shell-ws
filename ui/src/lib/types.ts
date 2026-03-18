@@ -51,8 +51,8 @@ export interface AutoRunConfig {
 
 export interface WorkspaceEdge {
   id: string;
-  from: { nodeId: string; port: PortKind };
-  to: { nodeId: string; port: PortKind };
+  from: { nodeId: string; port: PortKind; slot?: number | null };
+  to: { nodeId: string; port: PortKind; slot?: number | null };
   buffering: BufferingMode;
 }
 
@@ -138,6 +138,7 @@ export interface NodeRuntimeState {
 export interface ShellNodeData extends Record<string, unknown> {
   model: WorkspaceNode;
   runtime: NodeRuntimeState;
+  outputSlots?: number[];
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onStop: (nodeId: string) => void;

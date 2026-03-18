@@ -222,8 +222,7 @@ textarea {
 }
 
 .script-editor,
-.display-code,
-.merge-help {
+.display-code {
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
 }
 
@@ -287,6 +286,23 @@ textarea {
   letter-spacing: 0.08em;
 }
 
+.autorun-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 12px;
+  background: rgba(56, 41, 16, 0.3);
+  border: 1px solid rgba(242, 192, 120, 0.2);
+}
+
+.autorun-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent-soft);
+}
+
 .autorun-controls {
   display: flex;
   align-items: center;
@@ -336,15 +352,6 @@ textarea {
 
 .display-markdown {
   overflow: auto;
-}
-
-.merge-help {
-  border-radius: 12px;
-  padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text-soft);
-  font-size: 11px;
-  line-height: 1.4;
 }
 
 .shell-handle {
