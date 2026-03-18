@@ -2,6 +2,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useState } from "react";
 
 import { renderDisplay } from "../lib/format";
+import { nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
 import type {
   AutoRunConfig,
   ExecutionMode,
@@ -86,10 +87,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const [activePreviewTab, setActivePreviewTab] = useState<PortKind | null>(
     null,
   );
-  const previewTabs =
-    model.kind === "cat"
-      ? (["stdout", "stderr"] as PortKind[])
-      : (["stdin", "stdout", "stderr"] as PortKind[]);
+  const previewTabs = nodePreviewTabs(model.kind);
   const activePreview = activePreviewTab
     ? runtime.previews?.[activePreviewTab]
     : undefined;
@@ -115,7 +113,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         lineClassName="node-resizer-line"
         handleClassName="node-resizer-handle"
       />
-      {model.kind !== "text" && model.kind !== "cat" && (
+      {nodeHasInputPort(model.kind) && (
         <Handle
           id="stdin"
           type="target"
@@ -264,7 +262,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
               <div className="display-empty">stdin is quiet</div>
             )}
           </div>
-        )}
 
         <div className="node-toolbar">
           <button
@@ -311,9 +308,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
           />
         )}
 
-        {(model.kind === "script" || model.kind === "exec" || model.kind === "cat") && (
-          <div className="port-preview-shell">
-            <div className="port-preview-tabs">
+        <div className="port-preview-shell">
+          <div className="port-preview-tabs">
               {previewTabs.map((port) => (
                 <button
                   key={port}

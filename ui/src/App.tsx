@@ -29,6 +29,7 @@ import {
   saveWorkspace,
 } from "./lib/api";
 import { layoutSelectedNodes } from "./lib/layout";
+import { nodePreviewTabs } from "./lib/nodePorts";
 import type {
   AutoRunConfig,
   BufferingMode,
@@ -556,19 +557,14 @@ function WorkspaceCanvas() {
                     nodeKind === "display"
                       ? { bytes: new Uint8Array(), completed: false }
                       : current[event.node_id]?.display,
-                  previews:
-                    nodeKind === "script" || nodeKind === "exec"
-                      ? {
-                          stdin: { bytes: new Uint8Array(), completed: false },
-                          stdout: { bytes: new Uint8Array(), completed: false },
-                          stderr: { bytes: new Uint8Array(), completed: false },
-                        }
-                      : nodeKind === "cat"
-                        ? {
-                            stdout: { bytes: new Uint8Array(), completed: false },
-                            stderr: { bytes: new Uint8Array(), completed: false },
-                          }
-                        : current[event.node_id]?.previews,
+                  previews: nodeKind
+                    ? Object.fromEntries(
+                        nodePreviewTabs(nodeKind).map((port) => [
+                          port,
+                          { bytes: new Uint8Array(), completed: false },
+                        ]),
+                      )
+                    : current[event.node_id]?.previews,
                 },
               };
             }
