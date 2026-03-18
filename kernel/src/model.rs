@@ -135,6 +135,7 @@ pub enum PortKind {
 #[serde(rename_all = "snake_case")]
 pub enum BufferingMode {
     Unbuffered,
+    #[serde(rename = "line_or_1024", alias = "line_or1024")]
     LineOr1024,
     OnComplete,
 }
@@ -263,6 +264,15 @@ fn default_zoom() -> f64 {
 #[cfg(test)]
 mod tests {
     use super::{ClientEvent, Workspace};
+
+    #[test]
+    fn buffering_mode_serializes_with_expected_underscore() {
+        let value = serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
+        assert_eq!(value, ""line_or_1024"");
+
+        let parsed: super::BufferingMode = serde_json::from_str(""line_or1024"").expect("deserialize legacy mode");
+        assert_eq!(parsed, super::BufferingMode::LineOr1024);
+    }
 
     #[test]
     fn run_node_accepts_embedded_workspace_snapshot() {
