@@ -143,6 +143,7 @@ pub struct PortRef {
 #[serde(rename_all = "snake_case")]
 pub enum PortKind {
     Stdin,
+    Argv,
     Stdout,
     Stderr,
 }

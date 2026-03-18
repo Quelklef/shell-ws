@@ -2,7 +2,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useState } from "react";
 
 import { renderDisplay } from "../lib/format";
-import { nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
+import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
 import type {
   AutoRunConfig,
   ExecutionMode,
@@ -124,7 +124,21 @@ export default function ShellNode({ data, selected }: NodeProps) {
               ? "is-active"
               : ""
           }`}
-          style={{ top: 96 }}
+          style={{ top: nodeHasArgvPort(model.kind) ? 84 : 96 }}
+        />
+      )}
+      {nodeHasArgvPort(model.kind) && (
+        <Handle
+          id="argv"
+          type="target"
+          position={Position.Left}
+          className={`shell-handle shell-handle-argv ${
+            runtime.portActivity.argv &&
+            Date.now() - runtime.portActivity.argv < 800
+              ? "is-active"
+              : ""
+          }`}
+          style={{ top: 124 }}
         />
       )}
       {(model.kind === "script" ||

@@ -29,7 +29,7 @@ import {
   saveWorkspace,
 } from "./lib/api";
 import { layoutSelectedNodes } from "./lib/layout";
-import { nodePreviewTabs } from "./lib/nodePorts";
+import { nodeHasArgvPort, nodePreviewTabs } from "./lib/nodePorts";
 import type {
   AutoRunConfig,
   BufferingMode,
@@ -154,7 +154,7 @@ function parseHandleId(handleId: string | null | undefined): {
   if (!handleId) {
     return { port: "stdout" };
   }
-  const match = /^(stdin|stdout|stderr)-(\d+)$/.exec(handleId);
+  const match = /^(stdin|argv|stdout|stderr)-(\d+)$/.exec(handleId);
   if (match) {
     return {
       port: match[1] as PortKind,
@@ -633,22 +633,28 @@ function WorkspaceCanvas() {
               }
 
               if (targetExists) {
-                const previous =
-                  current[event.to_node_id]?.previews?.stdin?.bytes ??
-                  new Uint8Array();
-                nextState[event.to_node_id] = {
-                  ...(nextState[event.to_node_id] ?? {
-                    running: false,
-                    portActivity: {},
-                  }),
-                  previews: {
-                    ...(nextState[event.to_node_id]?.previews ?? {}),
-                    stdin: {
-                      bytes: concatBytes(previous, nextBytes),
-                      completed: false,
+                const targetPort = parseHandleId(
+                  edgesRef.current.find((edge) => edge.id === event.edge_id)
+                    ?.targetHandle as string | null | undefined,
+                ).port;
+                if (targetPort === "stdin") {
+                  const previous =
+                    current[event.to_node_id]?.previews?.stdin?.bytes ??
+                    new Uint8Array();
+                  nextState[event.to_node_id] = {
+                    ...(nextState[event.to_node_id] ?? {
+                      running: false,
+                      portActivity: {},
+                    }),
+                    previews: {
+                      ...(nextState[event.to_node_id]?.previews ?? {}),
+                      stdin: {
+                        bytes: concatBytes(previous, nextBytes),
+                        completed: false,
+                      },
                     },
-                  },
-                };
+                  };
+                }
               }
 
               return nextState;
@@ -868,9 +874,13 @@ function WorkspaceCanvas() {
       const sourceNode = nodesRef.current.find(
         (node) => node.id === connection.source,
       );
-      const hasExistingInput = edgesRef.current.some(
-        (edge) => edge.target === connection.target,
-      );
+      const targetPort = parseHandleId(connection.targetHandle).port;
+      const hasExistingInput = edgesRef.current.some((edge) => {
+        if (edge.target !== connection.target) {
+          return false;
+        }
+        return parseHandleId(edge.targetHandle as string | null | undefined).port === targetPort;
+      });
       if (
         sourceNode?.data.model.kind === "tee" &&
         edgesRef.current.some(
@@ -884,12 +894,16 @@ function WorkspaceCanvas() {
         );
         return;
       }
+      if (targetNode && targetPort === "argv" && !nodeHasArgvPort(targetNode.data.model.kind)) {
+        setToast("this node does not accept argv input");
+        return;
+      }
       if (
         targetNode &&
         !targetNode.data.model.kind.startsWith("merge_") &&
         hasExistingInput
       ) {
-        setToast("non-merge nodes only accept one stdin wire");
+        setToast(`non-merge nodes only accept one ${targetPort} wire`);
         return;
       }
       setEdges((current) => {

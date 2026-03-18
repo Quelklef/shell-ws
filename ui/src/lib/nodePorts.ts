@@ -4,6 +4,10 @@ export function nodeHasInputPort(kind: NodeKind) {
   return kind !== "text" && kind !== "cat";
 }
 
+export function nodeHasArgvPort(kind: NodeKind) {
+  return kind === "script" || kind === "exec";
+}
+
 export function nodePreviewTabs(kind: NodeKind): PortKind[] {
   const tabs: PortKind[] = ["stdout", "stderr"];
   if (nodeHasInputPort(kind)) {

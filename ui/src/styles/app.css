@@ -397,6 +397,11 @@ textarea {
   border-color: var(--accent-soft);
 }
 
+.shell-handle-argv {
+  border-color: #78b8f2;
+  border-radius: 4px;
+}
+
 .minimap {
   background: rgba(14, 15, 16, 0.92) !important;
   border: 1px solid var(--line) !important;
@@ -451,6 +456,11 @@ textarea {
 .shell-handle-stdin.is-active {
   background: var(--accent-soft);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(242, 192, 120, 0.9);
+}
+
+.shell-handle-argv.is-active {
+  background: #78b8f2;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(120, 184, 242, 0.85);
 }
 
 .node-palette button {

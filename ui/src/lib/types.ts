@@ -12,7 +12,7 @@ export type NodeKind =
   | "merge_byte"
   | "merge_shell";
 
-export type PortKind = "stdin" | "stdout" | "stderr";
+export type PortKind = "stdin" | "argv" | "stdout" | "stderr";
 export type BufferingMode = "unbuffered" | "line_or_1024" | "on_complete";
 export type ExecutionMode = "push" | "pull";
 

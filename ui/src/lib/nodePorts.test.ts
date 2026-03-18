@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nodeHasInputPort, nodePreviewTabs } from "./nodePorts";
+import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "./nodePorts";
 
 describe("node port affordances", () => {
   it("gives every node stdout and stderr previews", () => {
@@ -20,5 +20,12 @@ describe("node port affordances", () => {
     expect(nodeHasInputPort("cat")).toBe(false);
     expect(nodeHasInputPort("script")).toBe(true);
     expect(nodeHasInputPort("display")).toBe(true);
+  });
+
+  it("adds argv ports only to command nodes", () => {
+    expect(nodeHasArgvPort("script")).toBe(true);
+    expect(nodeHasArgvPort("exec")).toBe(true);
+    expect(nodeHasArgvPort("display")).toBe(false);
+    expect(nodeHasArgvPort("cat")).toBe(false);
   });
 });
