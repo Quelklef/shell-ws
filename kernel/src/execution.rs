@@ -878,7 +878,6 @@ impl ExecutionContext {
                 };
                 state.finish()
             };
-            let target_kind = self.nodes.get(&edge.to.node_id).map(|node| node.kind.clone());
             let delivered_payload = !flushed.is_empty();
             for payload in flushed {
                 self.emit_stream_chunk(&edge, edge.from.port, &payload);
