@@ -105,44 +105,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind !== "display" &&
         outputHandle("stderr", 128, runtime.portActivity.stderr)}
 
-      <div className="node-toolbar">
-        <button
-          className="nodrag nopan"
-          type="button"
-          onClick={() => typedData.onRun(model.id, "push")}
-        >
-          push
-        </button>
-        <button
-          className="nodrag nopan"
-          type="button"
-          onClick={() => typedData.onRun(model.id, "pull")}
-        >
-          pull
-        </button>
-        <button
-          type="button"
-          className={`nodrag nopan ${autoRun.enabled ? "is-live" : ""}`}
-          onClick={() =>
-            typedData.onToggleAutorun(model.id, {
-              ...autoRun,
-              enabled: !autoRun.enabled,
-            })
-          }
-        >
-          auto
-        </button>
-        {runtime.running && (
-          <button
-            type="button"
-            className="nodrag nopan danger"
-            onClick={() => typedData.onStop(model.id)}
-          >
-            stop
-          </button>
-        )}
-      </div>
-
       <div className="node-card">
         <div className="node-comment">
           <textarea
@@ -224,6 +186,44 @@ export default function ShellNode({ data, selected }: NodeProps) {
           config={autoRun}
           onChange={(next) => typedData.onToggleAutorun(model.id, next)}
         />
+
+        <div className="node-toolbar">
+          <button
+            className="nodrag nopan"
+            type="button"
+            onClick={() => typedData.onRun(model.id, "push")}
+          >
+            push
+          </button>
+          <button
+            className="nodrag nopan"
+            type="button"
+            onClick={() => typedData.onRun(model.id, "pull")}
+          >
+            pull
+          </button>
+          <button
+            type="button"
+            className={`nodrag nopan ${autoRun.enabled ? "is-live" : ""}`}
+            onClick={() =>
+              typedData.onToggleAutorun(model.id, {
+                ...autoRun,
+                enabled: !autoRun.enabled,
+              })
+            }
+          >
+            auto
+          </button>
+          {runtime.running && (
+            <button
+              type="button"
+              className="nodrag nopan danger"
+              onClick={() => typedData.onStop(model.id)}
+            >
+              stop
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
