@@ -550,6 +550,31 @@ function WorkspaceCanvas() {
   }, []);
 
   useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+
+    const closeOnPointer = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest(".context-menu")) {
+        return;
+      }
+      setContextMenu(null);
+    };
+
+    const closeMenu = () => setContextMenu(null);
+
+    window.addEventListener("pointerdown", closeOnPointer, true);
+    window.addEventListener("wheel", closeMenu, { passive: true });
+    window.addEventListener("keydown", closeMenu);
+
+    return () => {
+      window.removeEventListener("pointerdown", closeOnPointer, true);
+      window.removeEventListener("wheel", closeMenu);
+      window.removeEventListener("keydown", closeMenu);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
     if (!toast) {
       return;
     }
