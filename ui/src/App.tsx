@@ -568,7 +568,12 @@ function WorkspaceCanvas() {
                           stdout: { bytes: new Uint8Array(), completed: false },
                           stderr: { bytes: new Uint8Array(), completed: false },
                         }
-                      : current[event.node_id]?.previews,
+                      : nodeKind === "cat"
+                        ? {
+                            stdout: { bytes: new Uint8Array(), completed: false },
+                            stderr: { bytes: new Uint8Array(), completed: false },
+                          }
+                        : current[event.node_id]?.previews,
                 },
               };
             }

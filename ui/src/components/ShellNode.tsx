@@ -86,6 +86,10 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const [activePreviewTab, setActivePreviewTab] = useState<PortKind | null>(
     null,
   );
+  const previewTabs =
+    model.kind === "cat"
+      ? (["stdout", "stderr"] as PortKind[])
+      : (["stdin", "stdout", "stderr"] as PortKind[]);
   const activePreview = activePreviewTab
     ? runtime.previews?.[activePreviewTab]
     : undefined;
@@ -306,10 +310,10 @@ export default function ShellNode({ data, selected }: NodeProps) {
           />
         )}
 
-        {(model.kind === "script" || model.kind === "exec") && (
+        {(model.kind === "script" || model.kind === "exec" || model.kind === "cat") && (
           <div className="port-preview-shell">
             <div className="port-preview-tabs">
-              {(["stdin", "stdout", "stderr"] as PortKind[]).map((port) => (
+              {previewTabs.map((port) => (
                 <button
                   key={port}
                   type="button"
