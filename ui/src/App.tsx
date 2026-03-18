@@ -5,6 +5,7 @@ import {
   MiniMap,
   ReactFlow,
   ReactFlowProvider,
+  SelectionMode,
   addEdge,
   applyEdgeChanges,
   applyNodeChanges,
@@ -760,6 +761,7 @@ function WorkspaceCanvas() {
           onEdgeClick={(_, edge) => cycleEdgeBuffering(edge.id)}
           onConnect={onConnect}
           selectionOnDrag
+          selectionMode={SelectionMode.Partial}
           panOnScroll
           panOnDrag={[1, 2]}
           colorMode="dark"
