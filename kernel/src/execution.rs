@@ -35,11 +35,10 @@ fn node_accepts_argv(kind: &NodeKind) -> bool {
     matches!(kind, NodeKind::Script | NodeKind::Exec)
 }
 
-fn parse_argv_bytes(bytes: &[u8]) -> Vec<String> {
+fn parse_argv_value(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
-        .lines()
-        .map(ToOwned::to_owned)
-        .collect()
+        .trim_end_matches(['\n', '\r'])
+        .to_string()
 }
 
 #[derive(Clone)]
@@ -195,15 +194,27 @@ impl ExecutionContext {
                     .iter()
                     .filter(|edge| edge.to.port == PortKind::Stdin)
                     .count();
-                let argv_count = edges
-                    .iter()
-                    .filter(|edge| edge.to.port == PortKind::Argv)
-                    .count();
-                if stdin_count > 1 || argv_count > 1 {
+                if stdin_count > 1 {
                     return Err(format!(
-                        "Node {} accepts at most one stdin wire and one argv wire.",
+                        "Node {} accepts at most one stdin wire.",
                         node_label(node),
                     ));
+                }
+                let mut argv_slots = HashSet::new();
+                for edge in edges.iter().filter(|edge| edge.to.port == PortKind::Argv) {
+                    let Some(slot) = edge.to.slot else {
+                        return Err(format!(
+                            "Node {} has an argv wire without a target slot.",
+                            node_label(node),
+                        ));
+                    };
+                    if !argv_slots.insert(slot) {
+                        return Err(format!(
+                            "Node {} has multiple argv wires targeting slot {}.",
+                            node_label(node),
+                            slot,
+                        ));
+                    }
                 }
                 if edges.iter().any(|edge| {
                     edge.to.port != PortKind::Stdin && edge.to.port != PortKind::Argv
@@ -368,19 +379,50 @@ impl ExecutionContext {
             .unwrap_or(false)
     }
 
+    fn allowed_argv_edges(&self, node_id: &str) -> Vec<Edge> {
+        self.incoming
+            .get(node_id)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|edge| {
+                self.allowed_nodes.contains(&edge.from.node_id) && edge.to.port == PortKind::Argv
+            })
+            .collect()
+    }
+
+    fn argv_inputs_ready(&self, node_id: &str) -> bool {
+        let expected = self.allowed_argv_edges(node_id);
+        if expected.is_empty() {
+            return true;
+        }
+        let states = self.node_states.lock();
+        let state = states.get(node_id).cloned().unwrap_or_default();
+        expected
+            .iter()
+            .all(|edge| state.argv_completed.contains(&edge.id))
+    }
+
     fn take_command_inputs(
         &self,
         node_id: &str,
         initial_input: Vec<u8>,
     ) -> (Vec<u8>, bool, Vec<String>) {
+        let argv_edges = self.allowed_argv_edges(node_id);
         let mut states = self.node_states.lock();
         let state = states.entry(node_id.to_string()).or_default();
         let mut stdin = std::mem::take(&mut state.buffered_stdin);
         stdin.extend(initial_input);
         let close_after_start = state.buffered_stdin_closed;
         state.buffered_stdin_closed = false;
-        let argv = parse_argv_bytes(&std::mem::take(&mut state.argv_input));
-        state.argv_ready = false;
+        let mut argv_edges = argv_edges;
+        argv_edges.sort_by_key(|edge| edge.to.slot.unwrap_or(usize::MAX));
+        let argv = argv_edges
+            .into_iter()
+            .map(|edge| parse_argv_value(state.argv_inputs.get(&edge.id).map(Vec::as_slice).unwrap_or(&[])))
+            .collect();
+        state.argv_inputs.clear();
+        state.argv_completed.clear();
         state.scheduled = false;
         (stdin, close_after_start, argv)
     }
@@ -447,12 +489,7 @@ impl ExecutionContext {
             }
             NodeKind::Script => {
                 if self.has_allowed_incoming_port(&node.id, PortKind::Argv)
-                    && !self
-                        .node_states
-                        .lock()
-                        .get(&node.id)
-                        .map(|state| state.argv_ready)
-                        .unwrap_or(false)
+                    && !self.argv_inputs_ready(&node.id)
                 {
                     if !initial_input.is_empty() {
                         let mut states = self.node_states.lock();
@@ -470,12 +507,7 @@ impl ExecutionContext {
             }
             NodeKind::Exec => {
                 if self.has_allowed_incoming_port(&node.id, PortKind::Argv)
-                    && !self
-                        .node_states
-                        .lock()
-                        .get(&node.id)
-                        .map(|state| state.argv_ready)
-                        .unwrap_or(false)
+                    && !self.argv_inputs_ready(&node.id)
                 {
                     if !initial_input.is_empty() {
                         let mut states = self.node_states.lock();
@@ -895,24 +927,23 @@ impl ExecutionContext {
                             let mut states = self.node_states.lock();
                             let state = states.entry(target.id.clone()).or_default();
                             if !payload.is_empty() {
-                                state.argv_input.extend_from_slice(&payload);
+                                state
+                                    .argv_inputs
+                                    .entry(edge.id.clone())
+                                    .or_default()
+                                    .extend_from_slice(&payload);
                             }
                             if completed {
-                                state.argv_ready = true;
+                                state.argv_completed.insert(edge.id.clone());
                             }
                         }
-                        if completed {
+                        if completed && self.argv_inputs_ready(&target.id) {
                             self.clone().start_node(target.id.clone(), Vec::new()).await?;
                         }
                     }
                     PortKind::Stdin => {
                         let waiting_for_argv = self.has_allowed_incoming_port(&target.id, PortKind::Argv)
-                            && !self
-                                .node_states
-                                .lock()
-                                .get(&target.id)
-                                .map(|state| state.argv_ready)
-                                .unwrap_or(false);
+                            && !self.argv_inputs_ready(&target.id);
                         if waiting_for_argv {
                             let mut states = self.node_states.lock();
                             let state = states.entry(target.id.clone()).or_default();
@@ -1105,8 +1136,8 @@ struct NodeRuntimeState {
     merge_inputs: HashMap<String, Vec<u8>>,
     buffered_stdin: Vec<u8>,
     buffered_stdin_closed: bool,
-    argv_input: Vec<u8>,
-    argv_ready: bool,
+    argv_inputs: HashMap<String, Vec<u8>>,
+    argv_completed: HashSet<String>,
 }
 
 struct EdgeBufferState {
@@ -1268,6 +1299,24 @@ mod tests {
                     auto_run: None,
                 },
                 Node {
+                    id: "text-2".to_string(),
+                    kind: NodeKind::Text,
+                    title: "".to_string(),
+                    comment: "".to_string(),
+                    position: Position { x: 0.0, y: 140.0 },
+                    size: Size {
+                        width: 200.0,
+                        height: 120.0,
+                    },
+                    shell: Some("bash".to_string()),
+                    script: None,
+                    path: None,
+                    args: None,
+                    text: Some("world
+".to_string()),
+                    auto_run: None,
+                },
+                Node {
                     id: "script-1".to_string(),
                     kind: NodeKind::Script,
                     title: "".to_string(),
@@ -1278,31 +1327,47 @@ mod tests {
                         height: 120.0,
                     },
                     shell: Some("bash".to_string()),
-                    script: Some("test \"$1\" = hello".to_string()),
+                    script: Some(r#"test "$1" = hello && test "$2" = world"#.to_string()),
                     path: None,
                     args: None,
                     text: None,
                     auto_run: None,
                 },
             ],
-            edges: vec![Edge {
-                id: "edge-1".to_string(),
-                from: PortRef {
-                    node_id: "text-1".to_string(),
-                    port: PortKind::Stdout,
-                    slot: None,
+            edges: vec![
+                Edge {
+                    id: "edge-1".to_string(),
+                    from: PortRef {
+                        node_id: "text-1".to_string(),
+                        port: PortKind::Stdout,
+                        slot: None,
+                    },
+                    to: PortRef {
+                        node_id: "script-1".to_string(),
+                        port: PortKind::Argv,
+                        slot: Some(1),
+                    },
+                    buffering: BufferingMode::LineOr1024,
                 },
-                to: PortRef {
-                    node_id: "script-1".to_string(),
-                    port: PortKind::Argv,
-                    slot: None,
+                Edge {
+                    id: "edge-2".to_string(),
+                    from: PortRef {
+                        node_id: "text-2".to_string(),
+                        port: PortKind::Stdout,
+                        slot: None,
+                    },
+                    to: PortRef {
+                        node_id: "script-1".to_string(),
+                        port: PortKind::Argv,
+                        slot: Some(2),
+                    },
+                    buffering: BufferingMode::LineOr1024,
                 },
-                buffering: BufferingMode::LineOr1024,
-            }],
+            ],
             ui: WorkspaceUi::default(),
         };
 
-        let exec_id = manager.run(workspace, "text-1".to_string(), ExecutionMode::Push);
+        let exec_id = manager.run(workspace, "script-1".to_string(), ExecutionMode::Pull);
         let exit_code = timeout(Duration::from_secs(2), async move {
             loop {
                 match rx.recv().await {
@@ -1323,7 +1388,7 @@ mod tests {
         .await
         .expect("script node never completed");
 
-        assert_eq!(exit_code, Some(0), "script did not receive argv input");
+        assert_eq!(exit_code, Some(0), "script did not receive slotted argv input");
     }
 
     #[tokio::test]

@@ -139,6 +139,7 @@ export interface ShellNodeData extends Record<string, unknown> {
   model: WorkspaceNode;
   runtime: NodeRuntimeState;
   outputSlots?: number[];
+  argvSlots?: number[];
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onStop: (nodeId: string) => void;

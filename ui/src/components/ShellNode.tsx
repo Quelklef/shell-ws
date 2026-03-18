@@ -124,23 +124,25 @@ export default function ShellNode({ data, selected }: NodeProps) {
               ? "is-active"
               : ""
           }`}
-          style={{ top: nodeHasArgvPort(model.kind) ? 84 : 96 }}
+          style={{ top: nodeHasArgvPort(model.kind) ? 78 : 96 }}
         />
       )}
-      {nodeHasArgvPort(model.kind) && (
-        <Handle
-          id="argv"
-          type="target"
-          position={Position.Left}
-          className={`shell-handle shell-handle-argv ${
-            runtime.portActivity.argv &&
-            Date.now() - runtime.portActivity.argv < 800
-              ? "is-active"
-              : ""
-          }`}
-          style={{ top: 124 }}
-        />
-      )}
+      {nodeHasArgvPort(model.kind) &&
+        (typedData.argvSlots ?? [1]).map((slot, index) => (
+          <Handle
+            key={`argv-${slot}`}
+            id={`argv-${slot}`}
+            type="target"
+            position={Position.Left}
+            className={`shell-handle shell-handle-argv ${
+              runtime.portActivity.argv &&
+              Date.now() - runtime.portActivity.argv < 800
+                ? "is-active"
+                : ""
+            }`}
+            style={{ top: 112 + index * 24 }}
+          />
+        ))}
       {(model.kind === "script" ||
         model.kind === "exec" ||
         model.kind === "cat" ||
