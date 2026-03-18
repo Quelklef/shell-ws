@@ -97,7 +97,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 7px 12px;
-  font-size: 12px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -124,7 +124,7 @@ textarea {
   color: var(--text);
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 8px 10px;
   cursor: pointer;
   transition:
     transform 160ms ease,
@@ -151,7 +151,7 @@ textarea {
   color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.12em;
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .canvas-shell {
@@ -225,6 +225,7 @@ textarea {
 }
 
 .node-card {
+  font-size: 12px;
   border-radius: 20px;
   border: 1px solid var(--line);
   background:
@@ -252,7 +253,8 @@ textarea {
   background: rgba(9, 11, 13, 0.54);
   color: var(--text);
   border-radius: 12px;
-  padding: 10px 12px;
+  padding: 8px 10px;
+  font-size: 12px;
 }
 
 .node-comment textarea {
@@ -262,7 +264,7 @@ textarea {
 }
 
 .node-title {
-  font-size: 17px;
+  font-size: 14px;
   font-weight: 600;
 }
 
@@ -279,7 +281,7 @@ textarea {
   display: flex;
   justify-content: space-between;
   color: var(--text-soft);
-  font-size: 12px;
+  font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
 }
@@ -321,7 +323,8 @@ textarea {
   margin: 0;
   overflow: auto;
   white-space: pre-wrap;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .display-media {
@@ -339,7 +342,8 @@ textarea {
   padding: 10px 12px;
   background: rgba(255, 255, 255, 0.04);
   color: var(--text-soft);
-  line-height: 1.5;
+  font-size: 11px;
+  line-height: 1.4;
 }
 
 .shell-handle {
