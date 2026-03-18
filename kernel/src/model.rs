@@ -257,7 +257,7 @@ fn default_shell_option() -> Option<String> {
 }
 
 fn default_zoom() -> f64 {
-    1.0
+    0.5
 }
 
 #[cfg(test)]

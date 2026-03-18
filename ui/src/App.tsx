@@ -330,7 +330,13 @@ function WorkspaceCanvas() {
         if (disposed) {
           return;
         }
-        setWorkspaceMeta({ id: loaded.id, name: loaded.name, ui: loaded.ui });
+        const ui =
+          loaded.ui.viewportX === 0 &&
+          loaded.ui.viewportY === 0 &&
+          loaded.ui.zoom === 1
+            ? { ...loaded.ui, zoom: 0.5 }
+            : loaded.ui;
+        setWorkspaceMeta({ id: loaded.id, name: loaded.name, ui });
         setRuntime(
           Object.fromEntries(
             loaded.nodes.map((node) => [
@@ -704,6 +710,7 @@ function WorkspaceCanvas() {
         }}
       >
         <ReactFlow<FlowNode, FlowEdge>
+          defaultViewport={workspaceMeta.ui}
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
@@ -711,7 +718,6 @@ function WorkspaceCanvas() {
           onEdgesChange={onEdgesChange}
           onEdgeClick={(_, edge) => cycleEdgeBuffering(edge.id)}
           onConnect={onConnect}
-          fitView
           selectionOnDrag
           panOnScroll
           panOnDrag={[1, 2]}
