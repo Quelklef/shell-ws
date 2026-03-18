@@ -74,16 +74,22 @@ export default function ShellNode({ data, selected }: NodeProps) {
     intervalMs: 1000,
   };
   const display = runtime.display ? renderDisplay(runtime.display.bytes) : null;
-  const [activePreviewTab, setActivePreviewTab] = useState<PortKind>("stdout");
-  const activePreview = runtime.previews?.[activePreviewTab];
-  const renderedPreview = activePreview
-    ? renderDisplay(activePreview.bytes)
-    : {
-        label: activePreviewTab,
-        content: (
-          <div className="display-empty">no recent {activePreviewTab}</div>
-        ),
-      };
+  const [activePreviewTab, setActivePreviewTab] = useState<PortKind | null>(
+    null,
+  );
+  const activePreview = activePreviewTab
+    ? runtime.previews?.[activePreviewTab]
+    : undefined;
+  const renderedPreview = activePreviewTab
+    ? activePreview
+      ? renderDisplay(activePreview.bytes)
+      : {
+          label: activePreviewTab,
+          content: (
+            <div className="display-empty">no recent {activePreviewTab}</div>
+          ),
+        }
+    : null;
 
   return (
     <div
