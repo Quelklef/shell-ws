@@ -1,0 +1,429 @@
+@import "@xyflow/react/dist/style.css";
+
+:root {
+  color-scheme: dark;
+  --bg: #131415;
+  --bg-elevated: rgba(23, 27, 30, 0.86);
+  --bg-panel: rgba(17, 19, 22, 0.92);
+  --card: rgba(29, 34, 38, 0.92);
+  --card-soft: rgba(42, 48, 54, 0.78);
+  --line: rgba(244, 232, 214, 0.16);
+  --line-strong: rgba(244, 232, 214, 0.34);
+  --text: #f4ecdf;
+  --text-soft: #c1baaf;
+  --accent: #f08a5d;
+  --accent-soft: #f2c078;
+  --danger: #de5d5d;
+  --success: #8fcf9e;
+  --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
+  font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+  height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(240, 138, 93, 0.16), transparent 26%),
+    radial-gradient(circle at bottom right, rgba(242, 192, 120, 0.1), transparent 25%),
+    linear-gradient(160deg, #111314 0%, #181b1d 38%, #0f1112 100%);
+  color: var(--text);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.app-loading {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-soft);
+}
+
+.app-shell {
+  display: grid;
+  grid-template-columns: 310px 1fr;
+  height: 100%;
+}
+
+.sidebar {
+  position: relative;
+  padding: 22px;
+  border-right: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(240, 138, 93, 0.08), transparent 16%),
+    rgba(10, 11, 12, 0.72);
+  backdrop-filter: blur(18px);
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent-soft);
+  margin-bottom: 8px;
+}
+
+.sidebar h1 {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+}
+
+.sidebar-copy {
+  color: var(--text-soft);
+  line-height: 1.5;
+  margin: 14px 0 24px;
+}
+
+.kernel-pill {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.kernel-pill.online {
+  border-color: rgba(143, 207, 158, 0.45);
+  color: var(--success);
+}
+
+.kernel-pill.offline {
+  border-color: rgba(222, 93, 93, 0.4);
+  color: #f1b0b0;
+}
+
+.node-palette {
+  display: grid;
+  gap: 10px;
+}
+
+.node-palette button,
+.context-menu button,
+.node-toolbar button {
+  border: 1px solid var(--line);
+  color: var(--text);
+  background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
+  border-radius: 12px;
+  padding: 10px 12px;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.node-palette button:hover,
+.context-menu button:hover,
+.node-toolbar button:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-strong);
+  background: rgba(240, 138, 93, 0.12);
+}
+
+.sidebar-notes {
+  margin-top: 28px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+  color: var(--text-soft);
+}
+
+.sidebar-notes div {
+  color: var(--text);
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 11px;
+}
+
+.canvas-shell {
+  position: relative;
+}
+
+.toast {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: rgba(10, 11, 12, 0.94);
+  border: 1px solid rgba(222, 93, 93, 0.34);
+  box-shadow: var(--shadow);
+}
+
+.context-menu {
+  position: absolute;
+  z-index: 30;
+  padding: 8px;
+  border-radius: 14px;
+  background: rgba(12, 14, 16, 0.96);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.shell-node {
+  display: grid;
+  grid-template-columns: 56px 1fr;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+}
+
+.shell-node.is-running .node-card {
+  border-color: rgba(242, 192, 120, 0.42);
+  box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.18), var(--shadow);
+}
+
+.node-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.node-toolbar button {
+  writing-mode: vertical-rl;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  height: 64px;
+  padding: 12px 10px;
+}
+
+.node-toolbar button.is-live {
+  border-color: rgba(143, 207, 158, 0.42);
+  color: var(--success);
+}
+
+.node-toolbar button.danger {
+  border-color: rgba(222, 93, 93, 0.5);
+  color: #f4c3c3;
+}
+
+.node-card {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.node-card {
+  border-radius: 20px;
+  border: 1px solid var(--line);
+  background:
+    linear-gradient(180deg, rgba(242, 192, 120, 0.06), transparent 14%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 100%),
+    var(--card);
+  box-shadow: var(--shadow);
+}
+
+.node-comment textarea,
+.script-editor,
+.display-code,
+.merge-help {
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.node-comment textarea,
+.script-editor,
+.shell-input,
+.node-title,
+.autorun-controls input,
+.autorun-controls select {
+  width: 100%;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.54);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.node-comment textarea {
+  min-height: 56px;
+  resize: vertical;
+  color: var(--accent-soft);
+}
+
+.node-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.shell-input {
+  min-height: 42px;
+}
+
+.script-editor {
+  min-height: 112px;
+  resize: vertical;
+}
+
+.node-meta {
+  display: flex;
+  justify-content: space-between;
+  color: var(--text-soft);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.autorun-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.autorun-controls input {
+  width: 88px;
+}
+
+.display-pane {
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(9, 11, 13, 0.46);
+  border: 1px solid rgba(244, 236, 223, 0.08);
+  overflow: hidden;
+}
+
+.display-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--accent-soft);
+  font-size: 11px;
+}
+
+.display-empty {
+  color: var(--text-soft);
+}
+
+.display-code {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  line-height: 1.45;
+}
+
+.display-media {
+  max-width: 100%;
+  max-height: 240px;
+  border-radius: 10px;
+}
+
+.display-markdown {
+  overflow: auto;
+}
+
+.merge-help {
+  border-radius: 12px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-soft);
+  line-height: 1.5;
+}
+
+.shell-handle {
+  width: 12px;
+  height: 12px;
+  background: #1e2327;
+  border: 2px solid var(--accent-soft);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease,
+    border-color 120ms ease;
+}
+
+.shell-handle.is-active {
+  transform: scale(1.18);
+}
+
+.shell-handle-stdout {
+  border-color: var(--success);
+}
+
+.shell-handle-stderr {
+  border-color: var(--danger);
+}
+
+.shell-handle-stdin {
+  border-color: var(--accent-soft);
+}
+
+.minimap {
+  background: rgba(14, 15, 16, 0.92) !important;
+  border: 1px solid var(--line) !important;
+}
+
+.node-resizer-line {
+  border-color: rgba(242, 192, 120, 0.55) !important;
+}
+
+.node-resizer-handle {
+  background: var(--accent) !important;
+  border: none !important;
+}
+
+.react-flow__controls {
+  background: rgba(12, 13, 15, 0.92);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.react-flow__controls-button {
+  background: transparent;
+  border-bottom: 1px solid var(--line);
+}
+
+.react-flow__attribution {
+  display: none;
+}
+
+@media (max-width: 980px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .sidebar {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
+.shell-handle-stdout.is-active {
+  background: var(--success);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(143, 207, 158, 0.9);
+}
+
+.shell-handle-stderr.is-active {
+  background: var(--danger);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(222, 93, 93, 0.9);
+}
+
+.shell-handle-stdin.is-active {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(242, 192, 120, 0.9);
+}

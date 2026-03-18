@@ -1,0 +1,17 @@
+{
+  "name": "shell-ws",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "ui"
+  ],
+  "scripts": {
+    "dev": "concurrently -k -n kernel,ui -c blue,green \"cargo run --manifest-path kernel/Cargo.toml\" \"npm run dev --workspace ui\"",
+    "build": "cargo build --manifest-path kernel/Cargo.toml && npm run build --workspace ui",
+    "test": "cargo test --manifest-path kernel/Cargo.toml && npm run test --workspace ui",
+    "run": "cargo run --manifest-path kernel/Cargo.toml"
+  },
+  "devDependencies": {
+    "concurrently": "^9.0.1"
+  }
+}

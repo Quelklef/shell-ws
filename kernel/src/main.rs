@@ -1,0 +1,221 @@
+mod execution;
+mod model;
+mod workspace_store;
+
+use std::net::SocketAddr;
+
+use axum::{
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        Path, State,
+    },
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::get,
+    Json, Router,
+};
+use execution::ExecutionManager;
+use futures::{sink::SinkExt, stream::StreamExt};
+use model::{ClientEvent, ServerEvent, Workspace};
+use tokio::sync::broadcast;
+use tower_http::{cors::CorsLayer, services::ServeDir};
+use tracing::{error, info};
+use uuid::Uuid;
+use workspace_store::WorkspaceStore;
+
+#[derive(Clone)]
+struct AppState {
+    store: WorkspaceStore,
+    execution: ExecutionManager,
+    broadcaster: broadcast::Sender<ServerEvent>,
+}
+
+#[tokio::main]
+async fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            std::env::var("RUST_LOG")
+                .unwrap_or_else(|_| "shell_ws_kernel=debug,tower_http=info".to_string()),
+        )
+        .init();
+
+    let store = WorkspaceStore::new("workspace-data")
+        .await
+        .expect("workspace store");
+    let (broadcaster, _) = broadcast::channel(512);
+    let execution = ExecutionManager::new(broadcaster.clone());
+    let state = AppState {
+        store,
+        execution,
+        broadcaster,
+    };
+
+    let app = Router::new()
+        .route("/api/health", get(health))
+        .route(
+            "/api/workspaces",
+            get(list_workspaces).post(create_workspace),
+        )
+        .route(
+            "/api/workspaces/:id",
+            get(get_workspace)
+                .put(save_workspace)
+                .delete(delete_workspace),
+        )
+        .route("/ws", get(ws_handler))
+        .fallback_service(ServeDir::new("ui/dist").append_index_html_on_directories(true))
+        .layer(CorsLayer::permissive())
+        .with_state(state);
+
+    let address = SocketAddr::from(([127, 0, 0, 1], 4000));
+    info!("shell-ws kernel listening on http://{address}");
+    axum::serve(
+        tokio::net::TcpListener::bind(address)
+            .await
+            .expect("bind address"),
+        app,
+    )
+    .await
+    .expect("start server");
+}
+
+async fn health() -> &'static str {
+    "ok"
+}
+
+async fn list_workspaces(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<model::WorkspaceSummary>>, AppError> {
+    Ok(Json(state.store.list().await?))
+}
+
+async fn create_workspace(State(state): State<AppState>) -> Result<Json<Workspace>, AppError> {
+    let mut workspace = Workspace::example();
+    workspace.id = Uuid::new_v4().to_string();
+    workspace.name = format!("Workspace {}", &workspace.id[..8]);
+    state.store.save(&workspace.id, &workspace).await?;
+    Ok(Json(workspace))
+}
+
+async fn get_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Workspace>, AppError> {
+    Ok(Json(state.store.load(&id).await?))
+}
+
+async fn save_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Json(workspace): Json<Workspace>,
+) -> Result<StatusCode, AppError> {
+    state.store.save(&id, &workspace).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn delete_workspace(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, AppError> {
+    state.store.delete(&id).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn ws_handler(ws: WebSocketUpgrade, State(state): State<AppState>) -> Response {
+    ws.on_upgrade(move |socket| handle_socket(socket, state))
+}
+
+async fn handle_socket(socket: WebSocket, state: AppState) {
+    let mut rx = state.broadcaster.subscribe();
+    let (mut ws_tx, mut ws_rx) = socket.split();
+    let mut sender = tokio::spawn(async move {
+        while let Ok(event) = rx.recv().await {
+            match serde_json::to_string(&event) {
+                Ok(message) => {
+                    if ws_tx.send(Message::Text(message.into())).await.is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    error!("failed to serialize ws event: {error}");
+                }
+            }
+        }
+    });
+
+    loop {
+        tokio::select! {
+            message = &mut sender => {
+                if let Err(error) = message {
+                    error!("ws sender failed: {error}");
+                }
+                break;
+            }
+            maybe_message = ws_rx.next() => {
+                let Some(Ok(message)) = maybe_message else {
+                    break;
+                };
+                if let Message::Text(text) = message {
+                    match serde_json::from_str::<ClientEvent>(&text) {
+                        Ok(event) => {
+                            if let Err(error) = handle_client_event(event, state.clone()).await {
+                                let _ = state.broadcaster.send(ServerEvent::Error {
+                                    message: error.to_string(),
+                                    timestamp: current_ms(),
+                                });
+                            }
+                        }
+                        Err(error) => {
+                            let _ = state.broadcaster.send(ServerEvent::Error {
+                                message: format!("Invalid client event: {error}"),
+                                timestamp: current_ms(),
+                            });
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn handle_client_event(event: ClientEvent, state: AppState) -> Result<(), AppError> {
+    match event {
+        ClientEvent::RunNode {
+            workspace,
+            node_id,
+            mode,
+        } => {
+            state.execution.run(workspace, node_id, mode);
+        }
+        ClientEvent::StopExecution { exec_id, node_id } => {
+            if let Some(exec_id) = exec_id {
+                state.execution.stop_by_id(&exec_id);
+            } else if let Some(node_id) = node_id {
+                state.execution.stop_by_node(&node_id);
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(thiserror::Error, Debug)]
+enum AppError {
+    #[error("{0}")]
+    Io(#[from] std::io::Error),
+    #[error("{0}")]
+    Json(#[from] serde_json::Error),
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
+    }
+}
+
+fn current_ms() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis() as u64
+}
