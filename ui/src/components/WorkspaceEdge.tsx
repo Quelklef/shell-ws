@@ -40,18 +40,39 @@ export default function WorkspaceEdge({
     <>
       <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} />
       <EdgeLabelRenderer>
-        <button
-          type="button"
-          className="edge-delete nodrag nopan"
+        <div
+          className="edge-toolbar nodrag nopan"
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
           }}
-          onClick={() => typedData.onDelete?.(id)}
-          aria-label="delete wire"
-          title="delete wire"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
         >
-          ×
-        </button>
+          <button
+            type="button"
+            className="edge-buffering nodrag nopan"
+            onClick={(event) => {
+              event.stopPropagation();
+              typedData.onCycle?.(id);
+            }}
+            aria-label="cycle wire buffering"
+            title="cycle wire buffering"
+          >
+            {String(typedData.buffering ?? "line_or_1024").replaceAll("_", " ")}
+          </button>
+          <button
+            type="button"
+            className="edge-delete nodrag nopan"
+            onClick={(event) => {
+              event.stopPropagation();
+              typedData.onDelete?.(id);
+            }}
+            aria-label="delete wire"
+            title="delete wire"
+          >
+            ×
+          </button>
+        </div>
       </EdgeLabelRenderer>
     </>
   );

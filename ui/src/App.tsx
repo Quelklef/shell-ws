@@ -139,6 +139,7 @@ function toFlowNode(
 function toFlowEdge(
   edge: WorkspaceEdge,
   onDelete?: (edgeId: string) => void,
+  onCycle?: (edgeId: string) => void,
 ): FlowEdge {
   return {
     id: edge.id,
@@ -148,7 +149,7 @@ function toFlowEdge(
     targetHandle: edge.to.port,
     type: "workspace",
     animated: edge.buffering === "unbuffered",
-    data: { buffering: edge.buffering, onDelete },
+    data: { buffering: edge.buffering, onDelete, onCycle },
     label: edge.buffering.replaceAll("_", " "),
   };
 }
@@ -392,7 +393,11 @@ function WorkspaceCanvas() {
           ),
         );
         setNodes(loaded.nodes.map((node) => toFlowNode(node, {}, handlers)));
-        setEdges(loaded.edges.map((edge) => toFlowEdge(edge, deleteEdge)));
+        setEdges(
+          loaded.edges.map((edge) =>
+            toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
+          ),
+        );
       })
       .catch((error) => setToast(String(error)));
 
@@ -650,7 +655,11 @@ function WorkspaceCanvas() {
             ];
           return {
             ...edge,
-            data: { buffering, onDelete: deleteEdge },
+            data: {
+              buffering,
+              onDelete: deleteEdge,
+              onCycle: cycleEdgeBuffering,
+            },
             animated: buffering === "unbuffered",
             label: buffering.replaceAll("_", " "),
           };
@@ -684,7 +693,11 @@ function WorkspaceCanvas() {
             id: encodeId("edge"),
             ...connection,
             type: "workspace",
-            data: { buffering: "line_or_1024", onDelete: deleteEdge },
+            data: {
+              buffering: "line_or_1024",
+              onDelete: deleteEdge,
+              onCycle: cycleEdgeBuffering,
+            },
             label: "line or 1024",
           },
           current,
@@ -798,7 +811,6 @@ function WorkspaceCanvas() {
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
-          onEdgeClick={(_, edge) => cycleEdgeBuffering(edge.id)}
           onConnect={onConnect}
           selectionOnDrag
           selectionMode={SelectionMode.Partial}

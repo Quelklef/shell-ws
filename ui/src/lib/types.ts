@@ -143,6 +143,7 @@ export interface ShellNodeData extends Record<string, unknown> {
 export interface FlowEdgeData extends Record<string, unknown> {
   buffering: BufferingMode;
   onDelete?: (edgeId: string) => void;
+  onCycle?: (edgeId: string) => void;
 }
 
 export type FlowNode = Node<ShellNodeData, "shell">;
