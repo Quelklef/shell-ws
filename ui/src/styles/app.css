@@ -95,6 +95,29 @@ textarea {
   gap: 14px;
 }
 
+.sidebar-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sidebar-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-soft);
+}
+
+.sidebar-input {
+  width: 100%;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.54);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
 .node-palette-group {
   display: flex;
   flex-direction: column;

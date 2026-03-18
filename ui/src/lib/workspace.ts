@@ -3,6 +3,7 @@ import type { Workspace } from "./types";
 export function sanitizeWorkspace(workspace: Workspace): Workspace {
   return {
     ...workspace,
+    cwd: workspace.cwd ?? "",
     nodes: workspace.nodes.map((node) => ({
       ...node,
       kind: node.kind === ("cat" as typeof node.kind) ? "file" : node.kind,

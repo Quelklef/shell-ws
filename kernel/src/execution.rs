@@ -1,5 +1,6 @@
 use std::{
     collections::{HashMap, HashSet, VecDeque},
+    path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -20,7 +21,8 @@ use tracing::{error, warn};
 use uuid::Uuid;
 
 use crate::model::{
-    BufferingMode, Edge, ExecutionMode, Node, NodeKind, PortKind, ServerEvent, Workspace,
+    default_cwd, BufferingMode, Edge, ExecutionMode, Node, NodeKind, PortKind, ServerEvent,
+    Workspace,
 };
 
 fn node_label(node: &Node) -> &str {
@@ -153,6 +155,24 @@ struct ExecutionContext {
 }
 
 impl ExecutionContext {
+    fn workspace_cwd(&self) -> PathBuf {
+        let cwd = self.workspace.cwd.trim();
+        if cwd.is_empty() {
+            PathBuf::from(default_cwd())
+        } else {
+            PathBuf::from(cwd)
+        }
+    }
+
+    fn resolve_workspace_path(&self, value: &str) -> PathBuf {
+        let path = Path::new(value);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.workspace_cwd().join(path)
+        }
+    }
+
     fn new(
         exec_id: String,
         mut workspace: Workspace,
@@ -585,7 +605,8 @@ impl ExecutionContext {
             .clone()
             .filter(|value| !value.is_empty())
             .ok_or_else(|| format!("{} is missing a file path", node_label(&node)))?;
-        match tokio::fs::read(&path).await {
+        let resolved_path = self.resolve_workspace_path(&path);
+        match tokio::fs::read(&resolved_path).await {
             Ok(data) => {
                 self.emit_port_activity(&node.id, PortKind::Stdout, data.len());
                 self.clone()
@@ -633,6 +654,7 @@ impl ExecutionContext {
 
         self.emit_started(&node.id);
 
+        command.current_dir(self.workspace_cwd());
         command.stdin(Stdio::piped());
         command.stdout(Stdio::piped());
         command.stderr(Stdio::piped());
@@ -1250,8 +1272,8 @@ mod tests {
         interleave_bytes, interleave_lines, EdgeBufferState, ExecutionContext, ExecutionManager,
     };
     use crate::model::{
-        BufferingMode, Edge, ExecutionMode, Node, NodeKind, PortKind, PortRef, Position,
-        ServerEvent, Size, Workspace, WorkspaceUi,
+        default_cwd, BufferingMode, Edge, ExecutionMode, Node, NodeKind, PortKind, PortRef,
+        Position, ServerEvent, Size, Workspace, WorkspaceUi,
     };
 
     fn edge(mode: BufferingMode) -> Edge {
@@ -1276,6 +1298,7 @@ mod tests {
         let workspace = Workspace {
             id: "test".to_string(),
             name: "test".to_string(),
+            cwd: default_cwd(),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -1363,6 +1386,7 @@ mod tests {
         let workspace = Workspace {
             id: "test".to_string(),
             name: "test".to_string(),
+            cwd: default_cwd(),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -1476,6 +1500,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn script_nodes_run_in_workspace_cwd() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let cwd = temp_dir.path().to_string_lossy().to_string();
+        let (tx, _) = broadcast::channel(64);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let workspace = Workspace {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            cwd: cwd.clone(),
+            nodes: vec![Node {
+                id: "script-1".to_string(),
+                kind: NodeKind::Script,
+                title: "".to_string(),
+                comment: "".to_string(),
+                position: Position { x: 0.0, y: 0.0 },
+                size: Size {
+                    width: 200.0,
+                    height: 120.0,
+                },
+                shell: Some("bash".to_string()),
+                script: Some(format!(r#"test "$(pwd)" = "{}""#, cwd)),
+                path: None,
+                args: None,
+                text: None,
+                auto_run: None,
+            }],
+            edges: vec![],
+            ui: WorkspaceUi::default(),
+        };
+
+        let exec_id = manager.run(workspace, "script-1".to_string(), ExecutionMode::Push);
+        let exit_code = timeout(Duration::from_secs(2), async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen_exec_id,
+                        node_id,
+                        exit_code,
+                        ..
+                    }) if seen_exec_id == exec_id && node_id == "script-1" => return exit_code,
+                    Ok(ServerEvent::Error { message, .. }) => {
+                        panic!("unexpected execution error: {message}");
+                    }
+                    Ok(_) => {}
+                    Err(error) => panic!("event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("script node never completed");
+
+        assert_eq!(exit_code, Some(0), "script did not inherit workspace cwd");
+    }
+
+    #[tokio::test]
     async fn display_nodes_forward_input_to_stdout() {
         let (tx, _) = broadcast::channel(64);
         let manager = ExecutionManager::new(tx.clone());
@@ -1483,6 +1563,7 @@ mod tests {
         let workspace = Workspace {
             id: "test".to_string(),
             name: "test".to_string(),
+            cwd: default_cwd(),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -1600,6 +1681,7 @@ mod tests {
         let workspace = Workspace {
             id: "test".to_string(),
             name: "test".to_string(),
+            cwd: default_cwd(),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),

@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 pub struct Workspace {
     pub id: String,
     pub name: String,
+    #[serde(default = "default_cwd")]
+    pub cwd: String,
     #[serde(default)]
     pub nodes: Vec<Node>,
     #[serde(default)]
@@ -18,6 +20,7 @@ impl Workspace {
         Self {
             id: "default".to_string(),
             name: "Shell WS".to_string(),
+            cwd: default_cwd(),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -271,6 +274,10 @@ pub fn default_shell() -> String {
     "bash".to_string()
 }
 
+pub fn default_cwd() -> String {
+    std::env::var("HOME").unwrap_or_else(|_| ".".to_string())
+}
+
 fn default_shell_option() -> Option<String> {
     Some(default_shell())
 }
@@ -281,7 +288,7 @@ fn default_zoom() -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClientEvent, Workspace};
+    use super::{default_cwd, ClientEvent, Workspace};
 
     #[test]
     fn buffering_mode_serializes_with_expected_underscore() {
@@ -306,6 +313,20 @@ mod tests {
         let kind: super::NodeKind =
             serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
         assert_eq!(kind, super::NodeKind::File);
+    }
+
+    #[test]
+    fn workspace_defaults_cwd_to_home() {
+        let workspace: Workspace = serde_json::from_value(serde_json::json!({
+            "id": "default",
+            "name": "Shell WS",
+            "nodes": [],
+            "edges": [],
+            "ui": {},
+        }))
+        .expect("deserialize workspace with default cwd");
+
+        assert_eq!(workspace.cwd, default_cwd());
     }
 
     #[test]

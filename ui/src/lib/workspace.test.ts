@@ -9,6 +9,7 @@ describe("sanitizeWorkspace", () => {
       id: "w",
       name: "w",
       ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+      cwd: "",
       nodes: [
         {
           id: "cat-1",
@@ -30,6 +31,7 @@ describe("sanitizeWorkspace", () => {
       id: "w",
       name: "w",
       ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+      cwd: "",
       nodes: [],
       edges: [
         {

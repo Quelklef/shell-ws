@@ -19,6 +19,7 @@ export type ExecutionMode = "push" | "pull";
 export interface Workspace {
   id: string;
   name: string;
+  cwd: string;
   nodes: WorkspaceNode[];
   edges: WorkspaceEdge[];
   ui: {

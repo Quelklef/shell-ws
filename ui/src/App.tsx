@@ -310,7 +310,7 @@ type AutorunHandle = {
 function WorkspaceCanvas() {
   const [workspaceMeta, setWorkspaceMeta] = useState<Pick<
     Workspace,
-    "id" | "name" | "ui"
+    "id" | "name" | "cwd" | "ui"
   > | null>(null);
   const [kernelConnected, setKernelConnected] = useState(false);
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
@@ -332,7 +332,7 @@ function WorkspaceCanvas() {
     startY: 0,
     moved: false,
   });
-  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "ui"> | null>(
+  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "cwd" | "ui"> | null>(
     null,
   );
   const nodesRef = useRef<FlowNode[]>([]);
@@ -362,7 +362,7 @@ function WorkspaceCanvas() {
       edgesArg: FlowEdge[] = edgesRef.current,
       metaArg: Pick<
         Workspace,
-        "id" | "name" | "ui"
+        "id" | "name" | "cwd" | "ui"
       > | null = workspaceMetaRef.current,
     ): Workspace | null => {
       if (!metaArg) {
@@ -372,6 +372,7 @@ function WorkspaceCanvas() {
         id: metaArg.id,
         name: metaArg.name,
         ui: metaArg.ui,
+        cwd: metaArg.cwd,
         nodes: nodesArg.map(flowNodeToWorkspaceNode),
         edges: edgesArg.map(flowEdgeToWorkspaceEdge),
       };
@@ -385,6 +386,23 @@ function WorkspaceCanvas() {
       if (nextWorkspace) {
         saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
       }
+    },
+    [buildWorkspace],
+  );
+
+  const updateWorkspaceCwd = useCallback(
+    (cwd: string) => {
+      setWorkspaceMeta((current) => {
+        if (!current) {
+          return current;
+        }
+        const next = { ...current, cwd };
+        const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
+        if (nextWorkspace) {
+          saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+        }
+        return next;
+      });
     },
     [buildWorkspace],
   );
@@ -532,7 +550,7 @@ function WorkspaceCanvas() {
           loaded.ui.zoom === 1
             ? { ...loaded.ui, zoom: 0.5 }
             : loaded.ui;
-        setWorkspaceMeta({ id: loaded.id, name: loaded.name, ui });
+        setWorkspaceMeta({ id: loaded.id, name: loaded.name, cwd: loaded.cwd, ui });
         setRuntime(
           Object.fromEntries(
             loaded.nodes.map((node) => [
@@ -1056,6 +1074,16 @@ function WorkspaceCanvas() {
         >
           {kernelConnected ? "kernel online" : "kernel offline"}
         </span>
+        <label className="sidebar-field">
+          <span className="sidebar-label">pwd</span>
+          <input
+            className="sidebar-input"
+            value={workspaceMeta.cwd}
+            onChange={(event) => updateWorkspaceCwd(event.target.value)}
+            placeholder="/home/user"
+            title="working directory for kernel execution"
+          />
+        </label>
         <div className="node-palette-groups">
           {paletteGroups().map((group) => (
             <section key={group.label} className="node-palette-group">
