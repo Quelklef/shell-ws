@@ -102,7 +102,7 @@ function toFlowNode(
   runtime: Record<string, NodeRuntimeState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "onStop" | "onToggleAutorun"
+    "onUpdate" | "onRun" | "onStop" | "onDelete" | "onToggleAutorun"
   >,
 ): FlowNode {
   return {
@@ -115,6 +115,7 @@ function toFlowNode(
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
       onStop: handlers.onStop,
+      onDelete: handlers.onDelete,
       onToggleAutorun: handlers.onToggleAutorun,
     },
     width: node.size.width,
@@ -179,6 +180,7 @@ type ShellNodeActions = {
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onStop: (nodeId: string) => void;
+  onDelete: (nodeId: string) => void;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
 };
 
@@ -320,6 +322,17 @@ function WorkspaceCanvas() {
           node_id: nodeId,
         });
       },
+      onDelete: (nodeId) => {
+        setNodes((current) => {
+          const next = current.filter((node) => node.id !== nodeId);
+          const nextEdges = edgesRef.current.filter(
+            (edge) => edge.source !== nodeId && edge.target !== nodeId,
+          );
+          setEdges(nextEdges);
+          persistSoon(next, nextEdges);
+          return next;
+        });
+      },
       onToggleAutorun: (nodeId, next) => {
         setNodes((current) => {
           const updated = current.map((node) =>
@@ -390,6 +403,7 @@ function WorkspaceCanvas() {
           onUpdate: handlers.onUpdate,
           onRun: handlers.onRun,
           onStop: handlers.onStop,
+          onDelete: handlers.onDelete,
           onToggleAutorun: handlers.onToggleAutorun,
         },
       })),

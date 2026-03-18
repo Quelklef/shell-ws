@@ -135,6 +135,7 @@ export interface ShellNodeData extends Record<string, unknown> {
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onStop: (nodeId: string) => void;
+  onDelete: (nodeId: string) => void;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
 }
 

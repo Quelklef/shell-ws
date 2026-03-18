@@ -118,7 +118,18 @@ export default function ShellNode({ data, selected }: NodeProps) {
             }
           />
         </div>
-        <div className="node-title">{model.title}</div>
+        <div className="node-header-row">
+          <div className="node-title">{model.title}</div>
+          <button
+            type="button"
+            className="node-delete nodrag nopan"
+            onClick={() => typedData.onDelete(model.id)}
+            aria-label="delete node"
+            title="delete node"
+          >
+            ×
+          </button>
+        </div>
         <div className="node-meta">
           <span>{model.kind.replaceAll("_", " ")}</span>
           <span>{runtime.running ? "running" : "idle"}</span>
