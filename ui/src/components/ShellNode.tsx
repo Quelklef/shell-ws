@@ -225,21 +225,27 @@ export default function ShellNode({ data, selected }: NodeProps) {
                   className={`port-preview-tab nodrag nopan ${
                     activePreviewTab === port ? "is-active" : ""
                   }`}
-                  onClick={() => setActivePreviewTab(port)}
+                  onClick={() =>
+                    setActivePreviewTab((current) =>
+                      current === port ? null : port,
+                    )
+                  }
                 >
                   {port}
                 </button>
               ))}
             </div>
-            <div
-              className="port-preview-pane nodrag nopan"
-              onWheelCapture={(event) => event.stopPropagation()}
-            >
-              <div className="display-label">
-                {activePreviewTab} · {renderedPreview.label}
+            {activePreviewTab && renderedPreview && (
+              <div
+                className="port-preview-pane nodrag nopan"
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
+                <div className="display-label">
+                  {activePreviewTab} · {renderedPreview.label}
+                </div>
+                {renderedPreview.content}
               </div>
-              {renderedPreview.content}
-            </div>
+            )}
           </div>
         )}
 
