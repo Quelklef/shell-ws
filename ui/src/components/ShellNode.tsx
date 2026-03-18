@@ -118,13 +118,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
             }
           />
         </div>
-        <input
-          className="node-title nodrag nopan"
-          value={model.title}
-          onChange={(event) =>
-            typedData.onUpdate(model.id, { title: event.target.value })
-          }
-        />
+        <div className="node-title">{model.title}</div>
         <div className="node-meta">
           <span>{model.kind.replaceAll("_", " ")}</span>
           <span>{runtime.running ? "running" : "idle"}</span>

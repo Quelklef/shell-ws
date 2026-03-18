@@ -245,7 +245,6 @@ textarea {
 .node-comment textarea,
 .script-editor,
 .shell-input,
-.node-title,
 .autorun-controls input,
 .autorun-controls select {
   width: 100%;
@@ -264,8 +263,10 @@ textarea {
 }
 
 .node-title {
-  font-size: 14px;
+  font-size: 13px;
   font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
 }
 
 .shell-input {
