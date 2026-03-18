@@ -143,7 +143,6 @@ export interface ShellNodeData extends Record<string, unknown> {
   argvSlots?: number[];
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
-  onStop: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;

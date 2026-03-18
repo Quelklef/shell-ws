@@ -334,15 +334,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
           >
             {autoRun.enabled ? "auto on" : "auto"}
           </button>
-          {runtime.running && (
-            <button
-              type="button"
-              className="nodrag nopan danger"
-              onClick={() => typedData.onStop(model.id)}
-            >
-              stop
-            </button>
-          )}
         </div>
 
         {autoRun.enabled && (

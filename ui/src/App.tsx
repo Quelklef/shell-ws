@@ -201,7 +201,6 @@ function syncNodeData(
       argvSlots: computeArgvSlots(node.id, node.data.model.kind, edges),
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
-      onStop: handlers.onStop,
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
@@ -214,7 +213,7 @@ function toFlowNode(
   runtime: Record<string, NodeRuntimeState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "onStop" | "onDelete" | "onPickFile" | "onToggleAutorun"
+    "onUpdate" | "onRun" | "onDelete" | "onPickFile" | "onToggleAutorun"
   >,
   edges: FlowEdge[],
 ): FlowNode {
@@ -229,7 +228,6 @@ function toFlowNode(
       argvSlots: computeArgvSlots(node.id, node.kind, edges),
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
-      onStop: handlers.onStop,
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
@@ -296,7 +294,6 @@ function flowEdgeToWorkspaceEdge(edge: FlowEdge): WorkspaceEdge {
 type ShellNodeActions = {
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
-  onStop: (nodeId: string) => void;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
@@ -314,6 +311,9 @@ function WorkspaceCanvas() {
   > | null>(null);
   const [kernelConnected, setKernelConnected] = useState(false);
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
+  const [activeExecutions, setActiveExecutions] = useState<
+    { execId: string; nodeId: string }[]
+  >([]);
   const [toast, setToast] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -430,6 +430,17 @@ function WorkspaceCanvas() {
     [buildWorkspace],
   );
 
+  const stopExecution = useCallback((execId: string) => {
+    if (!socketRef.current?.ready) {
+      setToast("kernel websocket is not connected yet");
+      return;
+    }
+    socketRef.current.send({
+      type: "stop_execution",
+      exec_id: execId,
+    });
+  }, []);
+
   const handlers: ShellNodeActions = useMemo(
     () => ({
       onUpdate: (nodeId, patch) => {
@@ -461,16 +472,6 @@ function WorkspaceCanvas() {
       },
       onRun: (nodeId, mode) => {
         sendRunRequest(nodeId, mode);
-      },
-      onStop: (nodeId) => {
-        if (!socketRef.current?.ready) {
-          setToast("kernel websocket is not connected yet");
-          return;
-        }
-        socketRef.current.send({
-          type: "stop_execution",
-          node_id: nodeId,
-        });
       },
       onDelete: (nodeId) => {
         setNodes((current) => {
@@ -593,6 +594,21 @@ function WorkspaceCanvas() {
   useEffect(() => {
     const connection = connectKernel(
       (event) => {
+        if (event.type === "exec_started") {
+          setActiveExecutions((current) =>
+            current.some((entry) => entry.execId === event.exec_id)
+              ? current
+              : [...current, { execId: event.exec_id, nodeId: event.node_id }],
+          );
+        } else if (
+          event.type === "exec_finished" ||
+          event.type === "execution_stopped"
+        ) {
+          setActiveExecutions((current) =>
+            current.filter((entry) => entry.execId !== event.exec_id),
+          );
+        }
+
         setRuntime((current) => {
           switch (event.type) {
             case "exec_started": {
@@ -734,6 +750,18 @@ function WorkspaceCanvas() {
                   },
                 },
               };
+            }
+            case "execution_stopped": {
+              const nextState = { ...current };
+              for (const [nodeId, state] of Object.entries(current)) {
+                if (state.lastExecId === event.exec_id) {
+                  nextState[nodeId] = {
+                    ...state,
+                    running: false,
+                  };
+                }
+              }
+              return nextState;
             }
             case "error":
               setToast(event.message);
@@ -1084,6 +1112,28 @@ function WorkspaceCanvas() {
             title="working directory for kernel execution"
           />
         </label>
+        {activeExecutions.length > 0 && (
+          <section className="execution-panel">
+            <div className="node-palette-label">running</div>
+            <div className="execution-list">
+              {activeExecutions.map((execution) => {
+                const node = nodes.find((item) => item.id === execution.nodeId);
+                const label = node?.data.model.comment.trim() || node?.data.model.kind || execution.nodeId;
+                return (
+                  <div key={execution.execId} className="execution-item">
+                    <div className="execution-text">
+                      <div className="execution-label">{label}</div>
+                      <div className="execution-id">{execution.execId.slice(0, 8)}</div>
+                    </div>
+                    <button type="button" onClick={() => stopExecution(execution.execId)}>
+                      stop
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
         <div className="node-palette-groups">
           {paletteGroups().map((group) => (
             <section key={group.label} className="node-palette-group">

@@ -118,6 +118,64 @@ textarea {
   font-size: 12px;
 }
 
+.execution-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.execution-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.execution-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  border-radius: 12px;
+  background: rgba(9, 11, 13, 0.44);
+}
+
+.execution-text {
+  min-width: 0;
+  flex: 1;
+}
+
+.execution-label {
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.execution-id {
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-soft);
+}
+
+.execution-item button {
+  border: 1px solid rgba(222, 93, 93, 0.45);
+  color: #f4c3c3;
+  background: rgba(46, 18, 18, 0.88);
+  border-radius: 10px;
+  padding: 6px 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.execution-item button:hover {
+  border-color: rgba(222, 93, 93, 0.7);
+}
+
 .node-palette-group {
   display: flex;
   flex-direction: column;
@@ -139,7 +197,8 @@ textarea {
 
 .node-palette button,
 .context-menu button,
-.node-toolbar button {
+.node-toolbar button,
+.execution-item button {
   border: 1px solid var(--line);
   color: var(--text);
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
@@ -154,7 +213,8 @@ textarea {
 
 .node-palette button:hover,
 .context-menu button:hover,
-.node-toolbar button:hover {
+.node-toolbar button:hover,
+.execution-item button:hover {
   transform: translateY(-1px);
   border-color: var(--line-strong);
   background: rgba(240, 138, 93, 0.12);
