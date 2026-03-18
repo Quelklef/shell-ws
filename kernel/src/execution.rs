@@ -348,7 +348,12 @@ impl ExecutionContext {
                 self.emit_started(&node.id);
                 if !initial_input.is_empty() {
                     self.update_display(&node.id, initial_input.clone(), false);
+                    self.emit_port_activity(&node.id, PortKind::Stdout, initial_input.len());
+                    self.clone()
+                        .forward_output(&node.id, PortKind::Stdout, initial_input)
+                        .await?;
                 }
+                self.update_display(&node.id, Vec::new(), true);
                 self.emit_finished(&node.id, Some(0));
                 self.clone().complete_node(&node.id).await?;
             }
@@ -751,7 +756,18 @@ impl ExecutionContext {
                 if started {
                     self.emit_started(&target.id);
                 }
-                self.update_display(&target.id, payload, completed);
+                if !payload.is_empty() {
+                    self.update_display(&target.id, payload.clone(), false);
+                    self.emit_port_activity(&target.id, PortKind::Stdout, payload.len());
+                    self.clone()
+                        .forward_output(&target.id, PortKind::Stdout, payload)
+                        .await?;
+                }
+                if completed {
+                    self.update_display(&target.id, Vec::new(), true);
+                    self.emit_finished(&target.id, Some(0));
+                    self.clone().complete_node(&target.id).await?;
+                }
             }
             NodeKind::Script | NodeKind::Exec => {
                 let existing_writer = self
@@ -868,26 +884,10 @@ impl ExecutionContext {
                 self.emit_stream_chunk(&edge, edge.from.port, &payload);
                 self.clone().deliver_to_target(&edge, payload, true).await?;
             }
-            if !delivered_payload && !matches!(target_kind, Some(NodeKind::Display)) {
+            if !delivered_payload {
                 self.clone()
                     .deliver_to_target(&edge, Vec::new(), true)
                     .await?;
-            }
-            if matches!(target_kind, Some(NodeKind::Display)) {
-                self.update_display(&edge.to.node_id, Vec::new(), true);
-                let finished = {
-                    let mut states = self.node_states.lock();
-                    let state = states.entry(edge.to.node_id.clone()).or_default();
-                    if state.running {
-                        state.running = false;
-                        true
-                    } else {
-                        false
-                    }
-                };
-                if finished {
-                    self.emit_finished(&edge.to.node_id, Some(0));
-                }
             }
         }
         Ok(())
@@ -1077,6 +1077,123 @@ mod tests {
         let flushed = state.accept(b"hello\nworld".to_vec());
         assert_eq!(flushed, vec![b"hello\n".to_vec()]);
         assert_eq!(state.finish(), vec![b"world".to_vec()]);
+    }
+
+    #[tokio::test]
+    async fn display_nodes_forward_input_to_stdout() {
+        let (tx, _) = broadcast::channel(64);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let workspace = Workspace {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            nodes: vec![
+                Node {
+                    id: "text-1".to_string(),
+                    kind: NodeKind::Text,
+                    title: "".to_string(),
+                    comment: "".to_string(),
+                    position: Position { x: 0.0, y: 0.0 },
+                    size: Size {
+                        width: 200.0,
+                        height: 120.0,
+                    },
+                    shell: Some("bash".to_string()),
+                    script: None,
+                    path: None,
+                    args: None,
+                    text: Some("hello
+".to_string()),
+                    auto_run: None,
+                },
+                Node {
+                    id: "display-1".to_string(),
+                    kind: NodeKind::Display,
+                    title: "".to_string(),
+                    comment: "".to_string(),
+                    position: Position { x: 240.0, y: 0.0 },
+                    size: Size {
+                        width: 200.0,
+                        height: 120.0,
+                    },
+                    shell: Some("bash".to_string()),
+                    script: None,
+                    path: None,
+                    args: None,
+                    text: None,
+                    auto_run: None,
+                },
+                Node {
+                    id: "script-1".to_string(),
+                    kind: NodeKind::Script,
+                    title: "".to_string(),
+                    comment: "".to_string(),
+                    position: Position { x: 480.0, y: 0.0 },
+                    size: Size {
+                        width: 200.0,
+                        height: 120.0,
+                    },
+                    shell: Some("bash".to_string()),
+                    script: Some("grep h >/dev/null; echo done >&2".to_string()),
+                    path: None,
+                    args: None,
+                    text: None,
+                    auto_run: None,
+                },
+            ],
+            edges: vec![
+                Edge {
+                    id: "edge-1".to_string(),
+                    from: PortRef {
+                        node_id: "text-1".to_string(),
+                        port: PortKind::Stdout,
+                        slot: None,
+                    },
+                    to: PortRef {
+                        node_id: "display-1".to_string(),
+                        port: PortKind::Stdin,
+                        slot: None,
+                    },
+                    buffering: BufferingMode::LineOr1024,
+                },
+                Edge {
+                    id: "edge-2".to_string(),
+                    from: PortRef {
+                        node_id: "display-1".to_string(),
+                        port: PortKind::Stdout,
+                        slot: None,
+                    },
+                    to: PortRef {
+                        node_id: "script-1".to_string(),
+                        port: PortKind::Stdin,
+                        slot: None,
+                    },
+                    buffering: BufferingMode::LineOr1024,
+                },
+            ],
+            ui: WorkspaceUi::default(),
+        };
+
+        let exec_id = manager.run(workspace, "text-1".to_string(), ExecutionMode::Push);
+        let finished = timeout(Duration::from_secs(3), async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen_exec_id,
+                        node_id,
+                        ..
+                    }) if seen_exec_id == exec_id && node_id == "script-1" => return,
+                    Ok(ServerEvent::Error { message, .. }) => {
+                        panic!("unexpected execution error: {message}");
+                    }
+                    Ok(_) => {}
+                    Err(error) => panic!("event stream closed: {error}"),
+                }
+            }
+        })
+        .await;
+
+        assert!(finished.is_ok(), "display node did not forward downstream");
     }
 
     #[tokio::test]

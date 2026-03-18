@@ -133,6 +133,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "exec" ||
         model.kind === "cat" ||
         model.kind === "text" ||
+        model.kind === "display" ||
         model.kind.startsWith("merge_")) &&
         outputHandle("stdout", 84, "stdout", runtime.portActivity.stdout)}
       {model.kind === "tee" &&
