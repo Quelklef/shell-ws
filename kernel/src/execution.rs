@@ -1576,6 +1576,104 @@ mod tests {
     }
 
 
+    mod argv {
+        use super::*;
+
+        fn argv_context(action: ExecutionAction) -> Arc<ExecutionContext> {
+            let mut source = node(NodeKind::Script, "a");
+            source.script = Some("printf 'testing\n'".to_string());
+            let mut target = node(NodeKind::Script, "b");
+            target.script = Some("printf '%s' \"$1\"".to_string());
+            Arc::new(
+                ExecutionContext::new(
+                    "argv-exec".to_string(),
+                    workspace(
+                        vec![source, target],
+                        vec![edge("edge-ab", "a", PortKind::Stdout, "b", PortKind::Argv, Some(1))],
+                    ),
+                    action,
+                    broadcast::channel(64).0,
+                    CancellationToken::new(),
+                )
+                .expect("context"),
+            )
+        }
+
+        fn materialized_text(context: &ExecutionContext, node_id: &str, key: &str) -> String {
+            let bytes = context
+                .materialized_values
+                .lock()
+                .get(node_id)
+                .and_then(|values| values.get(key))
+                .cloned()
+                .unwrap_or_default();
+            String::from_utf8(bytes).expect("materialized utf8")
+        }
+
+        #[tokio::test]
+        async fn argv_test_pull_run() {
+            let context = argv_context(ExecutionAction::PullRun);
+            context.clone().run("b".to_string()).await.expect("run");
+
+            assert_eq!(materialized_text(&context, "a", "stdout"), "testing\n");
+            assert_eq!(materialized_text(&context, "b", "argv-1"), "testing\n");
+            assert_eq!(materialized_text(&context, "b", "stdout"), "testing");
+            assert_eq!(materialized_text(&context, "b", "stderr"), "");
+        }
+
+        #[tokio::test]
+        async fn argv_test_rerun_push() {
+            for iteration in 0..50 {
+                let context = argv_context(ExecutionAction::RerunPush);
+                context.clone().run("a".to_string()).await.expect("run");
+
+                assert_eq!(materialized_text(&context, "a", "stdout"), "testing\n", "iteration {iteration}: source stdout");
+                assert_eq!(materialized_text(&context, "b", "argv-1"), "testing\n", "iteration {iteration}: target argv-1");
+                assert_eq!(materialized_text(&context, "b", "stdout"), "testing", "iteration {iteration}: target stdout");
+                assert_eq!(materialized_text(&context, "b", "stderr"), "", "iteration {iteration}: target stderr");
+            }
+        }
+
+        #[tokio::test]
+        async fn argv_test_repush() {
+            let mut source = node(NodeKind::Script, "a");
+            source.materialized_values.insert(
+                "stdout".to_string(),
+                MaterializedValue {
+                    data_base64: encode_bytes(b"testing\n"),
+                },
+            );
+            source.materialized_values.insert(
+                "stderr".to_string(),
+                MaterializedValue {
+                    data_base64: encode_bytes(b""),
+                },
+            );
+            let mut target = node(NodeKind::Script, "b");
+            target.script = Some("printf '%s' \"$1\"".to_string());
+            let context = Arc::new(
+                ExecutionContext::new(
+                    "argv-repush".to_string(),
+                    workspace(
+                        vec![source, target],
+                        vec![edge("edge-ab", "a", PortKind::Stdout, "b", PortKind::Argv, Some(1))],
+                    ),
+                    ExecutionAction::Repush,
+                    broadcast::channel(64).0,
+                    CancellationToken::new(),
+                )
+                .expect("context"),
+            );
+
+            context.clone().run("a".to_string()).await.expect("run");
+
+            assert_eq!(materialized_text(&context, "b", "argv-1"), "testing\n");
+            assert_eq!(materialized_text(&context, "b", "stdout"), "testing");
+            assert_eq!(materialized_text(&context, "b", "stderr"), "");
+        }
+    }
+
+
     mod smoke {
         use super::*;
         use std::collections::{BTreeMap, BTreeSet};
