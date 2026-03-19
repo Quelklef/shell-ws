@@ -92,6 +92,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
     null,
   );
   const previewTabs = nodePreviewTabs(model.kind);
+  const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
+  const htmlContent = new TextDecoder().decode(htmlBytes);
   const activePreview = activePreviewTab
     ? runtime.previews?.[activePreviewTab]
     : undefined;
@@ -152,6 +154,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "file" ||
         model.kind === "text" ||
         model.kind === "passthru" ||
+        model.kind === "html" ||
         model.kind.startsWith("merge_")) &&
         outputHandle("stdout", 84, "stdout", runtime.portActivity.stdout)}
       {model.kind === "tee" &&
@@ -292,6 +295,18 @@ export default function ShellNode({ data, selected }: NodeProps) {
               typedData.onUpdate(model.id, { text: event.target.value })
             }
           />
+        )}
+
+        {model.kind === "html" && (
+          <div className="html-pane nodrag nopan">
+            <div className="display-label">html</div>
+            <iframe
+              className="html-frame"
+              sandbox="allow-scripts allow-forms"
+              srcDoc={htmlContent}
+              title={`html-${model.id}`}
+            />
+          </div>
         )}
 
         <div className="node-toolbar">

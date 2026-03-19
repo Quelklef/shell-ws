@@ -5,6 +5,7 @@ export type NodeKind =
   | "exec"
   | "file"
   | "passthru"
+  | "html"
   | "text"
   | "tee"
   | "merge_concat"

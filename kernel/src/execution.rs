@@ -213,6 +213,7 @@ impl ExecutionContext {
                 NodeKind::Script
                     | NodeKind::Exec
                     | NodeKind::Passthru
+                    | NodeKind::Html
                     | NodeKind::Text
                     | NodeKind::Tee
             )
@@ -489,13 +490,16 @@ impl ExecutionContext {
             NodeKind::Passthru => {
                 self.emit_started(&node.id);
                 if !initial_input.is_empty() {
-                    self.update_display(&node.id, initial_input.clone(), false);
                     self.emit_port_activity(&node.id, PortKind::Stdout, initial_input.len());
                     self.clone()
                         .forward_output(&node.id, PortKind::Stdout, initial_input)
                         .await?;
                 }
-                self.update_display(&node.id, Vec::new(), true);
+                self.emit_finished(&node.id, Some(0));
+                self.clone().complete_node(&node.id).await?;
+            }
+            NodeKind::Html => {
+                self.emit_started(&node.id);
                 self.emit_finished(&node.id, Some(0));
                 self.clone().complete_node(&node.id).await?;
             }
@@ -938,14 +942,31 @@ impl ExecutionContext {
                     self.emit_started(&target.id);
                 }
                 if !payload.is_empty() {
-                    self.update_display(&target.id, payload.clone(), false);
                     self.emit_port_activity(&target.id, PortKind::Stdout, payload.len());
                     self.clone()
                         .forward_output(&target.id, PortKind::Stdout, payload)
                         .await?;
                 }
                 if completed {
-                    self.update_display(&target.id, Vec::new(), true);
+                    self.emit_finished(&target.id, Some(0));
+                    self.clone().complete_node(&target.id).await?;
+                }
+            }
+            NodeKind::Html => {
+                let started = {
+                    let mut states = self.node_states.lock();
+                    let state = states.entry(target.id.clone()).or_default();
+                    if state.running {
+                        false
+                    } else {
+                        state.running = true;
+                        true
+                    }
+                };
+                if started {
+                    self.emit_started(&target.id);
+                }
+                if completed {
                     self.emit_finished(&target.id, Some(0));
                     self.clone().complete_node(&target.id).await?;
                 }
@@ -1109,15 +1130,6 @@ impl ExecutionContext {
             }
         }
         Ok(())
-    }
-
-    fn update_display(&self, node_id: &str, payload: Vec<u8>, completed: bool) {
-        let _ = self.broadcaster.send(ServerEvent::DisplayUpdate {
-            node_id: node_id.to_string(),
-            data_base64: BASE64.encode(payload),
-            timestamp: now_ms(),
-            completed,
-        });
     }
 
     fn emit_stream_chunk(&self, edge: &Edge, port: PortKind, payload: &[u8]) {

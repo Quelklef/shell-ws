@@ -116,6 +116,7 @@ pub enum NodeKind {
     File,
     #[serde(alias = "display")]
     Passthru,
+    Html,
     Text,
     Tee,
     MergeConcat,

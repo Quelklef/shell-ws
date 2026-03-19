@@ -746,3 +746,23 @@ textarea {
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
+
+.html-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 160px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(244, 236, 223, 0.08);
+  background: rgba(9, 11, 13, 0.42);
+}
+
+.html-frame {
+  width: 100%;
+  min-height: 180px;
+  flex: 1;
+  border: 0;
+  border-radius: 10px;
+  background: white;
+}

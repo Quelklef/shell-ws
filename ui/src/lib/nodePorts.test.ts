@@ -7,6 +7,7 @@ describe("node port affordances", () => {
     expect(nodePreviewTabs("text")).toEqual(["stdout", "stderr"]);
     expect(nodePreviewTabs("file")).toEqual(["stdout", "stderr"]);
     expect(nodePreviewTabs("passthru")).toEqual(["stdin", "stdout", "stderr"]);
+    expect(nodePreviewTabs("html")).toEqual(["stdin", "stdout", "stderr"]);
     expect(nodePreviewTabs("tee")).toEqual(["stdin", "stdout", "stderr"]);
     expect(nodePreviewTabs("merge_concat")).toEqual([
       "stdin",
@@ -20,6 +21,7 @@ describe("node port affordances", () => {
     expect(nodeHasInputPort("file")).toBe(false);
     expect(nodeHasInputPort("script")).toBe(true);
     expect(nodeHasInputPort("passthru")).toBe(true);
+    expect(nodeHasInputPort("html")).toBe(true);
   });
 
   it("adds argv ports only to command nodes", () => {

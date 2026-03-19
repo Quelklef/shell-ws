@@ -65,7 +65,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     title: "",
     comment: "",
     position: { x: 140 + count * 30, y: 140 + count * 24 },
-    size: { width: 320, height: 230 },
+    size: { width: 320, height: kind === "html" ? 300 : 230 },
     shell: "bash",
     script:
       kind === "script" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
@@ -110,6 +110,11 @@ function paletteGroups(): {
           kind: "passthru",
           label: "passthru",
           help: "Forward stdin to stdout with rich debug previews.",
+        },
+        {
+          kind: "html",
+          label: "html",
+          help: "Render stdin as sandboxed HTML in the browser.",
         },
       ],
     },
