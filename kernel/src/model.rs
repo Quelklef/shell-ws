@@ -36,7 +36,7 @@ impl Workspace {
                     script: None,
                     path: None,
                     args: None,
-                    text: Some("hello from shell-ws\n".to_string()),
+                    text: Some("".to_string()),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },

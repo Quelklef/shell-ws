@@ -96,7 +96,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
       kind === "script" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
     path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
-    text: kind === "text" ? "shell-ws\n" : null,
+    text: kind === "text" ? "" : null,
     autoRun: null,
   };
 }
