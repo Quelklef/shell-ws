@@ -177,6 +177,24 @@ struct ExecutionHandle {
     _task: JoinHandle<()>,
 }
 
+#[derive(Clone, Copy)]
+enum StreamingRootSeed {
+    Execute,
+    MaterializedOutputs,
+}
+
+#[derive(Clone)]
+struct StreamingRoot {
+    node_id: String,
+    seed: StreamingRootSeed,
+}
+
+struct StreamingExecutionPlan {
+    scope: HashSet<String>,
+    roots: Vec<StreamingRoot>,
+    blocked_nodes: HashSet<String>,
+}
+
 struct ExecutionContext {
     exec_id: String,
     workspace: Workspace,
@@ -188,7 +206,7 @@ struct ExecutionContext {
     incoming: HashMap<String, Vec<Edge>>,
     materialized_values: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
     execution_scope: Arc<Mutex<HashSet<String>>>,
-    pull_target: Arc<Mutex<Option<String>>>,
+    blocked_nodes: Arc<Mutex<HashSet<String>>>,
     edge_buffers: Arc<Mutex<HashMap<String, EdgeBufferState>>>,
     stream_states: Arc<Mutex<HashMap<String, StreamingNodeState>>>,
     live_inputs: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
@@ -268,7 +286,7 @@ impl ExecutionContext {
             incoming,
             materialized_values: Arc::new(Mutex::new(materialized_values)),
             execution_scope: Arc::new(Mutex::new(HashSet::new())),
-            pull_target: Arc::new(Mutex::new(None)),
+            blocked_nodes: Arc::new(Mutex::new(HashSet::new())),
             edge_buffers: Arc::new(Mutex::new(HashMap::new())),
             stream_states: Arc::new(Mutex::new(HashMap::new())),
             live_inputs: Arc::new(Mutex::new(HashMap::new())),
@@ -280,22 +298,23 @@ impl ExecutionContext {
         if !self.nodes.contains_key(&node_id) {
             return Err(format!("Node {node_id} does not exist"));
         }
-        match self.action {
-            ExecutionAction::PullInputs => self.clone().run_streaming_pull(node_id, false).await,
-            ExecutionAction::PullRun => self.clone().run_streaming_pull(node_id, true).await,
+        let plan = match self.action {
+            ExecutionAction::PullInputs => self.compute_streaming_pull_plan(&node_id, false)?,
+            ExecutionAction::PullRun => self.compute_streaming_pull_plan(&node_id, true)?,
             ExecutionAction::Rerun => {
                 self.ensure_rerunnable(&node_id)?;
-                self.clone().run_streaming_rerun(node_id).await
+                self.compute_streaming_rerun_plan(&node_id)
             }
             ExecutionAction::RerunPush => {
                 self.ensure_rerunnable(&node_id)?;
-                self.clone().run_streaming_push(node_id).await
+                self.compute_streaming_push_plan(&node_id)
             }
             ExecutionAction::Repush => {
                 self.ensure_repushable(&node_id)?;
-                self.clone().run_streaming_repush(node_id).await
+                self.compute_streaming_repush_plan(&node_id)
             }
-        }
+        };
+        self.clone().execute_streaming_plan(plan).await
     }
 
     fn workspace_cwd(&self) -> PathBuf {
@@ -394,26 +413,93 @@ impl ExecutionContext {
     }
 
 
-    async fn run_streaming_push(self: Arc<Self>, node_id: String) -> Result<(), String> {
-        *self.pull_target.lock() = None;
-        let scope = self.compute_forward_scope(&node_id);
-        self.init_streaming_scope(scope);
-        self.clone().start_streaming_root(node_id).await?;
-        self.wait_for_streaming_completion().await
+    fn compute_streaming_push_plan(&self, node_id: &str) -> StreamingExecutionPlan {
+        StreamingExecutionPlan {
+            scope: self.compute_forward_scope(node_id),
+            roots: vec![StreamingRoot {
+                node_id: node_id.to_string(),
+                seed: StreamingRootSeed::Execute,
+            }],
+            blocked_nodes: HashSet::new(),
+        }
     }
 
-    async fn run_streaming_rerun(self: Arc<Self>, node_id: String) -> Result<(), String> {
-        *self.pull_target.lock() = None;
-        self.init_streaming_scope(HashSet::from([node_id.clone()]));
-        self.clone().start_streaming_root(node_id).await?;
-        self.wait_for_streaming_completion().await
+    fn compute_streaming_rerun_plan(&self, node_id: &str) -> StreamingExecutionPlan {
+        StreamingExecutionPlan {
+            scope: HashSet::from([node_id.to_string()]),
+            roots: vec![StreamingRoot {
+                node_id: node_id.to_string(),
+                seed: StreamingRootSeed::Execute,
+            }],
+            blocked_nodes: HashSet::new(),
+        }
     }
 
-    async fn run_streaming_repush(self: Arc<Self>, node_id: String) -> Result<(), String> {
-        *self.pull_target.lock() = None;
-        let scope = self.compute_forward_scope(&node_id);
-        self.init_streaming_scope(scope);
-        self.clone().start_streaming_materialized_root(node_id).await?;
+    fn compute_streaming_repush_plan(&self, node_id: &str) -> StreamingExecutionPlan {
+        StreamingExecutionPlan {
+            scope: self.compute_forward_scope(node_id),
+            roots: vec![StreamingRoot {
+                node_id: node_id.to_string(),
+                seed: StreamingRootSeed::MaterializedOutputs,
+            }],
+            blocked_nodes: HashSet::new(),
+        }
+    }
+
+    fn compute_streaming_pull_plan(
+        &self,
+        target_node_id: &str,
+        run_target: bool,
+    ) -> Result<StreamingExecutionPlan, String> {
+        // Pull still runs through the forward executor; the only difference is that planning
+        // walks backward first to find the dependency closure and the roots that should seed it.
+        let scope = self.compute_backward_scope(target_node_id);
+        let root_ids = self.roots_in_scope(&scope);
+        let mut roots = root_ids
+            .iter()
+            .filter(|node_id| run_target || node_id.as_str() != target_node_id)
+            .cloned()
+            .map(|node_id| StreamingRoot {
+                node_id,
+                seed: StreamingRootSeed::Execute,
+            })
+            .collect::<Vec<_>>();
+        let blocked_nodes = if run_target {
+            HashSet::new()
+        } else {
+            HashSet::from([target_node_id.to_string()])
+        };
+
+        if roots.is_empty() {
+            if run_target && scope.contains(target_node_id) && root_ids.contains(&target_node_id.to_string()) {
+                roots.push(StreamingRoot {
+                    node_id: target_node_id.to_string(),
+                    seed: StreamingRootSeed::Execute,
+                });
+            } else if scope.len() > 1 {
+                return Err(format!("pull cycle detected at {target_node_id}"));
+            }
+        }
+
+        Ok(StreamingExecutionPlan {
+            scope,
+            roots,
+            blocked_nodes,
+        })
+    }
+
+    // Keep planning separate from execution so every action can share one forward engine.
+    // That makes scope/root derivation explicit and avoids action-specific control flow drift.
+    async fn execute_streaming_plan(self: Arc<Self>, plan: StreamingExecutionPlan) -> Result<(), String> {
+        self.init_streaming_plan(&plan);
+        for root in plan.roots {
+            match root.seed {
+                StreamingRootSeed::Execute => self.clone().start_streaming_root(root.node_id).await?,
+                StreamingRootSeed::MaterializedOutputs => {
+                    self.clone().start_streaming_materialized_root(root.node_id).await?
+                }
+            }
+        }
         self.wait_for_streaming_completion().await
     }
 
@@ -436,39 +522,10 @@ impl ExecutionContext {
         Ok(())
     }
 
-    async fn run_streaming_pull(self: Arc<Self>, target_node_id: String, run_target: bool) -> Result<(), String> {
-        let scope = self.compute_backward_scope(&target_node_id);
-        let mut roots = self.roots_in_scope(&scope);
-        *self.pull_target.lock() = Some(target_node_id.clone());
-
-        if !run_target {
-            roots.retain(|node_id| node_id != &target_node_id);
-        }
-
-        // Pull used to recurse per incoming path, which reran shared dependencies twice in
-        // diamond-shaped graphs. Using one run-scoped forward propagation engine keeps each
-        // node execution unique while still materializing inputs from the dependency roots.
-        self.init_streaming_scope(scope.clone());
-
-        if roots.is_empty() {
-            if run_target && scope.contains(&target_node_id) && self.roots_in_scope(&scope).contains(&target_node_id) {
-                self.clone().start_streaming_root(target_node_id).await?;
-            } else if scope.len() > 1 {
-                return Err(format!("pull cycle detected at {target_node_id}"));
-            }
-        } else {
-            for root in roots {
-                self.clone().start_streaming_root(root).await?;
-            }
-        }
-
-        self.wait_for_streaming_completion().await
-    }
-
-
-
-    fn init_streaming_scope(&self, reachable: HashSet<String>) {
-        *self.execution_scope.lock() = reachable.clone();
+    fn init_streaming_plan(&self, plan: &StreamingExecutionPlan) {
+        *self.execution_scope.lock() = plan.scope.clone();
+        *self.blocked_nodes.lock() = plan.blocked_nodes.clone();
+        let reachable = &plan.scope;
         self.edge_buffers.lock().clear();
         self.stream_states.lock().clear();
         self.live_inputs.lock().clear();
@@ -543,10 +600,7 @@ impl ExecutionContext {
 
 
     fn should_execute_node_in_scope(&self, node_id: &str) -> bool {
-        if self.action != ExecutionAction::PullInputs {
-            return true;
-        }
-        self.pull_target.lock().as_deref() != Some(node_id)
+        !self.blocked_nodes.lock().contains(node_id)
     }
 
     fn has_fresh_stdin_edge(&self, node_id: &str) -> bool {
