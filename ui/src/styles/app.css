@@ -331,12 +331,12 @@ textarea {
   background: rgba(9, 11, 13, 0.54);
   color: var(--text);
   border-radius: 12px;
-  padding: 8px 10px;
+  padding: 6px 9px;
   font-size: 12px;
 }
 
 .shell-input {
-  min-height: 42px;
+  min-height: 34px;
 }
 
 .script-editor {
