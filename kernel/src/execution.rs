@@ -178,20 +178,20 @@ struct ExecutionHandle {
 }
 
 #[derive(Clone, Copy)]
-enum StreamingRootSeed {
+enum StreamingSeedMode {
     Execute,
     MaterializedOutputs,
 }
 
 #[derive(Clone)]
-struct StreamingRoot {
+struct StreamingSeed {
     node_id: String,
-    seed: StreamingRootSeed,
+    seed: StreamingSeedMode,
 }
 
 struct StreamingExecutionPlan {
     scope: HashSet<String>,
-    roots: Vec<StreamingRoot>,
+    seeds: Vec<StreamingSeed>,
     blocked_nodes: HashSet<String>,
 }
 
@@ -416,9 +416,9 @@ impl ExecutionContext {
     fn compute_streaming_push_plan(&self, node_id: &str) -> StreamingExecutionPlan {
         StreamingExecutionPlan {
             scope: self.compute_forward_scope(node_id),
-            roots: vec![StreamingRoot {
+            seeds: vec![StreamingSeed {
                 node_id: node_id.to_string(),
-                seed: StreamingRootSeed::Execute,
+                seed: StreamingSeedMode::Execute,
             }],
             blocked_nodes: HashSet::new(),
         }
@@ -427,9 +427,9 @@ impl ExecutionContext {
     fn compute_streaming_rerun_plan(&self, node_id: &str) -> StreamingExecutionPlan {
         StreamingExecutionPlan {
             scope: HashSet::from([node_id.to_string()]),
-            roots: vec![StreamingRoot {
+            seeds: vec![StreamingSeed {
                 node_id: node_id.to_string(),
-                seed: StreamingRootSeed::Execute,
+                seed: StreamingSeedMode::Execute,
             }],
             blocked_nodes: HashSet::new(),
         }
@@ -438,9 +438,9 @@ impl ExecutionContext {
     fn compute_streaming_repush_plan(&self, node_id: &str) -> StreamingExecutionPlan {
         StreamingExecutionPlan {
             scope: self.compute_forward_scope(node_id),
-            roots: vec![StreamingRoot {
+            seeds: vec![StreamingSeed {
                 node_id: node_id.to_string(),
-                seed: StreamingRootSeed::MaterializedOutputs,
+                seed: StreamingSeedMode::MaterializedOutputs,
             }],
             blocked_nodes: HashSet::new(),
         }
@@ -452,16 +452,16 @@ impl ExecutionContext {
         run_target: bool,
     ) -> Result<StreamingExecutionPlan, String> {
         // Pull still runs through the forward executor; the only difference is that planning
-        // walks backward first to find the dependency closure and the roots that should seed it.
+        // walks backward first to find the dependency closure and the seed nodes that should start it.
         let scope = self.compute_backward_scope(target_node_id);
         let root_ids = self.roots_in_scope(&scope);
-        let mut roots = root_ids
+        let mut seeds = root_ids
             .iter()
             .filter(|node_id| run_target || node_id.as_str() != target_node_id)
             .cloned()
-            .map(|node_id| StreamingRoot {
+            .map(|node_id| StreamingSeed {
                 node_id,
-                seed: StreamingRootSeed::Execute,
+                seed: StreamingSeedMode::Execute,
             })
             .collect::<Vec<_>>();
         let blocked_nodes = if run_target {
@@ -470,11 +470,11 @@ impl ExecutionContext {
             HashSet::from([target_node_id.to_string()])
         };
 
-        if roots.is_empty() {
+        if seeds.is_empty() {
             if run_target && scope.contains(target_node_id) && root_ids.contains(&target_node_id.to_string()) {
-                roots.push(StreamingRoot {
+                seeds.push(StreamingSeed {
                     node_id: target_node_id.to_string(),
-                    seed: StreamingRootSeed::Execute,
+                    seed: StreamingSeedMode::Execute,
                 });
             } else if scope.len() > 1 {
                 return Err(format!("pull cycle detected at {target_node_id}"));
@@ -483,20 +483,20 @@ impl ExecutionContext {
 
         Ok(StreamingExecutionPlan {
             scope,
-            roots,
+            seeds,
             blocked_nodes,
         })
     }
 
     // Keep planning separate from execution so every action can share one forward engine.
-    // That makes scope/root derivation explicit and avoids action-specific control flow drift.
+    // That makes scope/seed derivation explicit and avoids action-specific control flow drift.
     async fn execute_streaming_plan(self: Arc<Self>, plan: StreamingExecutionPlan) -> Result<(), String> {
         self.init_streaming_plan(&plan);
-        for root in plan.roots {
-            match root.seed {
-                StreamingRootSeed::Execute => self.clone().start_streaming_root(root.node_id).await?,
-                StreamingRootSeed::MaterializedOutputs => {
-                    self.clone().start_streaming_materialized_root(root.node_id).await?
+        for seed in plan.seeds {
+            match seed.seed {
+                StreamingSeedMode::Execute => self.clone().start_streaming_root(seed.node_id).await?,
+                StreamingSeedMode::MaterializedOutputs => {
+                    self.clone().start_streaming_materialized_root(seed.node_id).await?
                 }
             }
         }
