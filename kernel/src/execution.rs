@@ -78,6 +78,8 @@ fn is_legacy_unslotted_argv_edge(edge: &Edge) -> bool {
     edge.to.port == PortKind::Argv && edge.to.slot.is_none()
 }
 
+const PROCESS_OUTPUT_READ_CHUNK_SIZE: usize = 1024;
+
 fn parse_argv_value(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes)
         .trim_end_matches(['\n', '\r'])
@@ -1451,7 +1453,7 @@ async fn read_worker_output<R>(
 ) where
     R: AsyncRead + Unpin + Send + 'static,
 {
-    let mut buffer = [0_u8; 1024];
+    let mut buffer = [0_u8; PROCESS_OUTPUT_READ_CHUNK_SIZE];
     loop {
         match reader.read(&mut buffer).await {
             Ok(0) => break,
