@@ -1325,7 +1325,15 @@ function WorkspaceCanvas() {
           }
         >
           <MiniMap pannable zoomable className="minimap" />
-          <Controls position="bottom-left">
+          <Controls position="bottom-left" showFitView={false}>
+            <ControlButton onClick={() => void flow.fitView()} title="fit view">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M8 4H4v4" />
+                <path d="M16 4h4v4" />
+                <path d="M20 16v4h-4" />
+                <path d="M4 16v4h4" />
+              </svg>
+            </ControlButton>
             <ControlButton onClick={() => void flow.zoomTo(1)} title="reset zoom">
               <span className="zoom-control-reset" aria-hidden="true">
                 <svg viewBox="0 0 24 24" focusable="false">

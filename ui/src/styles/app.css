@@ -811,6 +811,16 @@ textarea {
   stroke-linejoin: round;
 }
 
+.react-flow__controls-button svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .zoom-wheel-note {
   padding: 6px 8px;
   border: 1px solid rgba(244, 236, 223, 0.14);
