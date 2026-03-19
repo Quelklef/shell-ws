@@ -211,7 +211,10 @@ textarea {
 .node-palette button,
 .context-menu button,
 .node-toolbar button,
-.execution-item button {
+.execution-item button,
+.autorun-controls button,
+.exec-arg-add,
+.exec-arg-delete {
   border: 1px solid var(--line);
   color: var(--text);
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
@@ -227,7 +230,10 @@ textarea {
 .node-palette button:hover,
 .context-menu button:hover,
 .node-toolbar button:hover,
-.execution-item button:hover {
+.execution-item button:hover,
+.autorun-controls button:hover,
+.exec-arg-add:hover,
+.exec-arg-delete:hover {
   transform: translateY(-1px);
   border-color: var(--line-strong);
   background: rgba(240, 138, 93, 0.12);
