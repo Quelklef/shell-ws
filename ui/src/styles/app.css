@@ -215,6 +215,7 @@ textarea {
 .node-toolbar button,
 .execution-item button,
 .autorun-controls button,
+.ai-generate-shell button,
 .exec-arg-add,
 .exec-arg-delete {
   border: 1px solid var(--line);
@@ -234,6 +235,7 @@ textarea {
 .node-toolbar button:hover,
 .execution-item button:hover,
 .autorun-controls button:hover,
+.ai-generate-shell button:hover,
 .exec-arg-add:hover,
 .exec-arg-delete:hover {
   transform: translateY(-1px);
