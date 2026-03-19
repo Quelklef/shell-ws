@@ -126,7 +126,7 @@ textarea {
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.54);
   color: var(--text);
-  border-radius: 12px;
+  border-radius: 7px;
   padding: 8px 10px;
   font-size: 12px;
 }
@@ -149,7 +149,7 @@ textarea {
   gap: 8px;
   padding: 8px;
   border: 1px solid rgba(244, 236, 223, 0.12);
-  border-radius: 12px;
+  border-radius: 7px;
   background: rgba(9, 11, 13, 0.44);
 }
 
@@ -177,7 +177,7 @@ textarea {
   border: 1px solid rgba(222, 93, 93, 0.45);
   color: #f4c3c3;
   background: rgba(46, 18, 18, 0.88);
-  border-radius: 10px;
+  border-radius: 8px;
   padding: 6px 8px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -215,7 +215,7 @@ textarea {
   border: 1px solid var(--line);
   color: var(--text);
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
-  border-radius: 12px;
+  border-radius: 7px;
   padding: 8px 10px;
   cursor: pointer;
   transition:
@@ -242,7 +242,7 @@ textarea {
   right: 24px;
   bottom: 24px;
   padding: 12px 16px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(10, 11, 12, 0.94);
   border: 1px solid rgba(222, 93, 93, 0.34);
   box-shadow: var(--shadow);
@@ -252,7 +252,7 @@ textarea {
   position: absolute;
   z-index: 30;
   padding: 8px;
-  border-radius: 14px;
+  border-radius: 8px;
   background: rgba(12, 14, 16, 0.96);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
@@ -283,7 +283,7 @@ textarea {
   letter-spacing: 0.08em;
   font-size: 10px;
   padding: 6px 8px;
-  border-radius: 9px;
+  border-radius: 7px;
 }
 
 .node-toolbar button.is-live {
@@ -308,7 +308,7 @@ textarea {
 
 .node-card {
   font-size: 12px;
-  border-radius: 20px;
+  border-radius: 14px;
   border: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(242, 192, 120, 0.06), transparent 14%),
@@ -330,7 +330,7 @@ textarea {
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.54);
   color: var(--text);
-  border-radius: 12px;
+  border-radius: 7px;
   padding: 6px 9px;
   font-size: 12px;
 }
@@ -350,7 +350,7 @@ textarea {
   resize: vertical;
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.54);
-  border-radius: 12px;
+  border-radius: 7px;
   overflow: auto;
 }
 
@@ -443,7 +443,7 @@ textarea {
   flex-direction: column;
   gap: 6px;
   padding: 8px 10px;
-  border-radius: 12px;
+  border-radius: 7px;
   background: rgba(56, 41, 16, 0.3);
   border: 1px solid rgba(242, 192, 120, 0.2);
 }
@@ -471,7 +471,7 @@ textarea {
   flex-direction: column;
   gap: 8px;
   padding: 12px;
-  border-radius: 16px;
+  border-radius: 12px;
   background: rgba(9, 11, 13, 0.46);
   border: 1px solid rgba(244, 236, 223, 0.08);
   overflow: hidden;
@@ -513,7 +513,7 @@ textarea {
 .display-media {
   max-width: 100%;
   max-height: 240px;
-  border-radius: 10px;
+  border-radius: 8px;
 }
 
 .display-markdown {
@@ -624,7 +624,7 @@ textarea {
 
 .node-palette button {
   padding: 5px 7px;
-  border-radius: 9px;
+  border-radius: 7px;
   font-size: 11px;
   letter-spacing: 0.02em;
 }
@@ -738,7 +738,7 @@ textarea {
   max-height: 190px;
   overflow: auto;
   padding: 10px;
-  border-radius: 12px;
+  border-radius: 7px;
   background: rgba(9, 11, 13, 0.46);
   border: 1px solid rgba(244, 236, 223, 0.08);
 }
@@ -755,7 +755,7 @@ textarea {
   border: 1px solid var(--line);
   color: var(--text);
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
-  border-radius: 12px;
+  border-radius: 7px;
   padding: 8px 10px;
   cursor: pointer;
 }
@@ -769,7 +769,7 @@ textarea {
   margin-bottom: 48px;
   padding: 6px 8px;
   border: 1px solid rgba(244, 236, 223, 0.14);
-  border-radius: 10px;
+  border-radius: 8px;
   background: rgba(10, 11, 12, 0.86);
   color: var(--text-soft);
   font-size: 10px;
@@ -783,7 +783,7 @@ textarea {
   gap: 8px;
   min-height: 160px;
   padding: 10px;
-  border-radius: 12px;
+  border-radius: 7px;
   border: 1px solid rgba(244, 236, 223, 0.08);
   background: rgba(9, 11, 13, 0.42);
 }
@@ -793,7 +793,7 @@ textarea {
   min-height: 180px;
   flex: 1;
   border: 0;
-  border-radius: 10px;
+  border-radius: 8px;
   background: white;
 }
 
@@ -817,7 +817,7 @@ textarea {
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.54);
   color: var(--text);
-  border-radius: 12px;
+  border-radius: 7px;
   padding: 8px 10px;
   font-size: 12px;
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
