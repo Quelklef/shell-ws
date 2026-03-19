@@ -26,7 +26,17 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
     ...workspace,
     cwd: workspace.cwd ?? "",
     openaiApiKey: workspace.openaiApiKey ?? "",
-    nodes,
+    nodes: nodes.map((node) => ({
+      ...node,
+      uiState: node.uiState
+        ? {
+            ...node.uiState,
+            openPreviewTabs:
+              node.uiState.openPreviewTabs ??
+              (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []),
+          }
+        : node.uiState,
+    })),
     edges: workspace.edges.filter(
       (edge) =>
         !(edge.to.port === "argv" && edge.to.slot == null) &&

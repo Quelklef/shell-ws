@@ -88,13 +88,14 @@ function deserializeDisplayState(state?: PersistedDisplayState | null) {
 }
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {
+  const previewOpenByDefault = ["stdout"];
   return {
     id: encodeId(kind),
     kind,
     title: "",
     comment: "",
     position: { x: 140 + count * 30, y: 140 + count * 24 },
-    size: { width: 320, height: kind === "html" ? 300 : kind === "ai_script" ? 320 : 230 },
+    size: { width: 320, height: (kind === "html" ? 300 : kind === "ai_script" ? 320 : 230) + 156 },
     shell: "bash",
     script: kind === "script" ? "printf 'hello\n'" : kind === "ai_script" ? "" : null,
     description: kind === "ai_script" ? "" : null,
@@ -103,6 +104,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
     autoRun: null,
+    uiState: { openPreviewTabs: previewOpenByDefault },
   };
 }
 

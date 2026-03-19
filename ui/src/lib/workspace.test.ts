@@ -111,3 +111,29 @@ it("drops legacy removed node kinds and their edges", () => {
   expect(sanitized.nodes.map((node) => node.id)).toEqual(["x"]);
   expect(sanitized.edges).toEqual([]);
 });
+
+
+it("migrates legacy active preview tabs to open preview tab arrays", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    openaiApiKey: "",
+    nodes: [
+      {
+        id: "x",
+        kind: "text",
+        title: "",
+        comment: "",
+        position: { x: 0, y: 0 },
+        size: { width: 10, height: 10 },
+        uiState: { activePreviewTab: "stdout" },
+      },
+    ],
+    edges: [],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitized.nodes[0]?.uiState?.openPreviewTabs).toEqual(["stdout"]);
+});

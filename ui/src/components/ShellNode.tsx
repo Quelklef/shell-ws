@@ -102,7 +102,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
     mode: "push" as const,
     intervalMs: 1000,
   };
-  const activePreviewTab = model.uiState?.activePreviewTab ?? null;
+  const openPreviewTabs = model.uiState?.openPreviewTabs ?? (model.uiState?.activePreviewTab ? [model.uiState.activePreviewTab] : []);
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const descriptionEditorRef = useRef<HTMLTextAreaElement | null>(null);
@@ -112,19 +112,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
-  const activePreview = activePreviewTab
-    ? runtime.previews?.[activePreviewTab]
-    : undefined;
-  const renderedPreview = activePreviewTab
-    ? activePreview
-      ? renderDisplay(activePreview.bytes)
-      : {
-          label: activePreviewTab,
-          content: (
-            <div className="display-empty">no recent {activePreviewTab}</div>
-          ),
-        }
-    : null;
+  const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port));
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
 
@@ -529,53 +517,68 @@ export default function ShellNode({ data, selected }: NodeProps) {
 
         <div className="port-preview-shell">
           <div className="port-preview-tabs">
-            {previewTabs.map((port) => (
-              <button
-                key={port}
-                type="button"
-                className={`port-preview-tab nodrag nopan ${
-                  activePreviewTab === port ? "is-active" : ""
-                }`}
-                onClick={() => {
-                  const nextTab = activePreviewTab === port ? null : port;
-                  const opened = activePreviewTab == null && nextTab != null;
-                  const closed = activePreviewTab != null && nextTab == null;
-                  typedData.onUpdate(model.id, {
-                    uiState: {
-                      ...(model.uiState ?? {}),
-                      activePreviewTab: nextTab,
-                    },
-                    size:
-                      opened || closed
-                        ? {
-                            ...model.size,
-                            height: Math.max(
-                              160,
-                              model.size.height +
-                                (opened
-                                  ? PREVIEW_HEIGHT_DELTA
-                                  : -PREVIEW_HEIGHT_DELTA),
-                            ),
-                          }
-                        : model.size,
-                  });
-                }}
-              >
-                {port}
-              </button>
-            ))}
+            {previewTabs.map((port) => {
+              const isOpen = openPreviewTabs.includes(port);
+              const previewBytes = runtime.previews?.[port]?.bytes;
+              const hasData = Boolean(previewBytes && previewBytes.length > 0);
+              const portClass = port.startsWith("argv-") ? "argv" : port;
+              return (
+                <button
+                  key={port}
+                  type="button"
+                  className={`port-preview-tab port-preview-tab-${portClass} nodrag nopan ${
+                    isOpen ? "is-active" : ""
+                  } ${hasData ? "has-data" : ""}`}
+                  onClick={() => {
+                    const nextTabs = isOpen
+                      ? openPreviewTabs.filter((entry) => entry !== port)
+                      : [...openPreviewTabs, port];
+                    const openedCountDelta = nextTabs.length - openPreviewTabs.length;
+                    typedData.onUpdate(model.id, {
+                      uiState: {
+                        ...(model.uiState ?? {}),
+                        activePreviewTab: null,
+                        openPreviewTabs: nextTabs,
+                      },
+                      size:
+                        openedCountDelta !== 0
+                          ? {
+                              ...model.size,
+                              height: Math.max(
+                                160,
+                                model.size.height + PREVIEW_HEIGHT_DELTA * openedCountDelta,
+                              ),
+                            }
+                          : model.size,
+                    });
+                  }}
+                >
+                  {port}
+                </button>
+              );
+            })}
           </div>
-          {activePreviewTab && renderedPreview && (
-            <div
-              className="port-preview-pane nodrag nopan"
-              onWheelCapture={(event) => event.stopPropagation()}
-            >
-              <div className="display-label">
-                {activePreviewTab} · {renderedPreview.label}
+          {orderedOpenPreviewTabs.map((port) => {
+            const preview = runtime.previews?.[port];
+            const renderedPreview = preview
+              ? renderDisplay(preview.bytes)
+              : {
+                  label: port,
+                  content: <div className="display-empty">no recent {port}</div>,
+                };
+            return (
+              <div
+                key={port}
+                className="port-preview-pane nodrag nopan"
+                onWheelCapture={(event) => event.stopPropagation()}
+              >
+                <div className="display-label">
+                  {port} · {renderedPreview.label}
+                </div>
+                {renderedPreview.content}
               </div>
-              {renderedPreview.content}
-            </div>
-          )}
+            );
+          })}
         </div>
       </div>
     </div>

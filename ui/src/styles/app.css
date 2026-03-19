@@ -843,6 +843,30 @@ textarea {
   background: rgba(56, 41, 16, 0.7);
 }
 
+.port-preview-tab-stdin.has-data {
+  border-color: rgba(242, 192, 120, 0.42);
+  color: #f6ddb2;
+  background: rgba(56, 41, 16, 0.62);
+}
+
+.port-preview-tab-stdout.has-data {
+  border-color: rgba(143, 207, 158, 0.42);
+  color: #d7f4df;
+  background: rgba(21, 47, 28, 0.62);
+}
+
+.port-preview-tab-stderr.has-data {
+  border-color: rgba(222, 93, 93, 0.52);
+  color: #f4c3c3;
+  background: rgba(59, 21, 21, 0.72);
+}
+
+.port-preview-tab-argv.has-data {
+  border-color: rgba(120, 184, 242, 0.42);
+  color: #d4e9fb;
+  background: rgba(21, 36, 58, 0.62);
+}
+
 .port-preview-pane {
   min-height: 112px;
   max-height: 190px;

@@ -208,6 +208,8 @@ pub struct NodeUiState {
     #[serde(default)]
     pub active_preview_tab: Option<String>,
     #[serde(default)]
+    pub open_preview_tabs: Vec<String>,
+    #[serde(default)]
     pub show_auto_controls: bool,
     #[serde(default)]
     pub editor_heights: std::collections::HashMap<String, f64>,
