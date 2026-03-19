@@ -16,6 +16,11 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - Initialize and use git in this repo. Create frequent, meaningful commits.
 - Commit messages must use a short summary headline, with `WHAT:`, `WHY:`, and `HOW:` sections in the commit body.
 
+## Technical Pushback
+
+- If a request is impossible, contradictory, or disproportionately costly relative to its value, say so clearly and propose the closest viable alternative.
+- Do not force a brittle implementation just to satisfy the literal wording of the request.
+
 ## Architecture Notes
 
 - `ui/` contains the React client.
