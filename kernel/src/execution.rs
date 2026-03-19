@@ -188,7 +188,8 @@ struct ExecutionContext {
     incoming: HashMap<String, Vec<Edge>>,
     materialized_inputs: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
     materialized_outputs: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
-    push_reachable: Arc<Mutex<HashSet<String>>>,
+    execution_scope: Arc<Mutex<HashSet<String>>>,
+    pull_target: Arc<Mutex<Option<String>>>,
     edge_buffers: Arc<Mutex<HashMap<String, EdgeBufferState>>>,
     stream_states: Arc<Mutex<HashMap<String, StreamingNodeState>>>,
     live_inputs: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
@@ -273,7 +274,8 @@ impl ExecutionContext {
             incoming,
             materialized_inputs: Arc::new(Mutex::new(materialized_inputs)),
             materialized_outputs: Arc::new(Mutex::new(materialized_outputs)),
-            push_reachable: Arc::new(Mutex::new(HashSet::new())),
+            execution_scope: Arc::new(Mutex::new(HashSet::new())),
+            pull_target: Arc::new(Mutex::new(None)),
             edge_buffers: Arc::new(Mutex::new(HashMap::new())),
             stream_states: Arc::new(Mutex::new(HashMap::new())),
             live_inputs: Arc::new(Mutex::new(HashMap::new())),
@@ -286,11 +288,8 @@ impl ExecutionContext {
             return Err(format!("Node {node_id} does not exist"));
         }
         match self.action {
-            ExecutionAction::PullInputs => self.pull_inputs(node_id, Vec::new()).await,
-            ExecutionAction::PullRun => {
-                self.clone().pull_inputs(node_id.clone(), Vec::new()).await?;
-                self.clone().run_materialized_node(node_id).await.map(|_| ())
-            }
+            ExecutionAction::PullInputs => self.clone().run_streaming_pull(node_id, false).await,
+            ExecutionAction::PullRun => self.clone().run_streaming_pull(node_id, true).await,
             ExecutionAction::Rerun => {
                 self.ensure_rerunnable(&node_id)?;
                 self.run_materialized_node(node_id).await.map(|_| ())
@@ -408,7 +407,9 @@ impl ExecutionContext {
 
 
     async fn run_streaming_push(self: Arc<Self>, node_id: String) -> Result<(), String> {
-        self.init_streaming_push(&node_id);
+        *self.pull_target.lock() = None;
+        let scope = self.compute_forward_scope(&node_id);
+        self.init_streaming_scope(scope);
         self.clone().start_streaming_root(node_id).await?;
 
         loop {
@@ -429,9 +430,53 @@ impl ExecutionContext {
         Ok(())
     }
 
-    fn init_streaming_push(&self, start_node_id: &str) {
-        let reachable = self.compute_push_reachable(start_node_id);
-        *self.push_reachable.lock() = reachable.clone();
+
+    async fn run_streaming_pull(self: Arc<Self>, target_node_id: String, run_target: bool) -> Result<(), String> {
+        let scope = self.compute_backward_scope(&target_node_id);
+        let mut roots = self.roots_in_scope(&scope);
+        *self.pull_target.lock() = Some(target_node_id.clone());
+
+        if !run_target {
+            roots.retain(|node_id| node_id != &target_node_id);
+        }
+
+        // Pull used to recurse per incoming path, which reran shared dependencies twice in
+        // diamond-shaped graphs. Using one run-scoped forward propagation engine keeps each
+        // node execution unique while still materializing inputs from the dependency roots.
+        self.init_streaming_scope(scope.clone());
+
+        if roots.is_empty() {
+            if run_target && scope.contains(&target_node_id) && self.roots_in_scope(&scope).contains(&target_node_id) {
+                self.clone().start_streaming_root(target_node_id).await?;
+            } else if scope.len() > 1 {
+                return Err(format!("pull cycle detected at {target_node_id}"));
+            }
+        } else {
+            for root in roots {
+                self.clone().start_streaming_root(root).await?;
+            }
+        }
+
+        loop {
+            if self.cancel.is_cancelled() {
+                break;
+            }
+            let active = self
+                .stream_states
+                .lock()
+                .values()
+                .any(|state| state.running || state.scheduled);
+            if !active {
+                break;
+            }
+            sleep(Duration::from_millis(40)).await;
+        }
+
+        Ok(())
+    }
+
+    fn init_streaming_scope(&self, reachable: HashSet<String>) {
+        *self.execution_scope.lock() = reachable.clone();
         self.edge_buffers.lock().clear();
         self.stream_states.lock().clear();
         self.live_inputs.lock().clear();
@@ -452,7 +497,7 @@ impl ExecutionContext {
         }
     }
 
-    fn compute_push_reachable(&self, start_node_id: &str) -> HashSet<String> {
+    fn compute_forward_scope(&self, start_node_id: &str) -> HashSet<String> {
         let mut visited = HashSet::new();
         let mut queue = VecDeque::from([start_node_id.to_string()]);
         while let Some(node_id) = queue.pop_front() {
@@ -468,8 +513,48 @@ impl ExecutionContext {
         visited
     }
 
+
+    fn compute_backward_scope(&self, start_node_id: &str) -> HashSet<String> {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::from([start_node_id.to_string()]);
+        while let Some(node_id) = queue.pop_front() {
+            if !visited.insert(node_id.clone()) {
+                continue;
+            }
+            if let Some(edges) = self.incoming.get(&node_id) {
+                for edge in edges {
+                    queue.push_back(edge.from.node_id.clone());
+                }
+            }
+        }
+        visited
+    }
+
+    fn roots_in_scope(&self, scope: &HashSet<String>) -> Vec<String> {
+        let mut roots = scope
+            .iter()
+            .filter(|node_id| {
+                self.incoming
+                    .get(node_id.as_str())
+                    .map(|edges| !edges.iter().any(|edge| scope.contains(&edge.from.node_id)))
+                    .unwrap_or(true)
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots
+    }
+
     fn streaming_reachable_contains(&self, node_id: &str) -> bool {
-        self.push_reachable.lock().contains(node_id)
+        self.execution_scope.lock().contains(node_id)
+    }
+
+
+    fn should_execute_node_in_scope(&self, node_id: &str) -> bool {
+        if self.action != ExecutionAction::PullInputs {
+            return true;
+        }
+        self.pull_target.lock().as_deref() != Some(node_id)
     }
 
     fn has_fresh_stdin_edge(&self, node_id: &str) -> bool {
@@ -977,6 +1062,10 @@ impl ExecutionContext {
             }
         }
 
+        if !self.should_execute_node_in_scope(&target.id) {
+            return Ok(());
+        }
+
         match target.kind {
             NodeKind::Passthru => {
                 let started = {
@@ -1180,36 +1269,6 @@ impl ExecutionContext {
             success,
             timestamp: now_ms(),
         });
-    }
-
-    #[async_recursion]
-    async fn pull_inputs(self: Arc<Self>, node_id: String, path: Vec<String>) -> Result<(), String> {
-        if self.cancel.is_cancelled() {
-            return Ok(());
-        }
-        let incoming = self.connected_input_edges(&node_id);
-        let mut next_path = path;
-        next_path.push(node_id.clone());
-        for edge in incoming {
-            self.clone().pull_run_node(edge.from.node_id.clone(), next_path.clone()).await?;
-            self.clone().deliver_cached_output_to_input(&edge).await?;
-        }
-        Ok(())
-    }
-
-    #[async_recursion]
-    async fn pull_run_node(self: Arc<Self>, node_id: String, path: Vec<String>) -> Result<(), String> {
-        if self.cancel.is_cancelled() {
-            return Ok(());
-        }
-        if path.contains(&node_id) {
-            return Err(format!("pull cycle detected at {node_id}"));
-        }
-        let mut next_path = path;
-        next_path.push(node_id.clone());
-        self.clone().pull_inputs(node_id.clone(), next_path).await?;
-        self.run_materialized_node(node_id).await?;
-        Ok(())
     }
 
     async fn run_materialized_node(self: Arc<Self>, node_id: String) -> Result<Option<i32>, String> {
@@ -1418,15 +1477,6 @@ impl ExecutionContext {
             }
         }
         Ok(affected)
-    }
-
-    async fn deliver_cached_output_to_input(self: Arc<Self>, edge: &Edge) -> Result<(), String> {
-        let bytes = self
-            .node_materialized_outputs(&edge.from.node_id)
-            .get(output_key(edge.from.port))
-            .cloned()
-            .unwrap_or_default();
-        self.deliver_bytes_over_edge(edge, edge.from.port, bytes).await
     }
 
     async fn deliver_bytes_over_edge(
@@ -1818,6 +1868,90 @@ mod tests {
 
         let exec_id = manager.run(workspace, "script-1".to_string(), ExecutionAction::Rerun);
         assert_eq!(wait_for_finish(&mut rx, &exec_id, "script-1").await, Some(0));
+    }
+
+    #[tokio::test]
+    async fn pull_inputs_runs_shared_dependencies_once() {
+        let (tx, _) = broadcast::channel(256);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let mut source = node(NodeKind::Script, "source");
+        source.script = Some("printf 'hello\n'".to_string());
+        let passthru_a = node(NodeKind::Passthru, "pass-a");
+        let passthru_b = node(NodeKind::Passthru, "pass-b");
+        let mut target = node(NodeKind::Script, "target");
+        target.script = Some("cat >/dev/null".to_string());
+        let workspace = workspace(
+            vec![source, passthru_a, passthru_b, target],
+            vec![
+                edge("edge-source-a", "source", PortKind::Stdout, "pass-a", PortKind::Stdin, None),
+                edge("edge-source-b", "source", PortKind::Stdout, "pass-b", PortKind::Stdin, None),
+                edge("edge-a-target", "pass-a", PortKind::Stdout, "target", PortKind::Stdin, None),
+                edge("edge-b-target", "pass-b", PortKind::Stdout, "target", PortKind::Argv, Some(1)),
+            ],
+        );
+
+        let exec_id = manager.run(workspace, "target".to_string(), ExecutionAction::PullInputs);
+        let mut source_starts = 0;
+        timeout(Duration::from_secs(3), async {
+            loop {
+                match rx.recv().await {
+                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "source" => {
+                        source_starts += 1;
+                    }
+                    Ok(ServerEvent::ExecFinished { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "pass-b" => break,
+                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
+                    Ok(_) => {}
+                    Err(error) => panic!("event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("pull_inputs execution did not finish");
+
+        assert_eq!(source_starts, 1, "shared dependency should execute once per pull_inputs run");
+    }
+
+    #[tokio::test]
+    async fn pull_run_runs_shared_dependencies_once() {
+        let (tx, _) = broadcast::channel(256);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let mut source = node(NodeKind::Script, "source");
+        source.script = Some("printf 'hello\n'".to_string());
+        let passthru_a = node(NodeKind::Passthru, "pass-a");
+        let passthru_b = node(NodeKind::Passthru, "pass-b");
+        let mut target = node(NodeKind::Script, "target");
+        target.script = Some("printf '%s %s\n' \"$1\" \"$(cat)\"".to_string());
+        let workspace = workspace(
+            vec![source, passthru_a, passthru_b, target],
+            vec![
+                edge("edge-source-a", "source", PortKind::Stdout, "pass-a", PortKind::Stdin, None),
+                edge("edge-source-b", "source", PortKind::Stdout, "pass-b", PortKind::Stdin, None),
+                edge("edge-a-target", "pass-a", PortKind::Stdout, "target", PortKind::Stdin, None),
+                edge("edge-b-target", "pass-b", PortKind::Stdout, "target", PortKind::Argv, Some(1)),
+            ],
+        );
+
+        let exec_id = manager.run(workspace, "target".to_string(), ExecutionAction::PullRun);
+        let mut source_starts = 0;
+        timeout(Duration::from_secs(3), async {
+            loop {
+                match rx.recv().await {
+                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "source" => {
+                        source_starts += 1;
+                    }
+                    Ok(ServerEvent::ExecFinished { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "target" => break,
+                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
+                    Ok(_) => {}
+                    Err(error) => panic!("event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("pull_run execution did not finish");
+
+        assert_eq!(source_starts, 1, "shared dependency should execute once per pull_run");
     }
 
     #[tokio::test]
