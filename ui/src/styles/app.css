@@ -509,12 +509,11 @@ textarea {
   transition:
     background 120ms ease,
     box-shadow 120ms ease,
-    transform 120ms ease,
     border-color 120ms ease;
 }
 
 .shell-handle.is-active {
-  transform: scale(1.18);
+  transform: none;
 }
 
 .shell-handle-stdout {
