@@ -28,6 +28,13 @@ function AutoRunControls({
     <div className="autorun-shell">
       <div className="autorun-label">auto run</div>
       <div className="autorun-controls">
+        <button
+          type="button"
+          className={`nodrag nopan ${config.enabled ? "is-live" : ""}`}
+          onClick={() => onChange({ ...config, enabled: !config.enabled })}
+        >
+          {config.enabled ? "on" : "off"}
+        </button>
         <select
           className="nodrag nopan"
           value={config.mode}
@@ -391,19 +398,21 @@ export default function ShellNode({ data, selected }: NodeProps) {
           </button>
           <button
             type="button"
-            className={`nodrag nopan ${autoRun.enabled ? "is-live" : ""}`}
+            className={`nodrag nopan ${model.uiState?.showAutoControls ? "is-live" : ""}`}
             onClick={() =>
-              typedData.onToggleAutorun(model.id, {
-                ...autoRun,
-                enabled: !autoRun.enabled,
+              typedData.onUpdate(model.id, {
+                uiState: {
+                  ...(model.uiState ?? {}),
+                  showAutoControls: !model.uiState?.showAutoControls,
+                },
               })
             }
           >
-            {autoRun.enabled ? "auto on" : "auto"}
+            auto
           </button>
         </div>
 
-        {autoRun.enabled && (
+        {model.uiState?.showAutoControls && (
           <AutoRunControls
             config={autoRun}
             onChange={(next) => typedData.onToggleAutorun(model.id, next)}

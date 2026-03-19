@@ -24,6 +24,7 @@ export interface PersistedDisplayState {
 
 export interface NodeUiState {
   activePreviewTab?: string | null;
+  showAutoControls?: boolean;
   editorHeights?: Partial<Record<"script" | "args" | "text", number>>;
   previews?: Record<string, PersistedDisplayState>;
 }
