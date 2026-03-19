@@ -101,11 +101,6 @@ function paletteGroups(): {
           label: "exec",
           help: "Exec a binary path with one argument per line.",
         },
-        {
-          kind: "tee",
-          label: "tee",
-          help: "Duplicate stdin across multiple independent stdout ports.",
-        },
       ],
     },
     {
