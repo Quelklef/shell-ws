@@ -292,7 +292,7 @@ impl ExecutionContext {
             ExecutionAction::PullRun => self.clone().run_streaming_pull(node_id, true).await,
             ExecutionAction::Rerun => {
                 self.ensure_rerunnable(&node_id)?;
-                self.run_materialized_node(node_id).await.map(|_| ())
+                self.clone().run_streaming_rerun(node_id).await
             }
             ExecutionAction::RerunPush => {
                 self.ensure_rerunnable(&node_id)?;
@@ -300,8 +300,7 @@ impl ExecutionContext {
             }
             ExecutionAction::Repush => {
                 self.ensure_repushable(&node_id)?;
-                let mut visited = HashSet::new();
-                self.propagate_repush(node_id, &mut visited).await
+                self.clone().run_streaming_repush(node_id).await
             }
         }
     }
@@ -326,16 +325,6 @@ impl ExecutionContext {
 
     fn connected_input_edges(&self, node_id: &str) -> Vec<Edge> {
         self.incoming.get(node_id).cloned().unwrap_or_default()
-    }
-
-    fn outgoing_edges_for(&self, node_id: &str, port: PortKind) -> Vec<Edge> {
-        self.outgoing
-            .get(node_id)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|edge| edge.from.port == port)
-            .collect()
     }
 
     fn required_input_keys(&self, node_id: &str) -> Vec<String> {
@@ -411,7 +400,25 @@ impl ExecutionContext {
         let scope = self.compute_forward_scope(&node_id);
         self.init_streaming_scope(scope);
         self.clone().start_streaming_root(node_id).await?;
+        self.wait_for_streaming_completion().await
+    }
 
+    async fn run_streaming_rerun(self: Arc<Self>, node_id: String) -> Result<(), String> {
+        *self.pull_target.lock() = None;
+        self.init_streaming_scope(HashSet::from([node_id.clone()]));
+        self.clone().start_streaming_root(node_id).await?;
+        self.wait_for_streaming_completion().await
+    }
+
+    async fn run_streaming_repush(self: Arc<Self>, node_id: String) -> Result<(), String> {
+        *self.pull_target.lock() = None;
+        let scope = self.compute_forward_scope(&node_id);
+        self.init_streaming_scope(scope);
+        self.clone().start_streaming_materialized_root(node_id).await?;
+        self.wait_for_streaming_completion().await
+    }
+
+    async fn wait_for_streaming_completion(&self) -> Result<(), String> {
         loop {
             if self.cancel.is_cancelled() {
                 break;
@@ -429,7 +436,6 @@ impl ExecutionContext {
 
         Ok(())
     }
-
 
     async fn run_streaming_pull(self: Arc<Self>, target_node_id: String, run_target: bool) -> Result<(), String> {
         let scope = self.compute_backward_scope(&target_node_id);
@@ -457,23 +463,10 @@ impl ExecutionContext {
             }
         }
 
-        loop {
-            if self.cancel.is_cancelled() {
-                break;
-            }
-            let active = self
-                .stream_states
-                .lock()
-                .values()
-                .any(|state| state.running || state.scheduled);
-            if !active {
-                break;
-            }
-            sleep(Duration::from_millis(40)).await;
-        }
-
-        Ok(())
+        self.wait_for_streaming_completion().await
     }
+
+
 
     fn init_streaming_scope(&self, reachable: HashSet<String>) {
         *self.execution_scope.lock() = reachable.clone();
@@ -673,6 +666,24 @@ impl ExecutionContext {
                     .await
             }
         }
+    }
+
+
+    async fn start_streaming_materialized_root(self: Arc<Self>, node_id: String) -> Result<(), String> {
+        let node = self
+            .nodes
+            .get(&node_id)
+            .cloned()
+            .ok_or_else(|| format!("Unknown node {node_id}"))?;
+        self.begin_streaming_node(&node.id);
+        let outputs = self.node_materialized_outputs(&node.id);
+        for port in output_ports(&node.kind) {
+            let bytes = outputs.get(output_key(*port)).cloned().unwrap_or_default();
+            self.clone()
+                .forward_output_streaming(&node.id, *port, bytes)
+                .await?;
+        }
+        self.finish_streaming_node(&node.id, Some(0)).await
     }
 
     async fn run_streaming_text_node(self: Arc<Self>, node: Node) -> Result<(), String> {
@@ -1271,263 +1282,10 @@ impl ExecutionContext {
         });
     }
 
-    async fn run_materialized_node(self: Arc<Self>, node_id: String) -> Result<Option<i32>, String> {
-        if self.cancel.is_cancelled() {
-            return Ok(None);
-        }
-        let node = self.nodes.get(&node_id).cloned().ok_or_else(|| format!("Unknown node {node_id}"))?;
-        self.emit_started(&node.id);
-        let result = match node.kind {
-            NodeKind::Text => self.run_text_node(&node).await,
-            NodeKind::File => self.run_file_node(&node).await,
-            NodeKind::Passthru => self.run_passthru_node(&node).await,
-            NodeKind::Html => self.run_html_node(&node).await,
-            NodeKind::Script | NodeKind::AiScript => self.run_script_like_node(&node, true).await,
-            NodeKind::Exec => self.run_script_like_node(&node, false).await,
-        }?;
-        self.emit_finished(&node.id, result);
-        Ok(result)
-    }
-
-    async fn run_text_node(&self, node: &Node) -> Result<Option<i32>, String> {
-        let stdout = node.text.clone().unwrap_or_default().into_bytes();
-        self.replace_materialized_outputs(&node.id, vec![(PortKind::Stdout, stdout.clone())]);
-        self.emit_output_chunks(&node.id, PortKind::Stdout, &stdout);
-        Ok(Some(0))
-    }
-
-    async fn run_passthru_node(&self, node: &Node) -> Result<Option<i32>, String> {
-        let stdin = self.node_materialized_inputs(&node.id).remove("stdin").unwrap_or_default();
-        self.replace_materialized_outputs(&node.id, vec![(PortKind::Stdout, stdin.clone())]);
-        self.emit_output_chunks(&node.id, PortKind::Stdout, &stdin);
-        Ok(Some(0))
-    }
-
-    async fn run_html_node(&self, node: &Node) -> Result<Option<i32>, String> {
-        self.replace_materialized_outputs(&node.id, Vec::new());
-        Ok(Some(0))
-    }
-
-    async fn run_file_node(&self, node: &Node) -> Result<Option<i32>, String> {
-        let path = node
-            .path
-            .clone()
-            .filter(|value| !value.is_empty())
-            .ok_or_else(|| format!("{} is missing a file path", node_label(node)))?;
-        let resolved_path = self.resolve_workspace_path(&path);
-        match tokio::fs::read(&resolved_path).await {
-            Ok(stdout) => {
-                let stderr = Vec::new();
-                self.replace_materialized_outputs(
-                    &node.id,
-                    vec![
-                        (PortKind::Stdout, stdout.clone()),
-                        (PortKind::Stderr, stderr.clone()),
-                    ],
-                );
-                self.emit_output_chunks(&node.id, PortKind::Stdout, &stdout);
-                Ok(Some(0))
-            }
-            Err(error) => {
-                let stdout = Vec::new();
-                let stderr = format!("file {}: {error}\n", path).into_bytes();
-                self.replace_materialized_outputs(
-                    &node.id,
-                    vec![
-                        (PortKind::Stdout, stdout.clone()),
-                        (PortKind::Stderr, stderr.clone()),
-                    ],
-                );
-                self.emit_output_chunks(&node.id, PortKind::Stderr, &stderr);
-                Ok(Some(1))
-            }
-        }
-    }
-
-    async fn run_script_like_node(&self, node: &Node, shell_script: bool) -> Result<Option<i32>, String> {
-        let inputs = self.node_materialized_inputs(&node.id);
-        let stdin = if self.has_connected_stdin(&node.id) {
-            inputs.get("stdin").cloned().unwrap_or_default()
-        } else {
-            Vec::new()
-        };
-
-        let mut argv = Vec::new();
-        for edge in self.connected_input_edges(&node.id)
-            .into_iter()
-            .filter(|edge| edge.to.port == PortKind::Argv)
-        {
-            let key = input_key(PortKind::Argv, edge.to.slot);
-            let value = inputs.get(&key).cloned().unwrap_or_default();
-            argv.push((edge.to.slot.unwrap_or(1), parse_argv_value(&value)));
-        }
-        argv.sort_by_key(|(slot, _)| *slot);
-
-        let mut command = if shell_script {
-            let mut command = Command::new(node.shell_value());
-            command.arg("-c").arg(node.script.clone().unwrap_or_default()).arg("--");
-            for (_, arg) in argv {
-                command.arg(arg);
-            }
-            command
-        } else {
-            let path = node
-                .path
-                .clone()
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| format!("{} is missing a binary path", node_label(node)))?;
-            let mut command = Command::new(path);
-            for arg in node.args.clone().unwrap_or_default() {
-                command.arg(arg);
-            }
-            for (_, arg) in argv {
-                command.arg(arg);
-            }
-            command
-        };
-
-        command.current_dir(self.workspace_cwd());
-        command.stdin(Stdio::piped());
-        command.stdout(Stdio::piped());
-        command.stderr(Stdio::piped());
-        let mut child = command.spawn().map_err(|error| format!("Failed to spawn {}: {error}", node_label(node)))?;
-
-        if let Some(mut child_stdin) = child.stdin.take() {
-            let stdin_data = stdin.clone();
-            tokio::spawn(async move {
-                let _ = child_stdin.write_all(&stdin_data).await;
-                let _ = child_stdin.shutdown().await;
-            });
-        }
-
-        let stdout_reader = child.stdout.take().ok_or_else(|| format!("Failed to read stdout for {}", node_label(node)))?;
-        let stderr_reader = child.stderr.take().ok_or_else(|| format!("Failed to read stderr for {}", node_label(node)))?;
-
-        let stdout_task = tokio::spawn(read_output_stream(
-            self.broadcaster.clone(),
-            node.id.clone(),
-            PortKind::Stdout,
-            stdout_reader,
-        ));
-        let stderr_task = tokio::spawn(read_output_stream(
-            self.broadcaster.clone(),
-            node.id.clone(),
-            PortKind::Stderr,
-            stderr_reader,
-        ));
-
-        let status = tokio::select! {
-            _ = self.cancel.cancelled() => {
-                let _ = child.kill().await;
-                child.wait().await.ok();
-                None
-            }
-            status = child.wait() => Some(status.map_err(|error| format!("Failed while waiting for {}: {error}", node_label(node)))?),
-        };
-
-        let stdout = stdout_task.await.map_err(|error| error.to_string())?;
-        let stderr = stderr_task.await.map_err(|error| error.to_string())?;
-        self.replace_materialized_outputs(
-            &node.id,
-            vec![
-                (PortKind::Stdout, stdout.clone()),
-                (PortKind::Stderr, stderr.clone()),
-            ],
-        );
-        Ok(status.map(|value| value.code().unwrap_or_default()))
-    }
-
-    #[async_recursion]
-    async fn propagate_repush(
-        self: Arc<Self>,
-        node_id: String,
-        visited: &mut HashSet<String>,
-    ) -> Result<(), String> {
-        if self.cancel.is_cancelled() {
-            return Ok(());
-        }
-        if !visited.insert(node_id.clone()) {
-            return Ok(());
-        }
-        self.emit_started(&node_id);
-        let outputs = self.node_materialized_outputs(&node_id);
-        let node = self.nodes.get(&node_id).expect("node");
-        for port in output_ports(&node.kind) {
-            let bytes = outputs.get(output_key(*port)).cloned().unwrap_or_default();
-            self.emit_output_chunks(&node_id, *port, &bytes);
-        }
-        self.emit_finished(&node_id, Some(0));
-        let affected = self.clone().deliver_outputs_for_node(&node_id).await?;
-        for target_id in affected {
-            if self.can_repush_from_materialized(&target_id) {
-                self.clone().propagate_repush(target_id, visited).await?;
-            }
-        }
-        Ok(())
-    }
-
-    async fn deliver_outputs_for_node(self: Arc<Self>, node_id: &str) -> Result<HashSet<String>, String> {
-        let outputs = self.node_materialized_outputs(node_id);
-        let mut affected = HashSet::new();
-        for port in output_ports(&self.nodes.get(node_id).expect("node").kind) {
-            let bytes = outputs.get(output_key(*port)).cloned().unwrap_or_default();
-            for edge in self.outgoing_edges_for(node_id, *port) {
-                self.clone().deliver_bytes_over_edge(&edge, *port, bytes.clone()).await?;
-                affected.insert(edge.to.node_id.clone());
-            }
-        }
-        Ok(affected)
-    }
-
-    async fn deliver_bytes_over_edge(
-        self: Arc<Self>,
-        edge: &Edge,
-        from_port: PortKind,
-        bytes: Vec<u8>,
-    ) -> Result<(), String> {
-        if self.cancel.is_cancelled() {
-            return Ok(());
-        }
-        let chunks = chunk_for_edge(edge.buffering, &bytes);
-        for (index, chunk) in chunks.iter().enumerate() {
-            let _ = self.broadcaster.send(ServerEvent::StreamChunk {
-                edge_id: edge.id.clone(),
-                from_node_id: edge.from.node_id.clone(),
-                to_node_id: edge.to.node_id.clone(),
-                port: from_port,
-                data_base64: encode_bytes(chunk),
-                reset: index == 0,
-                completed: true,
-                success: true,
-                timestamp: now_ms(),
-            });
-            if !chunk.is_empty() {
-                self.emit_port_activity(&edge.to.node_id, edge.to.port, chunk.len());
-            }
-        }
-        self.set_materialized_input(&edge.to.node_id, &input_key(edge.to.port, edge.to.slot), bytes);
-        Ok(())
-    }
-
     fn has_connected_stdin(&self, node_id: &str) -> bool {
         self.connected_input_edges(node_id)
             .iter()
             .any(|edge| edge.to.port == PortKind::Stdin)
-    }
-
-    fn can_repush_from_materialized(&self, node_id: &str) -> bool {
-        let node = match self.nodes.get(node_id) {
-            Some(node) => node,
-            None => return false,
-        };
-        let required = output_ports(&node.kind);
-        if required.is_empty() {
-            return false;
-        }
-        let outputs = self.node_materialized_outputs(node_id);
-        required
-            .iter()
-            .all(|port| outputs.contains_key(output_key(*port)))
     }
 
     fn set_materialized_input(&self, node_id: &str, key: &str, bytes: Vec<u8>) {
@@ -1536,16 +1294,6 @@ impl ExecutionContext {
             .entry(node_id.to_string())
             .or_default()
             .insert(key.to_string(), bytes);
-    }
-
-    fn replace_materialized_outputs(&self, node_id: &str, outputs: Vec<(PortKind, Vec<u8>)>) {
-        let mut next = HashMap::new();
-        for (port, bytes) in outputs {
-            next.insert(output_key(port).to_string(), bytes);
-        }
-        self.materialized_outputs
-            .lock()
-            .insert(node_id.to_string(), next);
     }
 
     fn emit_started(&self, node_id: &str) {
@@ -1577,19 +1325,6 @@ impl ExecutionContext {
         });
     }
 
-    fn emit_output_chunks(&self, node_id: &str, port: PortKind, bytes: &[u8]) {
-        if bytes.is_empty() {
-            return;
-        }
-        self.emit_port_activity(node_id, port, bytes.len());
-        let _ = self.broadcaster.send(ServerEvent::NodeOutput {
-            node_id: node_id.to_string(),
-            port,
-            data_base64: encode_bytes(bytes),
-            reset: false,
-            timestamp: now_ms(),
-        });
-    }
 }
 
 
@@ -1660,46 +1395,6 @@ enum StdinMessage {
     Close,
 }
 
-async fn read_output_stream<R>(
-    broadcaster: broadcast::Sender<ServerEvent>,
-    node_id: String,
-    port: PortKind,
-    mut reader: R,
-) -> Vec<u8>
-where
-    R: AsyncRead + Unpin,
-{
-    let mut collected = Vec::new();
-    let mut buffer = [0_u8; 1024];
-    loop {
-        match reader.read(&mut buffer).await {
-            Ok(0) => break,
-            Ok(read) => {
-                let chunk = &buffer[..read];
-                collected.extend_from_slice(chunk);
-                let _ = broadcaster.send(ServerEvent::PortActivity {
-                    node_id: node_id.clone(),
-                    port,
-                    bytes: read,
-                    timestamp: now_ms(),
-                });
-                let _ = broadcaster.send(ServerEvent::NodeOutput {
-                    node_id: node_id.clone(),
-                    port,
-                    data_base64: encode_bytes(chunk),
-                    reset: false,
-                    timestamp: now_ms(),
-                });
-            }
-            Err(error) => {
-                error!("failed to read {:?} for {}: {}", port, node_id, error);
-                break;
-            }
-        }
-    }
-    collected
-}
-
 fn materialized_input_map(node: &Node) -> HashMap<String, Vec<u8>> {
     let mut values: HashMap<String, Vec<u8>> = node
         .materialized_inputs
@@ -1730,32 +1425,6 @@ fn materialized_output_map(node: &Node) -> HashMap<String, Vec<u8>> {
         }
     }
     values
-}
-
-fn chunk_for_edge(mode: BufferingMode, bytes: &[u8]) -> Vec<Vec<u8>> {
-    if bytes.is_empty() {
-        return vec![Vec::new()];
-    }
-    match mode {
-        BufferingMode::OnComplete | BufferingMode::Unbuffered => vec![bytes.to_vec()],
-        BufferingMode::LineOr1024 => {
-            let mut chunks = Vec::new();
-            let mut start = 0;
-            let mut index = 0;
-            while index < bytes.len() {
-                index += 1;
-                let boundary = bytes[index - 1] == b'\n' || index - start >= 1024;
-                if boundary {
-                    chunks.push(bytes[start..index].to_vec());
-                    start = index;
-                }
-            }
-            if start < bytes.len() {
-                chunks.push(bytes[start..].to_vec());
-            }
-            chunks
-        }
-    }
 }
 
 fn now_ms() -> u64 {
@@ -1843,12 +1512,6 @@ mod tests {
         })
         .await
         .expect("execution never completed")
-    }
-
-    #[test]
-    fn chunking_preserves_empty_values() {
-        let chunks = chunk_for_edge(BufferingMode::LineOr1024, b"");
-        assert_eq!(chunks, vec![Vec::<u8>::new()]);
     }
 
     #[tokio::test]
@@ -2119,6 +1782,66 @@ mod tests {
                 .cloned(),
             Some(b"old-input\n".to_vec())
         );
+    }
+
+    #[tokio::test]
+    async fn rerun_does_not_propagate_downstream() {
+        let (tx, _) = broadcast::channel(256);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let mut source = node(NodeKind::Script, "source");
+        source.script = Some("printf 'hello\n'".to_string());
+        source.materialized_inputs.insert(
+            "stdin".to_string(),
+            MaterializedValue {
+                data_base64: encode_bytes(b"input\n"),
+            },
+        );
+        let mut sink = node(NodeKind::Script, "sink");
+        sink.script = Some("cat >/dev/null".to_string());
+        let workspace = workspace(
+            vec![source, sink],
+            vec![edge("edge-1", "source", PortKind::Stdout, "sink", PortKind::Stdin, None)],
+        );
+
+        let exec_id = manager.run(workspace, "source".to_string(), ExecutionAction::Rerun);
+        assert_eq!(wait_for_finish(&mut rx, &exec_id, "source").await, Some(0));
+        let saw_sink = timeout(Duration::from_millis(300), async {
+            loop {
+                match rx.recv().await {
+                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "sink" => return true,
+                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
+                    Ok(_) => {}
+                    Err(_) => return false,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+        assert!(!saw_sink, "rerun should not propagate beyond the target node");
+    }
+
+    #[tokio::test]
+    async fn repush_recomputes_downstream_nodes() {
+        let (tx, _) = broadcast::channel(256);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let mut source = node(NodeKind::Text, "source");
+        source.materialized_outputs.insert(
+            "stdout".to_string(),
+            MaterializedValue {
+                data_base64: encode_bytes(b"cached\n"),
+            },
+        );
+        let mut sink = node(NodeKind::Script, "sink");
+        sink.script = Some("grep cached >/dev/null".to_string());
+        let workspace = workspace(
+            vec![source, sink],
+            vec![edge("edge-1", "source", PortKind::Stdout, "sink", PortKind::Stdin, None)],
+        );
+
+        let exec_id = manager.run(workspace, "source".to_string(), ExecutionAction::Repush);
+        assert_eq!(wait_for_finish(&mut rx, &exec_id, "sink").await, Some(0));
     }
 
     #[tokio::test]
