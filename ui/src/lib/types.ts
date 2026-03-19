@@ -4,7 +4,7 @@ export type NodeKind =
   | "script"
   | "exec"
   | "file"
-  | "display"
+  | "passthru"
   | "text"
   | "tee"
   | "merge_concat"

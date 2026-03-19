@@ -88,7 +88,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
     mode: "push" as const,
     intervalMs: 1000,
   };
-  const display = runtime.display ? renderDisplay(runtime.display.bytes) : null;
   const [activePreviewTab, setActivePreviewTab] = useState<PortKind | null>(
     null,
   );
@@ -152,7 +151,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "exec" ||
         model.kind === "file" ||
         model.kind === "text" ||
-        model.kind === "display" ||
+        model.kind === "passthru" ||
         model.kind.startsWith("merge_")) &&
         outputHandle("stdout", 84, "stdout", runtime.portActivity.stdout)}
       {model.kind === "tee" &&
@@ -293,18 +292,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
               typedData.onUpdate(model.id, { text: event.target.value })
             }
           />
-        )}
-
-        {model.kind === "display" && (
-          <div
-            className="display-pane nodrag nopan"
-            onWheelCapture={(event) => event.stopPropagation()}
-          >
-            <div className="display-label">{display?.label ?? "display"}</div>
-            {display?.content ?? (
-              <div className="display-empty">stdin is quiet</div>
-            )}
-          </div>
         )}
 
         <div className="node-toolbar">

@@ -40,8 +40,8 @@ impl Workspace {
                     auto_run: None,
                 },
                 Node {
-                    id: "display-1".to_string(),
-                    kind: NodeKind::Display,
+                    id: "passthru-1".to_string(),
+                    kind: NodeKind::Passthru,
                     title: "".to_string(),
                     comment: "".to_string(),
                     position: Position { x: 520.0, y: 120.0 },
@@ -65,7 +65,7 @@ impl Workspace {
                     slot: None,
                 },
                 to: PortRef {
-                    node_id: "display-1".to_string(),
+                    node_id: "passthru-1".to_string(),
                     port: PortKind::Stdin,
                     slot: None,
                 },
@@ -114,7 +114,8 @@ pub enum NodeKind {
     Exec,
     #[serde(alias = "cat")]
     File,
-    Display,
+    #[serde(alias = "display")]
+    Passthru,
     Text,
     Tee,
     MergeConcat,
@@ -313,6 +314,13 @@ mod tests {
         let kind: super::NodeKind =
             serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
         assert_eq!(kind, super::NodeKind::File);
+    }
+
+    #[test]
+    fn legacy_display_kind_deserializes_as_passthru() {
+        let kind: super::NodeKind =
+            serde_json::from_str("\"display\"").expect("deserialize legacy display kind");
+        assert_eq!(kind, super::NodeKind::Passthru);
     }
 
     #[test]

@@ -26,6 +26,28 @@ describe("sanitizeWorkspace", () => {
     expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("file");
   });
 
+  it("renames legacy display nodes to passthru nodes", () => {
+    const workspace = {
+      id: "w",
+      name: "w",
+      ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+      cwd: "",
+      nodes: [
+        {
+          id: "display-1",
+          kind: "display",
+          title: "",
+          comment: "",
+          position: { x: 0, y: 0 },
+          size: { width: 300, height: 200 },
+        },
+      ],
+      edges: [],
+    } as unknown as Workspace;
+
+    expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("passthru");
+  });
+
   it("drops legacy unslotted argv edges", () => {
     const workspace: Workspace = {
       id: "w",

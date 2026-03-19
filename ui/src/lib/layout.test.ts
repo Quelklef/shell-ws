@@ -29,7 +29,7 @@ describe("layoutSelectedNodes", () => {
         },
         {
           id: "c",
-          kind: "display",
+          kind: "passthru",
           title: "C",
           comment: "",
           position: { x: 0, y: 0 },

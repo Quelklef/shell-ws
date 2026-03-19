@@ -212,7 +212,7 @@ impl ExecutionContext {
                 node.kind,
                 NodeKind::Script
                     | NodeKind::Exec
-                    | NodeKind::Display
+                    | NodeKind::Passthru
                     | NodeKind::Text
                     | NodeKind::Tee
             )
@@ -486,7 +486,7 @@ impl ExecutionContext {
             NodeKind::File => {
                 self.clone().run_file_node(node).await?;
             }
-            NodeKind::Display => {
+            NodeKind::Passthru => {
                 self.emit_started(&node.id);
                 if !initial_input.is_empty() {
                     self.update_display(&node.id, initial_input.clone(), false);
@@ -923,7 +923,7 @@ impl ExecutionContext {
         }
 
         match target.kind {
-            NodeKind::Display => {
+            NodeKind::Passthru => {
                 let started = {
                     let mut states = self.node_states.lock();
                     let state = states.entry(target.id.clone()).or_default();
@@ -1556,7 +1556,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn display_nodes_forward_input_to_stdout() {
+    async fn passthru_nodes_forward_input_to_stdout() {
         let (tx, _) = broadcast::channel(64);
         let manager = ExecutionManager::new(tx.clone());
         let mut rx = tx.subscribe();
@@ -1584,8 +1584,8 @@ mod tests {
                     auto_run: None,
                 },
                 Node {
-                    id: "display-1".to_string(),
-                    kind: NodeKind::Display,
+                    id: "passthru-1".to_string(),
+                    kind: NodeKind::Passthru,
                     title: "".to_string(),
                     comment: "".to_string(),
                     position: Position { x: 240.0, y: 0.0 },
@@ -1627,7 +1627,7 @@ mod tests {
                         slot: None,
                     },
                     to: PortRef {
-                        node_id: "display-1".to_string(),
+                        node_id: "passthru-1".to_string(),
                         port: PortKind::Stdin,
                         slot: None,
                     },
@@ -1636,7 +1636,7 @@ mod tests {
                 Edge {
                     id: "edge-2".to_string(),
                     from: PortRef {
-                        node_id: "display-1".to_string(),
+                        node_id: "passthru-1".to_string(),
                         port: PortKind::Stdout,
                         slot: None,
                     },
@@ -1670,7 +1670,7 @@ mod tests {
         })
         .await;
 
-        assert!(finished.is_ok(), "display node did not forward downstream");
+        assert!(finished.is_ok(), "passthru node did not forward downstream");
     }
 
     #[tokio::test]

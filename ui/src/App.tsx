@@ -65,7 +65,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     title: "",
     comment: "",
     position: { x: 140 + count * 30, y: 140 + count * 24 },
-    size: { width: 320, height: kind === "display" ? 300 : 230 },
+    size: { width: 320, height: 230 },
     shell: "bash",
     script:
       kind === "script" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
@@ -132,9 +132,9 @@ function paletteGroups(): {
       label: "sinks",
       items: [
         {
-          kind: "display",
-          label: "display",
-          help: "Render stdin with rich format detection.",
+          kind: "passthru",
+          label: "passthru",
+          help: "Forward stdin to stdout with rich debug previews.",
         },
       ],
     },
@@ -621,7 +621,7 @@ function WorkspaceCanvas() {
                   running: true,
                   lastExecId: event.exec_id,
                   display:
-                    nodeKind === "display"
+                    nodeKind === "passthru"
                       ? { bytes: new Uint8Array(), completed: false }
                       : current[event.node_id]?.display,
                   previews: nodeKind

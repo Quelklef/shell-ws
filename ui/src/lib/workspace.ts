@@ -6,7 +6,12 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
     cwd: workspace.cwd ?? "",
     nodes: workspace.nodes.map((node) => ({
       ...node,
-      kind: node.kind === ("cat" as typeof node.kind) ? "file" : node.kind,
+      kind:
+        node.kind === ("cat" as typeof node.kind)
+          ? "file"
+          : node.kind === ("display" as typeof node.kind)
+            ? "passthru"
+            : node.kind,
     })),
     edges: workspace.edges.filter(
       (edge) => !(edge.to.port === "argv" && edge.to.slot == null),
