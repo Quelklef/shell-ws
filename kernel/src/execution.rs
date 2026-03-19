@@ -1801,9 +1801,7 @@ mod tests {
         }
 
         fn smoke_edge(id: &str, from: &str, to: &str) -> Edge {
-            let mut edge = edge(id, from, PortKind::Stdout, to, PortKind::Stdin, None);
-            edge.buffering = BufferingMode::Unbuffered;
-            edge
+            edge(id, from, PortKind::Stdout, to, PortKind::Stdin, None)
         }
 
         fn seed(node: &mut Node, key: &str, value: &str) {
