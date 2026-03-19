@@ -15,6 +15,8 @@ import type {
 } from "../lib/types";
 import { clamp } from "../lib/utils";
 
+const PREVIEW_HEIGHT_DELTA = 156;
+
 function AutoRunControls({
   config,
   onChange,
@@ -417,14 +419,30 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 className={`port-preview-tab nodrag nopan ${
                   activePreviewTab === port ? "is-active" : ""
                 }`}
-                onClick={() =>
+                onClick={() => {
+                  const nextTab = activePreviewTab === port ? null : port;
+                  const opened = activePreviewTab == null && nextTab != null;
+                  const closed = activePreviewTab != null && nextTab == null;
                   typedData.onUpdate(model.id, {
                     uiState: {
                       ...(model.uiState ?? {}),
-                      activePreviewTab: activePreviewTab === port ? null : port,
+                      activePreviewTab: nextTab,
                     },
-                  })
-                }
+                    size:
+                      opened || closed
+                        ? {
+                            ...model.size,
+                            height: Math.max(
+                              160,
+                              model.size.height +
+                                (opened
+                                  ? PREVIEW_HEIGHT_DELTA
+                                  : -PREVIEW_HEIGHT_DELTA),
+                            ),
+                          }
+                        : model.size,
+                  });
+                }}
               >
                 {port}
               </button>
