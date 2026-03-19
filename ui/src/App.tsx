@@ -104,26 +104,6 @@ function paletteGroups(): {
       ],
     },
     {
-      label: "merge",
-      items: [
-        {
-          kind: "merge_concat",
-          label: "concat",
-          help: "Concatenate all upstream inputs in order.",
-        },
-        {
-          kind: "merge_line",
-          label: "line",
-          help: "Interleave upstream inputs line by line.",
-        },
-        {
-          kind: "merge_byte",
-          label: "byte",
-          help: "Interleave upstream inputs byte by byte.",
-        },
-      ],
-    },
-    {
       label: "sinks",
       items: [
         {
