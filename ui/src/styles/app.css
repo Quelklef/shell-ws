@@ -394,19 +394,23 @@ textarea {
   z-index: 6;
 }
 
-.node-comment-floating textarea {
+.node-comment-floating textarea,
+.node-comment-display {
   width: 100%;
   min-height: 22px;
-  resize: none;
-  border: none;
-  outline: none;
-  box-shadow: none;
   background: transparent;
   color: var(--text);
   font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
   font-size: 17px;
-  font-weight: 700;
   line-height: 1.15;
+}
+
+.node-comment-floating textarea {
+  resize: none;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  font-weight: 700;
   padding: 0;
   overflow: hidden;
 }
@@ -417,6 +421,29 @@ textarea {
 }
 
 .node-comment-floating textarea::placeholder {
+  color: var(--text-soft);
+  font-style: italic;
+  font-weight: 400;
+}
+
+.node-comment-display {
+  cursor: text;
+}
+
+.node-comment-headline {
+  font-weight: 700;
+}
+
+.node-comment-body {
+  margin-top: 2px;
+  white-space: pre-wrap;
+  font-size: 13px;
+  line-height: 1.2;
+  font-weight: 400;
+  color: var(--text-soft);
+}
+
+.node-comment-placeholder {
   color: var(--text-soft);
   font-style: italic;
   font-weight: 400;

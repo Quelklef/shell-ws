@@ -3,7 +3,7 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { renderDisplay } from "../lib/format";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
@@ -106,6 +106,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
+  const [isEditingComment, setIsEditingComment] = useState(false);
   const nodeCardRef = useRef<HTMLDivElement | null>(null);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
@@ -123,7 +124,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
           ),
         }
     : null;
-
+  const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
+  const commentBody = commentBodyLines.join("\n").trim();
 
   const syncEditorHeight = (
     key: "script" | "args" | "text",
@@ -158,12 +160,25 @@ export default function ShellNode({ data, selected }: NodeProps) {
 
   useLayoutEffect(() => {
     const element = commentRef.current;
-    if (!element) {
+    if (!element || !isEditingComment) {
       return;
     }
     element.style.height = "0px";
     element.style.height = `${Math.max(22, element.scrollHeight)}px`;
-  }, [model.comment]);
+  }, [isEditingComment, model.comment]);
+
+  useEffect(() => {
+    if (!isEditingComment) {
+      return;
+    }
+    const element = commentRef.current;
+    if (!element) {
+      return;
+    }
+    element.focus();
+    const length = element.value.length;
+    element.setSelectionRange(length, length);
+  }, [isEditingComment]);
 
   return (
     <div
@@ -219,18 +234,49 @@ export default function ShellNode({ data, selected }: NodeProps) {
         outputHandle("stderr", STDERR_PORT_TOP, "stderr", runtime.portActivity.stderr)}
 
       <div className="node-comment-floating">
-        <textarea
-          ref={commentRef}
-          className="nodrag nopan"
-          value={model.comment}
-          placeholder="Add a comment"
-          onWheelCapture={(event) => event.stopPropagation()}
-          onChange={(event) =>
-            typedData.onUpdate(model.id, {
-              comment: event.target.value,
-            })
-          }
-        />
+        {isEditingComment ? (
+          <textarea
+            ref={commentRef}
+            className="nodrag nopan"
+            value={model.comment}
+            placeholder="Add a comment"
+            onWheelCapture={(event) => event.stopPropagation()}
+            onBlur={() => setIsEditingComment(false)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                setIsEditingComment(false);
+              }
+            }}
+            onChange={(event) =>
+              typedData.onUpdate(model.id, {
+                comment: event.target.value,
+              })
+            }
+          />
+        ) : (
+          <div
+            className={`node-comment-display nodrag nopan ${model.comment.trim() ? "has-comment" : "is-empty"}`}
+            role="button"
+            tabIndex={0}
+            onClick={() => setIsEditingComment(true)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                setIsEditingComment(true);
+              }
+            }}
+          >
+            {model.comment.trim() ? (
+              <>
+                <div className="node-comment-headline">{commentHeadline}</div>
+                {commentBody && <div className="node-comment-body">{commentBody}</div>}
+              </>
+            ) : (
+              <div className="node-comment-placeholder">Add a comment</div>
+            )}
+          </div>
+        )}
       </div>
 
       <div ref={nodeCardRef} className="node-card">
