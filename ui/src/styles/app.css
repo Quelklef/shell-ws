@@ -539,7 +539,7 @@ textarea {
 }
 
 .shell-handle {
-  position: relative;
+  position: absolute;
   width: 13px;
   height: 13px;
   background: #1e2327;
