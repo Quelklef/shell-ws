@@ -16,7 +16,7 @@ import type {
 import { clamp } from "../lib/utils";
 
 const PREVIEW_HEIGHT_DELTA = 156;
-const PORT_SPACING = 36;
+const PORT_SPACING = 30;
 const STDOUT_PORT_TOP = 84;
 const STDERR_PORT_TOP = STDOUT_PORT_TOP + PORT_SPACING;
 const STDIN_PORT_TOP = 96;
