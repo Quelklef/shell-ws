@@ -99,7 +99,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
   };
   const activePreviewTab = model.uiState?.activePreviewTab ?? null;
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
-  const argsEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const nodeCardRef = useRef<HTMLDivElement | null>(null);
@@ -151,55 +150,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
     observer.observe(element);
     return () => observer.disconnect();
   });
-
-  useEffect(() => {
-    const element = argsEditorRef.current;
-    if (!element) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      syncEditorHeight("args", element.getBoundingClientRect().height);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  });
-
-  useLayoutEffect(() => {
-    const element = nodeCardRef.current;
-    if (!element) {
-      return;
-    }
-    const measuredHeight = element.scrollHeight + 2;
-    if (measuredHeight > model.size.height + 1) {
-      typedData.onUpdate(model.id, {
-        size: {
-          ...model.size,
-          height: measuredHeight,
-        },
-      });
-    }
-  }, [
-    activePreviewTab,
-    autoRun.enabled,
-    htmlContent,
-    model.args,
-    model.comment,
-    model.kind,
-    model.path,
-    model.script,
-    model.size,
-    model.text,
-    renderedPreview,
-  ]);
-
-  useLayoutEffect(() => {
-    const element = commentRef.current;
-    if (!element) {
-      return;
-    }
-    element.style.height = "0px";
-    element.style.height = `${element.scrollHeight}px`;
-  }, [model.comment]);
 
   useEffect(() => {
     const element = textEditorRef.current;
@@ -355,22 +305,45 @@ export default function ShellNode({ data, selected }: NodeProps) {
               }
               placeholder="binary path"
             />
-            <textarea
-              ref={argsEditorRef}
-              className="script-editor nodrag nopan"
-              style={{ height: model.uiState?.editorHeights?.args }}
-              value={(model.args ?? []).join("\n")}
-              placeholder="arguments, one per line"
-              onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) =>
-                typedData.onUpdate(model.id, {
-                  args: event.target.value
-                    .split("\n")
-                    .map((value) => value.trim())
-                    .filter(Boolean),
-                })
-              }
-            />
+            <div className="exec-args-shell">
+              {(model.args ?? []).map((arg, index) => (
+                <div key={`${model.id}-arg-${index}`} className="exec-arg-row">
+                  <textarea
+                    className="exec-arg-editor nodrag nopan"
+                    value={arg}
+                    placeholder={`arg ${index + 1}`}
+                    onWheelCapture={(event) => event.stopPropagation()}
+                    onChange={(event) => {
+                      const nextArgs = [...(model.args ?? [])];
+                      nextArgs[index] = event.target.value;
+                      typedData.onUpdate(model.id, { args: nextArgs });
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="nodrag nopan exec-arg-delete"
+                    onClick={() => {
+                      const nextArgs = [...(model.args ?? [])];
+                      nextArgs.splice(index, 1);
+                      typedData.onUpdate(model.id, { args: nextArgs });
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                type="button"
+                className="nodrag nopan exec-arg-add"
+                onClick={() =>
+                  typedData.onUpdate(model.id, {
+                    args: [...(model.args ?? []), ""],
+                  })
+                }
+              >
+                add arg
+              </button>
+            </div>
           </>
         )}
 

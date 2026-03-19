@@ -796,3 +796,38 @@ textarea {
   border-radius: 10px;
   background: white;
 }
+
+.exec-args-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.exec-arg-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: start;
+}
+
+.exec-arg-editor {
+  width: 100%;
+  min-height: 42px;
+  resize: vertical;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.54);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+}
+
+.exec-arg-add,
+.exec-arg-delete {
+  align-self: start;
+}
+
+.exec-arg-delete {
+  min-width: 30px;
+}
