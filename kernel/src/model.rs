@@ -8,6 +8,8 @@ pub struct Workspace {
     #[serde(default = "default_cwd")]
     pub cwd: String,
     #[serde(default)]
+    pub openai_api_key: Option<String>,
+    #[serde(default)]
     pub nodes: Vec<Node>,
     #[serde(default)]
     pub edges: Vec<Edge>,
@@ -21,6 +23,7 @@ impl Workspace {
             id: "default".to_string(),
             name: "Shell WS".to_string(),
             cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -34,6 +37,8 @@ impl Workspace {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: Some("".to_string()),
@@ -52,6 +57,8 @@ impl Workspace {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: None,
@@ -93,6 +100,10 @@ pub struct Node {
     #[serde(default)]
     pub script: Option<String>,
     #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub include_sample_inputs: Option<bool>,
+    #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
     pub args: Option<Vec<String>>,
@@ -115,6 +126,7 @@ impl Node {
 pub enum NodeKind {
     #[serde(alias = "process")]
     Script,
+    AiScript,
     Exec,
     #[serde(alias = "cat")]
     File,
@@ -413,6 +425,7 @@ mod tests {
         .expect("deserialize workspace with default cwd");
 
         assert_eq!(workspace.cwd, default_cwd());
+        assert_eq!(workspace.openai_api_key.unwrap_or_default(), "");
     }
 
     #[test]

@@ -34,7 +34,7 @@ fn node_label(node: &Node) -> &str {
 }
 
 fn node_accepts_argv(kind: &NodeKind) -> bool {
-    matches!(kind, NodeKind::Script | NodeKind::Exec)
+    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec)
 }
 
 fn is_legacy_unslotted_argv_edge(edge: &Edge) -> bool {
@@ -210,6 +210,7 @@ impl ExecutionContext {
             matches!(
                 node.kind,
                 NodeKind::Script
+                    | NodeKind::AiScript
                     | NodeKind::Exec
                     | NodeKind::Passthru
                     | NodeKind::Html
@@ -510,7 +511,7 @@ impl ExecutionContext {
                 self.emit_finished(&node.id, Some(0));
                 self.clone().complete_node(&node.id).await?;
             }
-            NodeKind::Script => {
+            NodeKind::Script | NodeKind::AiScript => {
                 if self.has_allowed_incoming_port(&node.id, PortKind::Argv)
                     && !self.argv_inputs_ready(&node.id)
                 {
@@ -866,7 +867,7 @@ impl ExecutionContext {
                     self.clone().complete_node(&target.id).await?;
                 }
             }
-            NodeKind::Script | NodeKind::Exec => match edge.to.port {
+            NodeKind::Script | NodeKind::AiScript | NodeKind::Exec => match edge.to.port {
                 PortKind::Argv => {
                     {
                         let mut states = self.node_states.lock();
@@ -1133,6 +1134,7 @@ mod tests {
             id: "test".to_string(),
             name: "test".to_string(),
             cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -1146,6 +1148,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: Some(
@@ -1168,6 +1172,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: Some("true".to_string()),
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: None,
@@ -1226,6 +1232,7 @@ mod tests {
             id: "test".to_string(),
             name: "test".to_string(),
             cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -1239,6 +1246,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: Some(
@@ -1261,6 +1270,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: Some(
@@ -1283,6 +1294,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: Some(r#"test "$1" = hello && test "$2" = world"#.to_string()),
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: None,
@@ -1352,6 +1365,61 @@ mod tests {
     }
 
     #[tokio::test]
+        async fn ai_script_nodes_execute_like_script() {
+        let (tx, _) = broadcast::channel(64);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let workspace = Workspace {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
+            nodes: vec![Node {
+                id: "ai-script-1".to_string(),
+                kind: NodeKind::AiScript,
+                title: "".to_string(),
+                comment: "".to_string(),
+                position: Position { x: 0.0, y: 0.0 },
+                size: Size {
+                    width: 200.0,
+                    height: 120.0,
+                },
+                shell: Some("bash".to_string()),
+                script: Some("printf 'ok'".to_string()),
+                description: Some("print ok".to_string()),
+                include_sample_inputs: Some(false),
+                path: None,
+                args: None,
+                text: None,
+                auto_run: None,
+                ui_state: Default::default(),
+            }],
+            edges: vec![],
+            ui: WorkspaceUi::default(),
+        };
+
+        let exec_id = manager.run(workspace, "ai-script-1".to_string(), ExecutionMode::Push);
+        let exit_code = tokio::time::timeout(Duration::from_secs(2), async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen_exec_id,
+                        node_id,
+                        exit_code,
+                        ..
+                    }) if seen_exec_id == exec_id && node_id == "ai-script-1" => return exit_code,
+                    Ok(_) => continue,
+                    Err(error) => panic!("execution event stream closed unexpectedly: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("ai_script node never completed");
+
+        assert_eq!(exit_code, Some(0));
+    }
+
+    #[tokio::test]
     async fn script_nodes_run_in_workspace_cwd() {
         let temp_dir = tempfile::tempdir().expect("tempdir");
         let cwd = temp_dir.path().to_string_lossy().to_string();
@@ -1362,6 +1430,7 @@ mod tests {
             id: "test".to_string(),
             name: "test".to_string(),
             cwd: cwd.clone(),
+            openai_api_key: Some(String::new()),
             nodes: vec![Node {
                 id: "script-1".to_string(),
                 kind: NodeKind::Script,
@@ -1374,6 +1443,8 @@ mod tests {
                 },
                 shell: Some("bash".to_string()),
                 script: Some(format!(r#"test "$(pwd)" = "{}""#, cwd)),
+                description: None,
+                include_sample_inputs: None,
                 path: None,
                 args: None,
                 text: None,
@@ -1417,6 +1488,7 @@ mod tests {
             id: "test".to_string(),
             name: "test".to_string(),
             cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -1430,6 +1502,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: Some(
@@ -1452,6 +1526,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: None,
@@ -1470,6 +1546,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: Some("grep h >/dev/null; echo done >&2".to_string()),
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: None,
@@ -1541,6 +1619,7 @@ mod tests {
             id: "test".to_string(),
             name: "test".to_string(),
             cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
             nodes: vec![
                 Node {
                     id: "text-1".to_string(),
@@ -1554,6 +1633,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: None,
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: Some(
@@ -1576,6 +1657,8 @@ mod tests {
                     },
                     shell: Some("bash".to_string()),
                     script: Some("grep h >/dev/null; echo done >&2".to_string()),
+                    description: None,
+                    include_sample_inputs: None,
                     path: None,
                     args: None,
                     text: None,
@@ -1631,6 +1714,7 @@ mod tests {
             id: "test".to_string(),
             name: "test".to_string(),
             cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
             nodes: vec![Node {
                 id: "text-1".to_string(),
                 kind: NodeKind::Text,
@@ -1643,6 +1727,8 @@ mod tests {
                 },
                 shell: Some("bash".to_string()),
                 script: None,
+                    description: None,
+                    include_sample_inputs: None,
                 path: None,
                 args: None,
                 text: Some(

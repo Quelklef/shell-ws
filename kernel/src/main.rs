@@ -1,5 +1,6 @@
 mod execution;
 mod model;
+mod openai;
 mod workspace_store;
 
 use std::{net::SocketAddr, process::Stdio};
@@ -17,6 +18,7 @@ use axum::{
 use execution::ExecutionManager;
 use futures::{sink::SinkExt, stream::StreamExt};
 use model::{ClientEvent, ServerEvent, Workspace};
+use openai::{generate_script, GenerateScriptRequest, GenerateScriptResponse};
 use tokio::sync::broadcast;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{error, info};
@@ -28,6 +30,7 @@ struct AppState {
     store: WorkspaceStore,
     execution: ExecutionManager,
     broadcaster: broadcast::Sender<ServerEvent>,
+    openai_client: reqwest::Client,
 }
 
 #[tokio::main]
@@ -44,10 +47,14 @@ async fn main() {
         .expect("workspace store");
     let (broadcaster, _) = broadcast::channel(512);
     let execution = ExecutionManager::new(broadcaster.clone());
+    let openai_client = reqwest::Client::builder()
+        .build()
+        .expect("openai http client");
     let state = AppState {
         store,
         execution,
         broadcaster,
+        openai_client,
     };
 
     let app = Router::new()
@@ -63,6 +70,7 @@ async fn main() {
                 .delete(delete_workspace),
         )
         .route("/api/pick-file", post(pick_file))
+        .route("/api/generate-script", post(generate_script_handler))
         .route("/ws", get(ws_handler))
         .fallback_service(ServeDir::new("ui/dist").append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
@@ -132,6 +140,17 @@ async fn pick_file() -> Result<Json<PickedPath>, AppError> {
     Ok(Json(PickedPath {
         path: pick_file_path().await?,
     }))
+}
+
+async fn generate_script_handler(
+    State(state): State<AppState>,
+    Json(request): Json<GenerateScriptRequest>,
+) -> Result<Json<GenerateScriptResponse>, AppError> {
+    Ok(Json(
+        generate_script(&state.openai_client, request)
+            .await
+            .map_err(AppError::Message)?,
+    ))
 }
 
 async fn pick_file_path() -> Result<String, AppError> {
