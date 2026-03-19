@@ -320,6 +320,7 @@ textarea {
 .script-editor,
 .display-code {
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
+  cursor: pointer;
 }
 
 .shell-input,
@@ -355,6 +356,7 @@ textarea {
 }
 
 .script-editor-codemirror .cm-editor {
+  cursor: pointer;
   height: 100%;
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   font-size: 12px;
@@ -836,6 +838,7 @@ textarea {
 }
 
 .exec-arg-editor {
+  cursor: pointer;
   width: 100%;
   min-height: 42px;
   resize: vertical;
