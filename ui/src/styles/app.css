@@ -355,13 +355,20 @@ textarea {
 }
 
 .script-editor-codemirror .cm-editor {
+  height: 100%;
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   font-size: 12px;
   background: transparent;
 }
 
 .script-editor-codemirror .cm-scroller {
+  height: 100%;
   font-family: inherit;
+}
+
+.script-editor-codemirror .cm-content,
+.script-editor-codemirror .cm-lineWrapping {
+  min-height: 100%;
 }
 
 .script-editor-codemirror .cm-gutters {
