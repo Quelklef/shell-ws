@@ -81,19 +81,11 @@ function looksLikeCsv(text: string) {
 
 function renderCsvTable(text: string) {
   const rows = parseCsv(text.trim());
-  const [header, ...body] = rows;
   return (
     <div className="display-table-shell">
       <table className="display-table">
-        <thead>
-          <tr>
-            {header.map((cell, index) => (
-              <th key={`header-${index}`}>{cell}</th>
-            ))}
-          </tr>
-        </thead>
         <tbody>
-          {body.map((row, rowIndex) => (
+          {rows.map((row, rowIndex) => (
             <tr key={`row-${rowIndex}`}>
               {row.map((cell, cellIndex) => (
                 <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>

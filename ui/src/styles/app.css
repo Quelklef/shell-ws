@@ -576,26 +576,12 @@ textarea {
   line-height: 1.35;
 }
 
-.display-table th,
 .display-table td {
   padding: 6px 8px;
   border: 1px solid rgba(244, 236, 223, 0.12);
   text-align: left;
   vertical-align: top;
   white-space: pre-wrap;
-}
-
-.display-table th {
-  position: sticky;
-  top: 0;
-  background: rgba(22, 25, 28, 0.96);
-  color: var(--accent-soft);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-size: 10px;
-}
-
-.display-table td {
   color: var(--text);
 }
 
