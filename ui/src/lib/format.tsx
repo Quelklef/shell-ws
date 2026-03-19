@@ -15,6 +15,99 @@ function looksLikeMarkdown(text: string) {
   return /(^# |\n# |\n- |\n\* |\n```)/.test(text);
 }
 
+function parseCsv(text: string) {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    const next = text[index + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        cell += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (!inQuotes && char === ',') {
+      row.push(cell);
+      cell = "";
+      continue;
+    }
+
+    if (!inQuotes && (char === "
+" || char === "")) {
+      if (char === "" && next === "
+") {
+        index += 1;
+      }
+      row.push(cell);
+      rows.push(row);
+      row = [];
+      cell = "";
+      continue;
+    }
+
+    cell += char;
+  }
+
+  if (cell.length > 0 || row.length > 0) {
+    row.push(cell);
+    rows.push(row);
+  }
+
+  return rows;
+}
+
+function looksLikeCsv(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.includes("	")) {
+    return false;
+  }
+  const rows = parseCsv(trimmed);
+  if (rows.length < 2) {
+    return false;
+  }
+  const width = rows[0]?.length ?? 0;
+  if (width < 2) {
+    return false;
+  }
+  return rows.every((row) => row.length === width);
+}
+
+function renderCsvTable(text: string) {
+  const rows = parseCsv(text.trim());
+  const [header, ...body] = rows;
+  return (
+    <div className="display-table-shell">
+      <table className="display-table">
+        <thead>
+          <tr>
+            {header.map((cell, index) => (
+              <th key={`header-${index}`}>{cell}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {body.map((row, rowIndex) => (
+            <tr key={`row-${rowIndex}`}>
+              {row.map((cell, cellIndex) => (
+                <td key={`cell-${rowIndex}-${cellIndex}`}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 function guessBinaryMime(bytes: Uint8Array) {
   if (
     bytes[0] === 0x89 &&
@@ -124,6 +217,13 @@ export function renderDisplay(bytes: Uint8Array) {
     return {
       label: "svg",
       content: <img className="display-media" src={url} alt="svg content" />,
+    };
+  }
+
+  if (looksLikeCsv(text)) {
+    return {
+      label: "csv",
+      content: renderCsvTable(text),
     };
   }
 
