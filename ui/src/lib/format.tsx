@@ -41,10 +41,8 @@ function parseCsv(text: string) {
       continue;
     }
 
-    if (!inQuotes && (char === "
-" || char === "")) {
-      if (char === "" && next === "
-") {
+    if (!inQuotes && (char === "\n" || char === "\r")) {
+      if (char === "\r" && next === "\n") {
         index += 1;
       }
       row.push(cell);
