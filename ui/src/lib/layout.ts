@@ -1,5 +1,28 @@
 import type { WorkspaceEdge, WorkspaceNode } from "./types";
 
+function boundsCenter(nodes: WorkspaceNode[], positions?: Map<string, { x: number; y: number }>) {
+  const left = Math.min(
+    ...nodes.map((node) => positions?.get(node.id)?.x ?? node.position.x),
+  );
+  const top = Math.min(
+    ...nodes.map((node) => positions?.get(node.id)?.y ?? node.position.y),
+  );
+  const right = Math.max(
+    ...nodes.map(
+      (node) => (positions?.get(node.id)?.x ?? node.position.x) + node.size.width,
+    ),
+  );
+  const bottom = Math.max(
+    ...nodes.map(
+      (node) => (positions?.get(node.id)?.y ?? node.position.y) + node.size.height,
+    ),
+  );
+  return {
+    x: (left + right) / 2,
+    y: (top + bottom) / 2,
+  };
+}
+
 export function layoutSelectedNodes(
   selectedNodeIds: string[],
   nodes: WorkspaceNode[],
@@ -68,6 +91,21 @@ export function layoutSelectedNodes(
         y: 100 + rowIndex * 260,
       });
     });
+  }
+
+  const originalCenter = boundsCenter(selectedNodes);
+  const layoutCenter = boundsCenter(selectedNodes, nextPositions);
+  const offsetX = originalCenter.x - layoutCenter.x;
+  const offsetY = originalCenter.y - layoutCenter.y;
+
+  for (const node of selectedNodes) {
+    const position = nextPositions.get(node.id);
+    if (position) {
+      nextPositions.set(node.id, {
+        x: position.x + offsetX,
+        y: position.y + offsetY,
+      });
+    }
   }
 
   return nextPositions;
