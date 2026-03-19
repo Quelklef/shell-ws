@@ -6,7 +6,7 @@ import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { renderDisplay } from "../lib/format";
-import { ACTION_ICON_FAMILIES, DEFAULT_ACTION_ICON_FAMILY } from "../lib/actionIcons";
+import { ACTIONS } from "../lib/actionIcons";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
 import type {
   AutoRunConfig,
@@ -22,8 +22,6 @@ const STDOUT_PORT_TOP = 84;
 const STDERR_PORT_TOP = STDOUT_PORT_TOP + PORT_SPACING;
 const STDIN_PORT_TOP = 96;
 const ARGV_FIRST_PORT_TOP = STDIN_PORT_TOP + PORT_SPACING;
-
-const ACTIONS = ACTION_ICON_FAMILIES.find((family) => family.id === DEFAULT_ACTION_ICON_FAMILY)?.actions ?? [];
 
 function AutoRunControls({
   config,

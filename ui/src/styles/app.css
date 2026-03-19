@@ -104,6 +104,7 @@ textarea {
   margin: 4px 0 2px;
 }
 
+
 .node-palette-groups {
   display: flex;
   flex-direction: column;
@@ -312,16 +313,22 @@ textarea {
 }
 
 .node-action-button {
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  display: inline-grid;
-  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  align-content: center;
+  line-height: 1;
 }
 
 .node-action-button svg {
-  width: 14px;
-  height: 14px;
+  display: block;
+  margin: auto;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
   stroke: currentColor;
   fill: none;
   stroke-width: 1.6;

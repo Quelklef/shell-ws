@@ -22,7 +22,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import "@xyflow/react/dist/style.css";
 
-import ActionIconLab from "./components/ActionIconLab";
 import ShellNode from "./components/ShellNode";
 import WorkspaceEdgeView from "./components/WorkspaceEdge";
 import {
@@ -1251,8 +1250,6 @@ function WorkspaceCanvas() {
             </section>
           )}
         </div>
-        <div className="sidebar-divider" />
-        <ActionIconLab />
         <div className="sidebar-divider" />
         <div className="node-palette-groups">
           {paletteGroups().map((group) => (
