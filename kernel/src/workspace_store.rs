@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::fs;
 
-use crate::model::{Workspace, WorkspaceSummary};
+use crate::model::{sanitize_workspace_json_value, Workspace, WorkspaceSummary};
 
 #[derive(Clone)]
 pub struct WorkspaceStore {
@@ -30,8 +30,13 @@ impl WorkspaceStore {
                 continue;
             }
             let content = fs::read(&path).await?;
+            let mut value: serde_json::Value =
+                serde_json::from_slice(&content).unwrap_or_else(|_| {
+                    serde_json::to_value(Workspace::example()).expect("workspace example json")
+                });
+            sanitize_workspace_json_value(&mut value);
             let workspace: Workspace =
-                serde_json::from_slice(&content).unwrap_or_else(|_| Workspace::example());
+                serde_json::from_value(value).unwrap_or_else(|_| Workspace::example());
             workspaces.push(WorkspaceSummary {
                 id: workspace.id,
                 name: workspace.name,
@@ -44,8 +49,10 @@ impl WorkspaceStore {
     pub async fn load(&self, id: &str) -> Result<Workspace, std::io::Error> {
         let path = self.path_for(id);
         let content = fs::read(path).await?;
-        let workspace: Workspace =
+        let mut value: serde_json::Value =
             serde_json::from_slice(&content).map_err(std::io::Error::other)?;
+        sanitize_workspace_json_value(&mut value);
+        let workspace: Workspace = serde_json::from_value(value).map_err(std::io::Error::other)?;
         Ok(workspace)
     }
 

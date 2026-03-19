@@ -37,7 +37,6 @@ fn node_accepts_argv(kind: &NodeKind) -> bool {
     matches!(kind, NodeKind::Script | NodeKind::Exec)
 }
 
-
 fn is_legacy_unslotted_argv_edge(edge: &Edge) -> bool {
     edge.to.port == PortKind::Argv && edge.to.slot.is_none()
 }
@@ -215,7 +214,6 @@ impl ExecutionContext {
                     | NodeKind::Passthru
                     | NodeKind::Html
                     | NodeKind::Text
-                    | NodeKind::Tee
             )
         }) {
             let edges = incoming.get(&node.id).cloned().unwrap_or_default();
@@ -246,9 +244,10 @@ impl ExecutionContext {
                         ));
                     }
                 }
-                if edges.iter().any(|edge| {
-                    edge.to.port != PortKind::Stdin && edge.to.port != PortKind::Argv
-                }) {
+                if edges
+                    .iter()
+                    .any(|edge| edge.to.port != PortKind::Stdin && edge.to.port != PortKind::Argv)
+                {
                     return Err(format!(
                         "Node {} has an unsupported input port wiring.",
                         node_label(node),
@@ -449,7 +448,15 @@ impl ExecutionContext {
         argv_edges.sort_by_key(|edge| edge.to.slot.unwrap_or(usize::MAX));
         let argv = argv_edges
             .into_iter()
-            .map(|edge| parse_argv_value(state.argv_inputs.get(&edge.id).map(Vec::as_slice).unwrap_or(&[])))
+            .map(|edge| {
+                parse_argv_value(
+                    state
+                        .argv_inputs
+                        .get(&edge.id)
+                        .map(Vec::as_slice)
+                        .unwrap_or(&[]),
+                )
+            })
             .collect();
         state.argv_inputs.clear();
         state.argv_completed.clear();
@@ -502,23 +509,6 @@ impl ExecutionContext {
                 self.emit_started(&node.id);
                 self.emit_finished(&node.id, Some(0));
                 self.clone().complete_node(&node.id).await?;
-            }
-            NodeKind::Tee => {
-                self.emit_started(&node.id);
-                if !initial_input.is_empty() {
-                    self.emit_port_activity(&node.id, PortKind::Stdout, initial_input.len());
-                    self.clone()
-                        .forward_output(&node.id, PortKind::Stdout, initial_input)
-                        .await?;
-                }
-                self.emit_finished(&node.id, Some(0));
-                self.clone().complete_node(&node.id).await?;
-            }
-            NodeKind::MergeConcat
-            | NodeKind::MergeLine
-            | NodeKind::MergeByte
-            | NodeKind::MergeShell => {
-                self.clone().run_merge_node(node, initial_input).await?;
             }
             NodeKind::Script => {
                 if self.has_allowed_incoming_port(&node.id, PortKind::Argv)
@@ -619,11 +609,7 @@ impl ExecutionContext {
                 self.emit_finished(&node.id, Some(0));
             }
             Err(error) => {
-                let message = format!(
-                    "file {}: {error}\n",
-                    path
-                )
-                .into_bytes();
+                let message = format!("file {}: {error}\n", path).into_bytes();
                 self.emit_port_activity(&node.id, PortKind::Stderr, message.len());
                 self.clone()
                     .forward_output(&node.id, PortKind::Stderr, message)
@@ -754,100 +740,6 @@ impl ExecutionContext {
         Ok(())
     }
 
-    async fn run_merge_node(
-        self: Arc<Self>,
-        node: Node,
-        _initial_input: Vec<u8>,
-    ) -> Result<(), String> {
-        let incoming = self
-            .incoming
-            .get(&node.id)
-            .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|edge| self.allowed_nodes.contains(&edge.from.node_id))
-            .collect::<Vec<_>>();
-
-        if incoming.is_empty() {
-            self.emit_started(&node.id);
-            self.emit_finished(&node.id, Some(0));
-            self.clone().complete_node(&node.id).await?;
-            return Ok(());
-        }
-
-        let maybe_inputs = {
-            let states = self.node_states.lock();
-            let state = states.get(&node.id).cloned().unwrap_or_default();
-            incoming
-                .iter()
-                .map(|edge| state.merge_inputs.get(&edge.id).cloned())
-                .collect::<Option<Vec<_>>>()
-        };
-
-        let Some(inputs) = maybe_inputs else {
-            return Ok(());
-        };
-
-        self.emit_started(&node.id);
-        let output = match node.kind {
-            NodeKind::MergeConcat => inputs.concat(),
-            NodeKind::MergeLine => interleave_lines(&inputs),
-            NodeKind::MergeByte => interleave_bytes(&inputs),
-            NodeKind::MergeShell => self.run_shell_merge(&node, inputs).await?,
-            _ => Vec::new(),
-        };
-        self.emit_port_activity(&node.id, PortKind::Stdout, output.len());
-        self.clone()
-            .forward_output(&node.id, PortKind::Stdout, output)
-            .await?;
-        self.emit_finished(&node.id, Some(0));
-        self.clone().complete_node(&node.id).await?;
-        self.node_states
-            .lock()
-            .entry(node.id)
-            .or_default()
-            .merge_inputs
-            .clear();
-        Ok(())
-    }
-
-    async fn run_shell_merge(&self, node: &Node, inputs: Vec<Vec<u8>>) -> Result<Vec<u8>, String> {
-        let temp_dir = std::env::temp_dir().join(format!("shell-ws-merge-{}", Uuid::new_v4()));
-        tokio::fs::create_dir_all(&temp_dir)
-            .await
-            .map_err(|error| format!("Failed to create temp dir: {error}"))?;
-
-        let mut args = Vec::new();
-        for (index, input) in inputs.iter().enumerate() {
-            let path = temp_dir.join(format!("input-{index}.txt"));
-            tokio::fs::write(&path, input)
-                .await
-                .map_err(|error| format!("Failed to write merge input: {error}"))?;
-            args.push(path);
-        }
-
-        let mut command = Command::new(node.shell_value());
-        let mut script = node.script.clone().unwrap_or_default();
-        if !args.is_empty() {
-            script.push(' ');
-            script.push_str(
-                &args
-                    .iter()
-                    .map(|path| path.to_string_lossy().to_string())
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            );
-        }
-        command.arg("-c").arg(script);
-        let output = command
-            .output()
-            .await
-            .map_err(|error| format!("Failed to run shell merge {}: {error}", node_label(node)))?;
-
-        let _ = tokio::fs::remove_dir_all(temp_dir).await;
-        Ok(output.stdout)
-    }
-
     async fn read_output<R>(self: Arc<Self>, node_id: String, port: PortKind, mut reader: R)
     where
         R: tokio::io::AsyncRead + Unpin + Send + 'static,
@@ -974,123 +866,84 @@ impl ExecutionContext {
                     self.clone().complete_node(&target.id).await?;
                 }
             }
-            NodeKind::Script | NodeKind::Exec => {
-                match edge.to.port {
-                    PortKind::Argv => {
-                        {
-                            let mut states = self.node_states.lock();
-                            let state = states.entry(target.id.clone()).or_default();
-                            if !payload.is_empty() {
-                                state
-                                    .argv_inputs
-                                    .entry(edge.id.clone())
-                                    .or_default()
-                                    .extend_from_slice(&payload);
-                            }
-                            if completed {
-                                state.argv_completed.insert(edge.id.clone());
-                            }
+            NodeKind::Script | NodeKind::Exec => match edge.to.port {
+                PortKind::Argv => {
+                    {
+                        let mut states = self.node_states.lock();
+                        let state = states.entry(target.id.clone()).or_default();
+                        if !payload.is_empty() {
+                            state
+                                .argv_inputs
+                                .entry(edge.id.clone())
+                                .or_default()
+                                .extend_from_slice(&payload);
                         }
-                        if completed && self.argv_inputs_ready(&target.id) {
-                            self.clone().start_node(target.id.clone(), Vec::new()).await?;
+                        if completed {
+                            state.argv_completed.insert(edge.id.clone());
                         }
                     }
-                    PortKind::Stdin => {
-                        let waiting_for_argv = self.has_allowed_incoming_port(&target.id, PortKind::Argv)
-                            && !self.argv_inputs_ready(&target.id);
-                        if waiting_for_argv {
-                            let mut states = self.node_states.lock();
-                            let state = states.entry(target.id.clone()).or_default();
-                            if !payload.is_empty() {
-                                state.buffered_stdin.extend_from_slice(&payload);
-                            }
-                            if completed {
-                                state.buffered_stdin_closed = true;
-                            }
-                            state.scheduled = true;
-                        } else {
-                            let existing_writer = self
-                                .node_states
-                                .lock()
-                                .get(&target.id)
-                                .and_then(|state| state.stdin_writer.clone());
-                            if completed {
-                                if let Some(writer) = existing_writer {
-                                    if !payload.is_empty() {
-                                        let _ = writer.send(StdinMessage::Chunk(payload));
-                                    }
-                                    let _ = writer.send(StdinMessage::Close);
-                                } else {
-                                    self.clone().start_node(target.id.clone(), payload).await?;
-                                    let writer = self
-                                        .node_states
-                                        .lock()
-                                        .get(&target.id)
-                                        .and_then(|state| state.stdin_writer.clone());
-                                    if let Some(writer) = writer {
-                                        let _ = writer.send(StdinMessage::Close);
-                                    }
+                    if completed && self.argv_inputs_ready(&target.id) {
+                        self.clone()
+                            .start_node(target.id.clone(), Vec::new())
+                            .await?;
+                    }
+                }
+                PortKind::Stdin => {
+                    let waiting_for_argv = self
+                        .has_allowed_incoming_port(&target.id, PortKind::Argv)
+                        && !self.argv_inputs_ready(&target.id);
+                    if waiting_for_argv {
+                        let mut states = self.node_states.lock();
+                        let state = states.entry(target.id.clone()).or_default();
+                        if !payload.is_empty() {
+                            state.buffered_stdin.extend_from_slice(&payload);
+                        }
+                        if completed {
+                            state.buffered_stdin_closed = true;
+                        }
+                        state.scheduled = true;
+                    } else {
+                        let existing_writer = self
+                            .node_states
+                            .lock()
+                            .get(&target.id)
+                            .and_then(|state| state.stdin_writer.clone());
+                        if completed {
+                            if let Some(writer) = existing_writer {
+                                if !payload.is_empty() {
+                                    let _ = writer.send(StdinMessage::Chunk(payload));
                                 }
+                                let _ = writer.send(StdinMessage::Close);
                             } else {
-                                let running = self
+                                self.clone().start_node(target.id.clone(), payload).await?;
+                                let writer = self
                                     .node_states
                                     .lock()
                                     .get(&target.id)
-                                    .map(|state| state.running)
-                                    .unwrap_or(false);
-                                if running {
-                                    if let Some(writer) = existing_writer {
-                                        let _ = writer.send(StdinMessage::Chunk(payload));
-                                    }
-                                } else {
-                                    self.clone().start_node(target.id.clone(), payload).await?;
+                                    .and_then(|state| state.stdin_writer.clone());
+                                if let Some(writer) = writer {
+                                    let _ = writer.send(StdinMessage::Close);
                                 }
+                            }
+                        } else {
+                            let running = self
+                                .node_states
+                                .lock()
+                                .get(&target.id)
+                                .map(|state| state.running)
+                                .unwrap_or(false);
+                            if running {
+                                if let Some(writer) = existing_writer {
+                                    let _ = writer.send(StdinMessage::Chunk(payload));
+                                }
+                            } else {
+                                self.clone().start_node(target.id.clone(), payload).await?;
                             }
                         }
                     }
-                    _ => {}
                 }
-            }
-            NodeKind::MergeConcat
-            | NodeKind::MergeLine
-            | NodeKind::MergeByte
-            | NodeKind::MergeShell => {
-                {
-                    let mut states = self.node_states.lock();
-                    let state = states.entry(target.id.clone()).or_default();
-                    let entry = state.merge_inputs.entry(edge.id.clone()).or_default();
-                    entry.extend_from_slice(&payload);
-                }
-                if completed {
-                    sleep(Duration::from_millis(250)).await;
-                    self.clone().run_merge_node(target, Vec::new()).await?;
-                }
-            }
-            NodeKind::Tee => {
-                let started = {
-                    let mut states = self.node_states.lock();
-                    let state = states.entry(target.id.clone()).or_default();
-                    if state.running {
-                        false
-                    } else {
-                        state.running = true;
-                        true
-                    }
-                };
-                if started {
-                    self.emit_started(&target.id);
-                }
-                if !payload.is_empty() {
-                    self.emit_port_activity(&target.id, PortKind::Stdout, payload.len());
-                    self.clone()
-                        .forward_output(&target.id, PortKind::Stdout, payload)
-                        .await?;
-                }
-                if completed {
-                    self.emit_finished(&target.id, Some(0));
-                    self.clone().complete_node(&target.id).await?;
-                }
-            }
+                _ => {}
+            },
             NodeKind::Text | NodeKind::File => {}
         }
         Ok(())
@@ -1187,7 +1040,6 @@ struct NodeRuntimeState {
     running: bool,
     scheduled: bool,
     stdin_writer: Option<mpsc::UnboundedSender<StdinMessage>>,
-    merge_inputs: HashMap<String, Vec<u8>>,
     buffered_stdin: Vec<u8>,
     buffered_stdin_closed: bool,
     argv_inputs: HashMap<String, Vec<u8>>,
@@ -1238,46 +1090,6 @@ enum StdinMessage {
     Close,
 }
 
-fn interleave_lines(inputs: &[Vec<u8>]) -> Vec<u8> {
-    let mut lines = inputs
-        .iter()
-        .map(|input| {
-            String::from_utf8_lossy(input)
-                .lines()
-                .map(|line| format!("{line}\n").into_bytes())
-                .collect::<Vec<_>>()
-        })
-        .collect::<Vec<_>>();
-
-    let mut output = Vec::new();
-    loop {
-        let mut changed = false;
-        for source in &mut lines {
-            if !source.is_empty() {
-                output.extend(source.remove(0));
-                changed = true;
-            }
-        }
-        if !changed {
-            break;
-        }
-    }
-    output
-}
-
-fn interleave_bytes(inputs: &[Vec<u8>]) -> Vec<u8> {
-    let max_len = inputs.iter().map(Vec::len).max().unwrap_or(0);
-    let mut output = Vec::with_capacity(inputs.iter().map(Vec::len).sum());
-    for index in 0..max_len {
-        for input in inputs {
-            if let Some(byte) = input.get(index) {
-                output.push(*byte);
-            }
-        }
-    }
-    output
-}
-
 fn now_ms() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1292,9 +1104,7 @@ mod tests {
     use tokio::{sync::broadcast, time::timeout};
     use tokio_util::sync::CancellationToken;
 
-    use super::{
-        interleave_bytes, interleave_lines, EdgeBufferState, ExecutionContext, ExecutionManager,
-    };
+    use super::{EdgeBufferState, ExecutionContext, ExecutionManager};
     use crate::model::{
         default_cwd, BufferingMode, Edge, ExecutionMode, Node, NodeKind, PortKind, PortRef,
         Position, ServerEvent, Size, Workspace, WorkspaceUi,
@@ -1338,8 +1148,11 @@ mod tests {
                     script: None,
                     path: None,
                     args: None,
-                    text: Some("hello
-".to_string()),
+                    text: Some(
+                        "hello
+"
+                        .to_string(),
+                    ),
                     auto_run: None,
                     ui_state: Default::default(),
                 },
@@ -1428,8 +1241,11 @@ mod tests {
                     script: None,
                     path: None,
                     args: None,
-                    text: Some("hello
-".to_string()),
+                    text: Some(
+                        "hello
+"
+                        .to_string(),
+                    ),
                     auto_run: None,
                     ui_state: Default::default(),
                 },
@@ -1447,8 +1263,11 @@ mod tests {
                     script: None,
                     path: None,
                     args: None,
-                    text: Some("world
-".to_string()),
+                    text: Some(
+                        "world
+"
+                        .to_string(),
+                    ),
                     auto_run: None,
                     ui_state: Default::default(),
                 },
@@ -1525,7 +1344,11 @@ mod tests {
         .await
         .expect("script node never completed");
 
-        assert_eq!(exit_code, Some(0), "script did not receive slotted argv input");
+        assert_eq!(
+            exit_code,
+            Some(0),
+            "script did not receive slotted argv input"
+        );
     }
 
     #[tokio::test]
@@ -1609,8 +1432,11 @@ mod tests {
                     script: None,
                     path: None,
                     args: None,
-                    text: Some("hello
-".to_string()),
+                    text: Some(
+                        "hello
+"
+                        .to_string(),
+                    ),
                     auto_run: None,
                     ui_state: Default::default(),
                 },
@@ -1730,8 +1556,11 @@ mod tests {
                     script: None,
                     path: None,
                     args: None,
-                    text: Some("hello
-".to_string()),
+                    text: Some(
+                        "hello
+"
+                        .to_string(),
+                    ),
                     auto_run: None,
                     ui_state: Default::default(),
                 },
@@ -1793,18 +1622,6 @@ mod tests {
         assert!(finished.is_ok(), "downstream script never observed EOF");
     }
 
-    #[test]
-    fn byte_interleave_works() {
-        let output = interleave_bytes(&[b"abc".to_vec(), b"12".to_vec()]);
-        assert_eq!(output, b"a1b2c".to_vec());
-    }
-
-    #[test]
-    fn line_interleave_works() {
-        let output = interleave_lines(&[b"a\nb\n".to_vec(), b"1\n2\n".to_vec()]);
-        assert_eq!(String::from_utf8_lossy(&output), "a\n1\nb\n2\n");
-    }
-
     #[tokio::test]
     async fn stdout_previews_emit_without_downstream_edges() {
         let (tx, _) = broadcast::channel(64);
@@ -1820,13 +1637,19 @@ mod tests {
                 title: "".to_string(),
                 comment: "".to_string(),
                 position: Position { x: 0.0, y: 0.0 },
-                size: Size { width: 200.0, height: 120.0 },
+                size: Size {
+                    width: 200.0,
+                    height: 120.0,
+                },
                 shell: Some("bash".to_string()),
                 script: None,
                 path: None,
                 args: None,
-                text: Some("hello
-".to_string()),
+                text: Some(
+                    "hello
+"
+                    .to_string(),
+                ),
                 auto_run: None,
                 ui_state: Default::default(),
             }],
@@ -1839,9 +1662,14 @@ mod tests {
             loop {
                 match rx.recv().await {
                     Ok(ServerEvent::NodeOutput { node_id, port, .. })
-                        if node_id == "text-1" && port == PortKind::Stdout => return true,
-                    Ok(ServerEvent::ExecFinished { exec_id: seen_exec_id, .. })
-                        if seen_exec_id == exec_id => return false,
+                        if node_id == "text-1" && port == PortKind::Stdout =>
+                    {
+                        return true
+                    }
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen_exec_id,
+                        ..
+                    }) if seen_exec_id == exec_id => return false,
                     Ok(ServerEvent::Error { message, .. }) => {
                         panic!("unexpected execution error: {message}");
                     }
@@ -1853,7 +1681,9 @@ mod tests {
         .await
         .expect("text node never completed");
 
-        assert!(saw_output, "node output event was not emitted for detached stdout");
+        assert!(
+            saw_output,
+            "node output event was not emitted for detached stdout"
+        );
     }
-
 }

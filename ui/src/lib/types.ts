@@ -6,12 +6,7 @@ export type NodeKind =
   | "file"
   | "passthru"
   | "html"
-  | "text"
-  | "tee"
-  | "merge_concat"
-  | "merge_line"
-  | "merge_byte"
-  | "merge_shell";
+  | "text";
 
 export type PortKind = "stdin" | "argv" | "stdout" | "stderr";
 export type BufferingMode = "unbuffered" | "line_or_1024" | "on_complete";
@@ -160,7 +155,6 @@ export interface NodeRuntimeState {
 export interface ShellNodeData extends Record<string, unknown> {
   model: WorkspaceNode;
   runtime: NodeRuntimeState;
-  outputSlots?: number[];
   argvSlots?: number[];
   previewTabs?: string[];
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;

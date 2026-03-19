@@ -122,11 +122,6 @@ pub enum NodeKind {
     Passthru,
     Html,
     Text,
-    Tee,
-    MergeConcat,
-    MergeLine,
-    MergeByte,
-    MergeShell,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -302,6 +297,58 @@ pub struct WorkspaceSummary {
     pub name: String,
 }
 
+pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
+    const REMOVED: &[&str] = &[
+        "tee",
+        "merge_concat",
+        "merge_line",
+        "merge_byte",
+        "merge_shell",
+    ];
+    let Some(obj) = value.as_object_mut() else {
+        return;
+    };
+    let mut removed_ids = std::collections::HashSet::new();
+    if let Some(nodes) = obj
+        .get_mut("nodes")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        nodes.retain(|node| {
+            let Some(kind) = node.get("kind").and_then(serde_json::Value::as_str) else {
+                return true;
+            };
+            if REMOVED.contains(&kind) {
+                if let Some(id) = node.get("id").and_then(serde_json::Value::as_str) {
+                    removed_ids.insert(id.to_string());
+                }
+                return false;
+            }
+            true
+        });
+    }
+    if let Some(edges) = obj
+        .get_mut("edges")
+        .and_then(serde_json::Value::as_array_mut)
+    {
+        edges.retain(|edge| {
+            let from = edge
+                .get("from")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|port| port.get("nodeId").or_else(|| port.get("node_id")))
+                .and_then(serde_json::Value::as_str);
+            let to = edge
+                .get("to")
+                .and_then(serde_json::Value::as_object)
+                .and_then(|port| port.get("nodeId").or_else(|| port.get("node_id")))
+                .and_then(serde_json::Value::as_str);
+            match (from, to) {
+                (Some(from), Some(to)) => !removed_ids.contains(from) && !removed_ids.contains(to),
+                _ => true,
+            }
+        });
+    }
+}
+
 pub fn default_shell() -> String {
     "bash".to_string()
 }
@@ -366,6 +413,29 @@ mod tests {
         .expect("deserialize workspace with default cwd");
 
         assert_eq!(workspace.cwd, default_cwd());
+    }
+
+    #[test]
+    fn sanitize_workspace_json_drops_removed_node_kinds() {
+        let mut value = serde_json::json!({
+            "id": "w",
+            "name": "w",
+            "cwd": "/tmp",
+            "nodes": [
+                { "id": "tee-1", "kind": "tee", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1} },
+                { "id": "text-1", "kind": "text", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1}, "text": "" }
+            ],
+            "edges": [
+                { "id": "e1", "from": {"nodeId": "text-1", "port": "stdout"}, "to": {"nodeId": "tee-1", "port": "stdin"}, "buffering": "line_or_1024" }
+            ],
+            "ui": {}
+        });
+        super::sanitize_workspace_json_value(&mut value);
+        let workspace: Workspace =
+            serde_json::from_value(value).expect("deserialize sanitized workspace");
+        assert_eq!(workspace.nodes.len(), 1);
+        assert_eq!(workspace.nodes[0].id, "text-1");
+        assert!(workspace.edges.is_empty());
     }
 
     #[test]

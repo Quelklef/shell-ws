@@ -209,18 +209,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "file" ||
         model.kind === "text" ||
         model.kind === "passthru" ||
-        model.kind === "html" ||
-        model.kind.startsWith("merge_")) &&
+        model.kind === "html") &&
         outputHandle("stdout", 84, "stdout", runtime.portActivity.stdout)}
-      {model.kind === "tee" &&
-        (typedData.outputSlots ?? [1]).map((slot, index) =>
-          outputHandle(
-            "stdout",
-            70 + index * 28,
-            `stdout-${slot}`,
-            runtime.portActivity.stdout,
-          ),
-        )}
       {(model.kind === "script" ||
         model.kind === "exec" ||
         model.kind === "file") &&
@@ -258,7 +248,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
           </span>
         </div>
 
-        {(model.kind === "script" || model.kind === "merge_shell") && (
+        {model.kind === "script" && (
           <>
             <input
               className="shell-input nodrag nopan"

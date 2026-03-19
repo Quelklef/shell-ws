@@ -54,7 +54,11 @@ describe("sanitizeWorkspace", () => {
       name: "w",
       ui: { viewportX: 0, viewportY: 0, zoom: 1 },
       cwd: "",
-      nodes: [],
+      nodes: [
+        { id: "a", kind: "text", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },
+        { id: "b", kind: "script", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },
+        { id: "c", kind: "text", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },
+      ],
       edges: [
         {
           id: "old-argv",
@@ -82,4 +86,25 @@ describe("sanitizeWorkspace", () => {
       "new-argv",
     ]);
   });
+});
+
+
+it("drops legacy removed node kinds and their edges", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    nodes: [
+      { id: "t", kind: "tee", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },
+      { id: "x", kind: "text", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },
+    ],
+    edges: [
+      { id: "e", from: { nodeId: "x", port: "stdout" }, to: { nodeId: "t", port: "stdin" }, buffering: "line_or_1024" },
+    ],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitized.nodes.map((node) => node.id)).toEqual(["x"]);
+  expect(sanitized.edges).toEqual([]);
 });

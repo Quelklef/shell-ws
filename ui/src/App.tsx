@@ -92,8 +92,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     position: { x: 140 + count * 30, y: 140 + count * 24 },
     size: { width: 320, height: kind === "html" ? 300 : 230 },
     shell: "bash",
-    script:
-      kind === "script" || kind === "merge_shell" ? "printf 'hello\\n'" : null,
+    script: kind === "script" ? "printf 'hello\n'" : null,
     path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
@@ -167,21 +166,6 @@ function parseHandleId(handleId: string | null | undefined): {
   return { port: handleId as PortKind };
 }
 
-function computeOutputSlots(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
-  if (kind !== "tee") {
-    return undefined;
-  }
-  const usedSlots = edges
-    .filter((edge) => edge.source === nodeId)
-    .map((edge) =>
-      parseHandleId(edge.sourceHandle as string | null | undefined),
-    )
-    .filter((entry) => entry.port === "stdout")
-    .map((entry) => entry.slot ?? 1);
-  const maxSlot = Math.max(1, ...usedSlots);
-  return Array.from({ length: maxSlot + 1 }, (_, index) => index + 1);
-}
-
 function computeArgvSlots(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
   return nodeArgvSlots(nodeId, kind, edges, parseHandleId);
 }
@@ -202,7 +186,6 @@ function syncNodeData(
       ...node.data,
       model: node.data.model,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
-      outputSlots: computeOutputSlots(node.id, node.data.model.kind, edges),
       argvSlots: computeArgvSlots(node.id, node.data.model.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.data.model.kind, edges),
       onUpdate: handlers.onUpdate,
@@ -230,7 +213,6 @@ function toFlowNode(
     data: {
       model: node,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
-      outputSlots: computeOutputSlots(node.id, node.kind, edges),
       argvSlots: computeArgvSlots(node.id, node.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.kind, edges),
       onUpdate: handlers.onUpdate,
@@ -1080,19 +1062,6 @@ function WorkspaceCanvas() {
           edge.target === connection.target &&
           edge.targetHandle === connection.targetHandle,
       );
-      if (
-        sourceNode?.data.model.kind === "tee" &&
-        edgesRef.current.some(
-          (edge) =>
-            edge.source === connection.source &&
-            edge.sourceHandle === connection.sourceHandle,
-        )
-      ) {
-        setToast(
-          "tee output ports allow one wire each; use the next free port",
-        );
-        return;
-      }
       if (targetNode && targetPort === "argv" && !nodeHasArgvPort(targetNode.data.model.kind)) {
         setToast("this node does not accept argv input");
         return;
@@ -1104,7 +1073,6 @@ function WorkspaceCanvas() {
       if (
         targetNode &&
         targetPort === "stdin" &&
-        !targetNode.data.model.kind.startsWith("merge_") &&
         hasExistingPortWire
       ) {
         setToast("non-merge nodes only accept one stdin wire");
@@ -1114,10 +1082,9 @@ function WorkspaceCanvas() {
         targetNode &&
         targetPort !== "stdin" &&
         targetPort !== "argv" &&
-        !targetNode.data.model.kind.startsWith("merge_") &&
         hasExistingPortWire
       ) {
-        setToast(`non-merge nodes only accept one ${targetPort} wire`);
+        setToast(`nodes only accept one ${targetPort} wire`);
         return;
       }
       setEdges((current) => {

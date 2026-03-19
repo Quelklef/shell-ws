@@ -8,12 +8,6 @@ describe("node port affordances", () => {
     expect(nodePreviewTabs("file")).toEqual(["stdout", "stderr"]);
     expect(nodePreviewTabs("passthru")).toEqual(["stdin", "stdout", "stderr"]);
     expect(nodePreviewTabs("html")).toEqual(["stdin", "stdout", "stderr"]);
-    expect(nodePreviewTabs("tee")).toEqual(["stdin", "stdout", "stderr"]);
-    expect(nodePreviewTabs("merge_concat")).toEqual([
-      "stdin",
-      "stdout",
-      "stderr",
-    ]);
   });
 
   it("matches stdin affordance to node kind", () => {
