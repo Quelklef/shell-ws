@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet, VecDeque},
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -625,14 +625,18 @@ enum ControllerEvent {
         node_id: String,
         exit_code: Option<i32>,
     },
-    DeliveryReady {
-        edge: Edge,
-        port: PortKind,
-        payload: Vec<u8>,
-        reset: bool,
-        completed: bool,
-        success: bool,
-    },
+    DeliveryReady(DelayedDelivery),
+}
+
+#[derive(Clone)]
+struct DelayedDelivery {
+    sequence: u64,
+    edge: Edge,
+    port: PortKind,
+    payload: Vec<u8>,
+    reset: bool,
+    completed: bool,
+    success: bool,
 }
 
 struct RunController {
@@ -646,6 +650,9 @@ struct RunController {
     live_outputs: HashMap<String, HashMap<String, Vec<u8>>>,
     pending_finish_events: HashMap<String, Option<i32>>,
     pending_delivery_counts: HashMap<String, usize>,
+    next_delivery_sequence: HashMap<String, u64>,
+    next_delivery_to_process: HashMap<String, u64>,
+    ready_deliveries: HashMap<String, BTreeMap<u64, DelayedDelivery>>,
     active_external_tasks: usize,
 }
 
@@ -663,6 +670,9 @@ impl RunController {
             live_outputs: HashMap::new(),
             pending_finish_events: HashMap::new(),
             pending_delivery_counts: HashMap::new(),
+            next_delivery_sequence: HashMap::new(),
+            next_delivery_to_process: HashMap::new(),
+            ready_deliveries: HashMap::new(),
             active_external_tasks: 0,
         }
     }
@@ -677,7 +687,7 @@ impl RunController {
             if self.context.cancel.is_cancelled() {
                 break;
             }
-            if self.active_external_tasks == 0 && self.events_rx.is_empty() {
+            if self.active_external_tasks == 0 && self.events_rx.is_empty() && self.ready_deliveries.values().all(BTreeMap::is_empty) {
                 break;
             }
             let Some(event) = (tokio::select! {
@@ -725,29 +735,73 @@ impl RunController {
                 self.active_external_tasks = self.active_external_tasks.saturating_sub(1);
                 self.handle_node_exit(&node_id, exit_code).await
             }
-            ControllerEvent::DeliveryReady {
-                edge,
-                port,
-                payload,
-                reset,
-                completed,
-                success,
-            } => {
+            ControllerEvent::DeliveryReady(delivery) => {
                 self.active_external_tasks = self.active_external_tasks.saturating_sub(1);
-                self.context
-                    .emit_stream_chunk(&edge, port, &payload, reset, completed, success);
-                let from_node_id = edge.from.node_id.clone();
-                let result = self.handle_delivery(edge, payload, completed, success).await;
-                if let Some(count) = self.pending_delivery_counts.get_mut(&from_node_id) {
-                    *count = count.saturating_sub(1);
-                    if *count == 0 {
-                        self.pending_delivery_counts.remove(&from_node_id);
-                    }
-                }
-                self.finish_node_if_delivery_drained(&from_node_id);
-                result
+                self.enqueue_ready_delivery(delivery).await
             }
         }
+    }
+
+    async fn enqueue_ready_delivery(&mut self, delivery: DelayedDelivery) -> Result<(), String> {
+        self.ready_deliveries
+            .entry(delivery.edge.id.clone())
+            .or_default()
+            .insert(delivery.sequence, delivery.clone());
+        self.drain_ready_deliveries(&delivery.edge.id).await
+    }
+
+    async fn drain_ready_deliveries(&mut self, edge_id: &str) -> Result<(), String> {
+        loop {
+            let next_sequence = self.next_delivery_to_process.get(edge_id).copied().unwrap_or(0);
+            let Some(delivery) = self
+                .ready_deliveries
+                .get_mut(edge_id)
+                .and_then(|deliveries| deliveries.remove(&next_sequence))
+            else {
+                break;
+            };
+            if self
+                .ready_deliveries
+                .get(edge_id)
+                .map(BTreeMap::is_empty)
+                .unwrap_or(false)
+            {
+                self.ready_deliveries.remove(edge_id);
+            }
+            self.next_delivery_to_process
+                .insert(edge_id.to_string(), next_sequence + 1);
+            self.process_ready_delivery(delivery).await?;
+        }
+        Ok(())
+    }
+
+    async fn process_ready_delivery(&mut self, delivery: DelayedDelivery) -> Result<(), String> {
+        // Per-edge delivery order matters: argv/stdin completion must never overtake earlier bytes.
+        self.context.emit_stream_chunk(
+            &delivery.edge,
+            delivery.port,
+            &delivery.payload,
+            delivery.reset,
+            delivery.completed,
+            delivery.success,
+        );
+        let from_node_id = delivery.edge.from.node_id.clone();
+        let result = self
+            .handle_delivery(
+                delivery.edge,
+                delivery.payload,
+                delivery.completed,
+                delivery.success,
+            )
+            .await;
+        if let Some(count) = self.pending_delivery_counts.get_mut(&from_node_id) {
+            *count = count.saturating_sub(1);
+            if *count == 0 {
+                self.pending_delivery_counts.remove(&from_node_id);
+            }
+        }
+        self.finish_node_if_delivery_drained(&from_node_id);
+        result
     }
 
     fn state_mut(&mut self, node_id: &str) -> &mut StreamingNodeState {
@@ -1246,18 +1300,25 @@ impl RunController {
         success: bool,
     ) {
         let events_tx = self.events_tx.clone();
+        let sequence = {
+            let next = self.next_delivery_sequence.entry(edge.id.clone()).or_default();
+            let sequence = *next;
+            *next += 1;
+            sequence
+        };
         *self.pending_delivery_counts.entry(edge.from.node_id.clone()).or_default() += 1;
         self.active_external_tasks += 1;
         tokio::spawn(async move {
             sleep(Duration::from_millis(250)).await;
-            let _ = events_tx.send(ControllerEvent::DeliveryReady {
+            let _ = events_tx.send(ControllerEvent::DeliveryReady(DelayedDelivery {
+                sequence,
                 edge,
                 port,
                 payload,
                 reset,
                 completed,
                 success,
-            });
+            }));
         });
     }
 
@@ -1608,6 +1669,58 @@ mod tests {
                 .cloned()
                 .unwrap_or_default();
             String::from_utf8(bytes).expect("materialized utf8")
+        }
+
+        #[tokio::test]
+        async fn argv_test_delivery_ordering() {
+            let context = argv_context(ExecutionAction::RerunPush);
+            let plan = context.compute_streaming_push_plan("a");
+            let edge = context.workspace.edges[0].clone();
+            let mut controller = RunController::new(context, plan);
+            controller.init();
+
+            controller
+                .handle_event(ControllerEvent::DeliveryReady(DelayedDelivery {
+                    sequence: 1,
+                    edge: edge.clone(),
+                    port: PortKind::Stdout,
+                    payload: Vec::new(),
+                    reset: false,
+                    completed: true,
+                    success: true,
+                }))
+                .await
+                .expect("completion event");
+            assert!(
+                !controller
+                    .stream_states
+                    .get("b")
+                    .map(|state| state.running)
+                    .unwrap_or(false),
+                "argv completion must not start the target before earlier argv bytes arrive"
+            );
+
+            controller
+                .handle_event(ControllerEvent::DeliveryReady(DelayedDelivery {
+                    sequence: 0,
+                    edge,
+                    port: PortKind::Stdout,
+                    payload: b"testing
+".to_vec(),
+                    reset: true,
+                    completed: false,
+                    success: true,
+                }))
+                .await
+                .expect("payload event");
+            assert!(
+                controller
+                    .stream_states
+                    .get("b")
+                    .map(|state| state.running)
+                    .unwrap_or(false),
+                "argv payload plus queued completion should start the target once both deliveries drain in order"
+            );
         }
 
         #[tokio::test]
