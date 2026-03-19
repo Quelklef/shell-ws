@@ -163,8 +163,20 @@ export default function ShellNode({ data, selected }: NodeProps) {
     if (!element || !isEditingComment) {
       return;
     }
+    const selectionStart = element.selectionStart;
+    const selectionEnd = element.selectionEnd;
+    const needsTrailingLineSentinel = model.comment.endsWith("\n");
+    if (needsTrailingLineSentinel) {
+      element.value = `${model.comment} `;
+    }
     element.style.height = "0px";
     element.style.height = `${Math.max(22, element.scrollHeight)}px`;
+    if (needsTrailingLineSentinel) {
+      element.value = model.comment;
+      if (document.activeElement === element) {
+        element.setSelectionRange(selectionStart, selectionEnd);
+      }
+    }
   }, [isEditingComment, model.comment]);
 
   useEffect(() => {
