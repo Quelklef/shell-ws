@@ -1204,43 +1204,46 @@ function WorkspaceCanvas() {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <span
-          className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}
-        >
-          {kernelConnected ? "kernel online" : "kernel offline"}
-        </span>
-        <label className="sidebar-field">
-          <span className="sidebar-label">pwd</span>
-          <input
-            className="sidebar-input"
-            value={workspaceMeta.cwd}
-            onChange={(event) => updateWorkspaceCwd(event.target.value)}
-            placeholder="/home/user"
-            title="working directory for kernel execution"
-          />
-        </label>
-        {activeExecutions.length > 0 && (
-          <section className="execution-panel">
-            <div className="node-palette-label">running</div>
-            <div className="execution-list">
-              {activeExecutions.map((execution) => {
-                const node = nodes.find((item) => item.id === execution.nodeId);
-                const label = node?.data.model.comment.trim() || node?.data.model.kind || execution.nodeId;
-                return (
-                  <div key={execution.execId} className="execution-item">
-                    <div className="execution-text">
-                      <div className="execution-label">{label}</div>
-                      <div className="execution-id">{execution.execId.slice(0, 8)}</div>
+        <div className="sidebar-controls-group">
+          <span
+            className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}
+          >
+            {kernelConnected ? "kernel online" : "kernel offline"}
+          </span>
+          <label className="sidebar-field">
+            <span className="sidebar-label">pwd</span>
+            <input
+              className="sidebar-input"
+              value={workspaceMeta.cwd}
+              onChange={(event) => updateWorkspaceCwd(event.target.value)}
+              placeholder="/home/user"
+              title="working directory for kernel execution"
+            />
+          </label>
+          {activeExecutions.length > 0 && (
+            <section className="execution-panel">
+              <div className="node-palette-label">running</div>
+              <div className="execution-list">
+                {activeExecutions.map((execution) => {
+                  const node = nodes.find((item) => item.id === execution.nodeId);
+                  const label = node?.data.model.comment.trim() || node?.data.model.kind || execution.nodeId;
+                  return (
+                    <div key={execution.execId} className="execution-item">
+                      <div className="execution-text">
+                        <div className="execution-label">{label}</div>
+                        <div className="execution-id">{execution.execId.slice(0, 8)}</div>
+                      </div>
+                      <button type="button" onClick={() => stopExecution(execution.execId)}>
+                        stop
+                      </button>
                     </div>
-                    <button type="button" onClick={() => stopExecution(execution.execId)}>
-                      stop
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          </section>
-        )}
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </div>
+        <div className="sidebar-divider" />
         <div className="node-palette-groups">
           {paletteGroups().map((group) => (
             <section key={group.label} className="node-palette-group">

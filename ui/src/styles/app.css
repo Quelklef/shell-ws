@@ -89,6 +89,19 @@ textarea {
   color: #f1b0b0;
 }
 
+.sidebar-controls-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 4px;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: linear-gradient(90deg, rgba(244, 236, 223, 0.2), rgba(244, 236, 223, 0.04));
+  margin: 4px 0 2px;
+}
+
 .node-palette-groups {
   display: flex;
   flex-direction: column;
