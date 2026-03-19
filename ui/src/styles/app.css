@@ -390,7 +390,7 @@ textarea {
   position: absolute;
   left: 16px;
   right: 16px;
-  bottom: calc(100% + 3px);
+  bottom: calc(100% + 5px);
   z-index: 6;
 }
 
@@ -437,7 +437,7 @@ textarea {
 .node-comment-body {
   margin-top: 2px;
   white-space: pre-wrap;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.2;
   font-weight: 400;
   color: var(--text-soft);
