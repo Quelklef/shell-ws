@@ -98,7 +98,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     shell: "bash",
     script: kind === "script" ? "printf 'hello\n'" : kind === "ai_script" ? "" : null,
     description: kind === "ai_script" ? "" : null,
-    includeSampleInputs: kind === "ai_script" ? false : null,
+    includeSampleInputs: kind === "ai_script" ? true : null,
     path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
