@@ -523,6 +523,7 @@ textarea {
 }
 
 .display-label {
+  margin-bottom: 0.5em;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--accent-soft);
