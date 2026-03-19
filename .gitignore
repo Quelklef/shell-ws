@@ -7,3 +7,6 @@ workspace-data/
 !.codex/config.toml
 ui/tsconfig.tsbuildinfo
 working.md
+
+# Local backups
+*.bak
