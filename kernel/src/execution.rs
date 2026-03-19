@@ -880,6 +880,9 @@ impl ExecutionContext {
         port: PortKind,
         chunk: Vec<u8>,
     ) -> Result<(), String> {
+        if !chunk.is_empty() {
+            self.emit_node_output(from_node_id, port, &chunk);
+        }
         let edges = self
             .outgoing
             .get(from_node_id)
@@ -1130,6 +1133,15 @@ impl ExecutionContext {
             }
         }
         Ok(())
+    }
+
+    fn emit_node_output(&self, node_id: &str, port: PortKind, payload: &[u8]) {
+        let _ = self.broadcaster.send(ServerEvent::NodeOutput {
+            node_id: node_id.to_string(),
+            port,
+            data_base64: BASE64.encode(payload),
+            timestamp: now_ms(),
+        });
     }
 
     fn emit_stream_chunk(&self, edge: &Edge, port: PortKind, payload: &[u8]) {
@@ -1792,4 +1804,56 @@ mod tests {
         let output = interleave_lines(&[b"a\nb\n".to_vec(), b"1\n2\n".to_vec()]);
         assert_eq!(String::from_utf8_lossy(&output), "a\n1\nb\n2\n");
     }
+
+    #[tokio::test]
+    async fn stdout_previews_emit_without_downstream_edges() {
+        let (tx, _) = broadcast::channel(64);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let workspace = Workspace {
+            id: "test".to_string(),
+            name: "test".to_string(),
+            cwd: default_cwd(),
+            nodes: vec![Node {
+                id: "text-1".to_string(),
+                kind: NodeKind::Text,
+                title: "".to_string(),
+                comment: "".to_string(),
+                position: Position { x: 0.0, y: 0.0 },
+                size: Size { width: 200.0, height: 120.0 },
+                shell: Some("bash".to_string()),
+                script: None,
+                path: None,
+                args: None,
+                text: Some("hello
+".to_string()),
+                auto_run: None,
+                ui_state: Default::default(),
+            }],
+            edges: vec![],
+            ui: WorkspaceUi::default(),
+        };
+
+        let exec_id = manager.run(workspace, "text-1".to_string(), ExecutionMode::Push);
+        let saw_output = timeout(Duration::from_secs(2), async move {
+            loop {
+                match rx.recv().await {
+                    Ok(ServerEvent::NodeOutput { node_id, port, .. })
+                        if node_id == "text-1" && port == PortKind::Stdout => return true,
+                    Ok(ServerEvent::ExecFinished { exec_id: seen_exec_id, .. })
+                        if seen_exec_id == exec_id => return false,
+                    Ok(ServerEvent::Error { message, .. }) => {
+                        panic!("unexpected execution error: {message}");
+                    }
+                    Ok(_) => {}
+                    Err(error) => panic!("event stream closed: {error}"),
+                }
+            }
+        })
+        .await
+        .expect("text node never completed");
+
+        assert!(saw_output, "node output event was not emitted for detached stdout");
+    }
+
 }

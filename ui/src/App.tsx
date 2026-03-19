@@ -730,6 +730,28 @@ function WorkspaceCanvas() {
                   },
                 },
               };
+            case "node_output": {
+              const nextBytes = fromBase64(event.data_base64);
+              const previous =
+                current[event.node_id]?.previews?.[event.port]?.bytes ??
+                new Uint8Array();
+              return {
+                ...current,
+                [event.node_id]: {
+                  ...(current[event.node_id] ?? {
+                    running: false,
+                    portActivity: {},
+                  }),
+                  previews: {
+                    ...(current[event.node_id]?.previews ?? {}),
+                    [event.port]: {
+                      bytes: concatBytes(previous, nextBytes),
+                      completed: false,
+                    },
+                  },
+                },
+              };
+            }
             case "stream_chunk": {
               const nextBytes = fromBase64(event.data_base64);
               const nextState = { ...current };

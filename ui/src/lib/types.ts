@@ -110,6 +110,13 @@ export type ServerEvent =
       timestamp: number;
     }
   | {
+      type: "node_output";
+      node_id: string;
+      port: PortKind;
+      data_base64: string;
+      timestamp: number;
+    }
+  | {
       type: "stream_chunk";
       edge_id: string;
       from_node_id: string;

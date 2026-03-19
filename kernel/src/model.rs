@@ -264,6 +264,12 @@ pub enum ServerEvent {
         bytes: usize,
         timestamp: u64,
     },
+    NodeOutput {
+        node_id: String,
+        port: PortKind,
+        data_base64: String,
+        timestamp: u64,
+    },
     StreamChunk {
         edge_id: String,
         from_node_id: String,
