@@ -9,4 +9,13 @@ describe("renderDisplay", () => {
     render(result.content);
     expect(screen.getByText(/"ok": true/)).toBeTruthy();
   });
+
+  it("renders csv as a table", () => {
+    const result = renderDisplay(new TextEncoder().encode("name,age\nalice,30\nbob,41\n"));
+    render(result.content);
+    expect(screen.getByRole("table")).toBeTruthy();
+    expect(screen.getByText("name")).toBeTruthy();
+    expect(screen.getByText("alice")).toBeTruthy();
+    expect(screen.getByText("41")).toBeTruthy();
+  });
 });
