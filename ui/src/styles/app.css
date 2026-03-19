@@ -604,6 +604,12 @@ textarea {
   border-bottom: 1px solid var(--line);
 }
 
+.zoom-controls-note {
+  margin-bottom: 12px;
+  margin-left: 48px;
+  pointer-events: none;
+}
+
 .react-flow__attribution {
   display: none;
 }
@@ -787,26 +793,6 @@ textarea {
 .file-picker-button:hover {
   border-color: var(--line-strong);
   background: rgba(240, 138, 93, 0.12);
-}
-
-.zoom-controls-panel {
-  margin-bottom: 12px;
-  display: flex;
-  flex-direction: row;
-  align-items: flex-end;
-  gap: 10px;
-}
-
-.custom-zoom-controls {
-  overflow: hidden;
-}
-
-.zoom-control-fit {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 11px;
-  letter-spacing: -0.08em;
 }
 
 .zoom-control-reset {
