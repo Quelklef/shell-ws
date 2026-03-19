@@ -41,6 +41,8 @@ import type {
   FlowNode,
   NodeKind,
   NodeRuntimeState,
+  NodeUiState,
+  PersistedDisplayState,
   PortKind,
   Workspace,
   WorkspaceEdge,
@@ -48,7 +50,7 @@ import type {
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
-import { concatBytes, encodeId, fromBase64 } from "./lib/utils";
+import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
   shell: ShellNode,
@@ -57,6 +59,29 @@ const nodeTypes = {
 const edgeTypes = {
   workspace: WorkspaceEdgeView,
 };
+
+
+function serializeDisplayState(state?: { bytes: Uint8Array; completed: boolean }):
+  | PersistedDisplayState
+  | undefined {
+  if (!state) {
+    return undefined;
+  }
+  return {
+    dataBase64: toBase64(state.bytes),
+    completed: state.completed,
+  };
+}
+
+function deserializeDisplayState(state?: PersistedDisplayState | null) {
+  if (!state) {
+    return undefined;
+  }
+  return {
+    bytes: fromBase64(state.dataBase64),
+    completed: state.completed,
+  };
+}
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {
   return {
@@ -314,6 +339,8 @@ function WorkspaceCanvas() {
   const nodesRef = useRef<FlowNode[]>([]);
   const edgesRef = useRef<FlowEdge[]>([]);
   const autorunRef = useRef<Map<string, AutorunHandle>>(new Map());
+  const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
+  const persistTimerRef = useRef<number | null>(null);
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
 
@@ -332,6 +359,10 @@ function WorkspaceCanvas() {
     edgesRef.current = edges;
   }, [edges]);
 
+  useEffect(() => {
+    runtimeRef.current = runtime;
+  }, [runtime]);
+
   const buildWorkspace = useCallback(
     (
       nodesArg: FlowNode[] = nodesRef.current,
@@ -340,6 +371,7 @@ function WorkspaceCanvas() {
         Workspace,
         "id" | "name" | "cwd" | "ui"
       > | null = workspaceMetaRef.current,
+      runtimeArg: Record<string, NodeRuntimeState> = runtimeRef.current,
     ): Workspace | null => {
       if (!metaArg) {
         return null;
@@ -349,7 +381,26 @@ function WorkspaceCanvas() {
         name: metaArg.name,
         ui: metaArg.ui,
         cwd: metaArg.cwd,
-        nodes: nodesArg.map(flowNodeToWorkspaceNode),
+        nodes: nodesArg.map((node) => {
+          const model = flowNodeToWorkspaceNode(node);
+          const runtimeState = runtimeArg[node.id];
+          return {
+            ...model,
+            uiState: {
+              ...(model.uiState ?? {}),
+              previews: runtimeState?.previews
+                ? Object.fromEntries(
+                    Object.entries(runtimeState.previews)
+                      .map(([port, state]) => [
+                        port,
+                        serializeDisplayState(state),
+                      ])
+                      .filter((entry): entry is [string, PersistedDisplayState] => Boolean(entry[1])),
+                  )
+                : model.uiState?.previews,
+            },
+          };
+        }),
         edges: edgesArg.map(flowEdgeToWorkspaceEdge),
       };
     },
@@ -365,6 +416,19 @@ function WorkspaceCanvas() {
     },
     [buildWorkspace],
   );
+
+  const persistRuntimeSoon = useCallback(() => {
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+    }
+    persistTimerRef.current = window.setTimeout(() => {
+      const nextWorkspace = buildWorkspace();
+      if (nextWorkspace) {
+        saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+      }
+      persistTimerRef.current = null;
+    }, 150);
+  }, [buildWorkspace]);
 
   const updateWorkspaceCwd = useCallback(
     (cwd: string) => {
@@ -415,7 +479,7 @@ function WorkspaceCanvas() {
       type: "stop_execution",
       exec_id: execId,
     });
-  }, []);
+  }, [persistRuntimeSoon]);
 
   const handlers: ShellNodeActions = useMemo(
     () => ({
@@ -532,7 +596,17 @@ function WorkspaceCanvas() {
           Object.fromEntries(
             loaded.nodes.map((node) => [
               node.id,
-              { running: false, portActivity: {}, display: undefined },
+              {
+                running: false,
+                portActivity: {},
+                previews: node.uiState?.previews
+                  ? Object.fromEntries(
+                      Object.entries(node.uiState.previews)
+                        .map(([port, state]) => [port, deserializeDisplayState(state)])
+                        .filter((entry): entry is [string, NonNullable<ReturnType<typeof deserializeDisplayState>>] => Boolean(entry[1])),
+                    )
+                  : undefined,
+              },
             ]),
           ),
         );
@@ -746,6 +820,9 @@ function WorkspaceCanvas() {
               return current;
           }
         });
+        if (event.type !== "error") {
+          persistRuntimeSoon();
+        }
       },
       () => setKernelConnected(false),
     );
@@ -794,6 +871,9 @@ function WorkspaceCanvas() {
     return () => {
       for (const handle of autorunRef.current.values()) {
         window.clearInterval(handle.timerId);
+      }
+      if (persistTimerRef.current !== null) {
+        window.clearTimeout(persistTimerRef.current);
       }
       autorunRef.current.clear();
     };

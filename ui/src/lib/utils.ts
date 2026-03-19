@@ -2,6 +2,14 @@ export function encodeId(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function toBase64(bytes: Uint8Array) {
+  let raw = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    raw += String.fromCharCode(bytes[index] ?? 0);
+  }
+  return btoa(raw);
+}
+
 export function fromBase64(base64: string) {
   const raw = atob(base64);
   const bytes = new Uint8Array(raw.length);

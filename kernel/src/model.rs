@@ -38,6 +38,7 @@ impl Workspace {
                     args: None,
                     text: Some("hello from shell-ws\n".to_string()),
                     auto_run: None,
+                    ui_state: NodeUiState::default(),
                 },
                 Node {
                     id: "passthru-1".to_string(),
@@ -55,6 +56,7 @@ impl Workspace {
                     args: None,
                     text: None,
                     auto_run: None,
+                    ui_state: NodeUiState::default(),
                 },
             ],
             edges: vec![Edge {
@@ -98,6 +100,8 @@ pub struct Node {
     pub text: Option<String>,
     #[serde(default, alias = "auto_run")]
     pub auto_run: Option<AutoRunConfig>,
+    #[serde(default)]
+    pub ui_state: NodeUiState,
 }
 
 impl Node {
@@ -182,6 +186,24 @@ pub struct AutoRunConfig {
     pub enabled: bool,
     pub mode: ExecutionMode,
     pub interval_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PersistedDisplayState {
+    pub data_base64: String,
+    pub completed: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeUiState {
+    #[serde(default)]
+    pub active_preview_tab: Option<PortKind>,
+    #[serde(default)]
+    pub editor_heights: std::collections::HashMap<String, f64>,
+    #[serde(default)]
+    pub previews: std::collections::HashMap<PortKind, PersistedDisplayState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

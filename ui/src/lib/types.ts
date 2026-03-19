@@ -17,6 +17,17 @@ export type PortKind = "stdin" | "argv" | "stdout" | "stderr";
 export type BufferingMode = "unbuffered" | "line_or_1024" | "on_complete";
 export type ExecutionMode = "push" | "pull";
 
+export interface PersistedDisplayState {
+  dataBase64: string;
+  completed: boolean;
+}
+
+export interface NodeUiState {
+  activePreviewTab?: PortKind | null;
+  editorHeights?: Partial<Record<"script" | "args" | "text", number>>;
+  previews?: Partial<Record<PortKind, PersistedDisplayState>>;
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -43,6 +54,7 @@ export interface WorkspaceNode {
   args?: string[] | null;
   text?: string | null;
   autoRun?: AutoRunConfig | null;
+  uiState?: NodeUiState | null;
 }
 
 export interface AutoRunConfig {

@@ -3,7 +3,7 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { renderDisplay } from "../lib/format";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
@@ -88,9 +88,10 @@ export default function ShellNode({ data, selected }: NodeProps) {
     mode: "push" as const,
     intervalMs: 1000,
   };
-  const [activePreviewTab, setActivePreviewTab] = useState<PortKind | null>(
-    null,
-  );
+  const activePreviewTab = model.uiState?.activePreviewTab ?? null;
+  const scriptEditorRef = useRef<HTMLDivElement | null>(null);
+  const argsEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const previewTabs = nodePreviewTabs(model.kind);
   const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
@@ -107,6 +108,62 @@ export default function ShellNode({ data, selected }: NodeProps) {
           ),
         }
     : null;
+
+
+  const syncEditorHeight = (
+    key: "script" | "args" | "text",
+    height: number,
+  ) => {
+    const currentHeight = model.uiState?.editorHeights?.[key];
+    if (currentHeight && Math.abs(currentHeight - height) < 1) {
+      return;
+    }
+    typedData.onUpdate(model.id, {
+      uiState: {
+        ...(model.uiState ?? {}),
+        editorHeights: {
+          ...(model.uiState?.editorHeights ?? {}),
+          [key]: height,
+        },
+      },
+    });
+  };
+
+  useEffect(() => {
+    const element = scriptEditorRef.current;
+    if (!element) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      syncEditorHeight("script", element.getBoundingClientRect().height);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
+
+  useEffect(() => {
+    const element = argsEditorRef.current;
+    if (!element) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      syncEditorHeight("args", element.getBoundingClientRect().height);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
+
+  useEffect(() => {
+    const element = textEditorRef.current;
+    if (!element) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      syncEditorHeight("text", element.getBoundingClientRect().height);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
 
   return (
     <div
@@ -214,7 +271,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
               placeholder="shell"
             />
             <div
+              ref={scriptEditorRef}
               className="script-editor-codemirror nodrag nopan"
+              style={{ height: model.uiState?.editorHeights?.script ?? 132 }}
               onWheelCapture={(event) => event.stopPropagation()}
             >
               <CodeMirror
@@ -248,7 +307,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
               placeholder="binary path"
             />
             <textarea
+              ref={argsEditorRef}
               className="script-editor nodrag nopan"
+              style={{ height: model.uiState?.editorHeights?.args }}
               value={(model.args ?? []).join("\n")}
               placeholder="arguments, one per line"
               onWheelCapture={(event) => event.stopPropagation()}
@@ -287,7 +348,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
 
         {model.kind === "text" && (
           <textarea
+            ref={textEditorRef}
             className="script-editor nodrag nopan"
+            style={{ height: model.uiState?.editorHeights?.text }}
             value={model.text ?? ""}
             placeholder="text output"
             onWheelCapture={(event) => event.stopPropagation()}
@@ -355,9 +418,12 @@ export default function ShellNode({ data, selected }: NodeProps) {
                   activePreviewTab === port ? "is-active" : ""
                 }`}
                 onClick={() =>
-                  setActivePreviewTab((current) =>
-                    current === port ? null : port,
-                  )
+                  typedData.onUpdate(model.id, {
+                    uiState: {
+                      ...(model.uiState ?? {}),
+                      activePreviewTab: activePreviewTab === port ? null : port,
+                    },
+                  })
                 }
               >
                 {port}

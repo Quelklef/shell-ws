@@ -1329,6 +1329,7 @@ mod tests {
                     text: Some("hello
 ".to_string()),
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
                 Node {
                     id: "script-1".to_string(),
@@ -1346,6 +1347,7 @@ mod tests {
                     args: None,
                     text: None,
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
             ],
             edges: vec![Edge {
@@ -1417,6 +1419,7 @@ mod tests {
                     text: Some("hello
 ".to_string()),
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
                 Node {
                     id: "text-2".to_string(),
@@ -1435,6 +1438,7 @@ mod tests {
                     text: Some("world
 ".to_string()),
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
                 Node {
                     id: "script-1".to_string(),
@@ -1452,6 +1456,7 @@ mod tests {
                     args: None,
                     text: None,
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
             ],
             edges: vec![
@@ -1538,6 +1543,7 @@ mod tests {
                 args: None,
                 text: None,
                 auto_run: None,
+                ui_state: Default::default(),
             }],
             edges: vec![],
             ui: WorkspaceUi::default(),
@@ -1594,6 +1600,7 @@ mod tests {
                     text: Some("hello
 ".to_string()),
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
                 Node {
                     id: "passthru-1".to_string(),
@@ -1611,6 +1618,7 @@ mod tests {
                     args: None,
                     text: None,
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
                 Node {
                     id: "script-1".to_string(),
@@ -1628,6 +1636,7 @@ mod tests {
                     args: None,
                     text: None,
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
             ],
             edges: vec![
@@ -1712,6 +1721,7 @@ mod tests {
                     text: Some("hello
 ".to_string()),
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
                 Node {
                     id: "script-1".to_string(),
@@ -1729,6 +1739,7 @@ mod tests {
                     args: None,
                     text: None,
                     auto_run: None,
+                    ui_state: Default::default(),
                 },
             ],
             edges: vec![Edge {
