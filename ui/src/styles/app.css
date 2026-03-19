@@ -275,7 +275,6 @@ textarea {
   align-items: center;
   justify-content: flex-start;
   gap: 6px;
-  margin-top: auto;
 }
 
 .node-toolbar button {
