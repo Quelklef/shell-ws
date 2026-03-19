@@ -156,17 +156,14 @@ export default function ShellNode({ data, selected }: NodeProps) {
     return () => observer.disconnect();
   });
 
-  useEffect(() => {
-    const element = textEditorRef.current;
+  useLayoutEffect(() => {
+    const element = commentRef.current;
     if (!element) {
       return;
     }
-    const observer = new ResizeObserver(() => {
-      syncEditorHeight("text", element.getBoundingClientRect().height);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  });
+    element.style.height = "0px";
+    element.style.height = `${Math.max(22, element.scrollHeight)}px`;
+  }, [model.comment]);
 
   return (
     <div
