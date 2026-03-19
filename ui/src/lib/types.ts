@@ -23,9 +23,9 @@ export interface PersistedDisplayState {
 }
 
 export interface NodeUiState {
-  activePreviewTab?: PortKind | null;
+  activePreviewTab?: string | null;
   editorHeights?: Partial<Record<"script" | "args" | "text", number>>;
-  previews?: Partial<Record<PortKind, PersistedDisplayState>>;
+  previews?: Record<string, PersistedDisplayState>;
 }
 
 export interface Workspace {
@@ -146,7 +146,7 @@ export interface NodeRuntimeState {
   lastExecId?: string;
   portActivity: Partial<Record<PortKind, number>>;
   display?: DisplayState;
-  previews?: Partial<Record<PortKind, DisplayState>>;
+  previews?: Record<string, DisplayState>;
 }
 
 export interface ShellNodeData extends Record<string, unknown> {
@@ -154,6 +154,7 @@ export interface ShellNodeData extends Record<string, unknown> {
   runtime: NodeRuntimeState;
   outputSlots?: number[];
   argvSlots?: number[];
+  previewTabs?: string[];
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onDelete: (nodeId: string) => void;

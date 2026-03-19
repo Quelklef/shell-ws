@@ -31,7 +31,7 @@ import {
   saveWorkspace,
 } from "./lib/api";
 import { layoutSelectedNodes } from "./lib/layout";
-import { nodeArgvSlots, nodeHasArgvPort, nodePreviewTabs } from "./lib/nodePorts";
+import { nodeArgvSlots, nodeHasArgvPort, nodePreviewTabs, nodePreviewTabsForNode } from "./lib/nodePorts";
 import type {
   AutoRunConfig,
   BufferingMode,
@@ -186,6 +186,10 @@ function computeArgvSlots(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
   return nodeArgvSlots(nodeId, kind, edges, parseHandleId);
 }
 
+function computePreviewTabs(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
+  return nodePreviewTabsForNode(nodeId, kind, edges, parseHandleId);
+}
+
 function syncNodeData(
   current: FlowNode[],
   runtime: Record<string, NodeRuntimeState>,
@@ -200,6 +204,7 @@ function syncNodeData(
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
       outputSlots: computeOutputSlots(node.id, node.data.model.kind, edges),
       argvSlots: computeArgvSlots(node.id, node.data.model.kind, edges),
+      previewTabs: computePreviewTabs(node.id, node.data.model.kind, edges),
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
       onDelete: handlers.onDelete,
@@ -227,6 +232,7 @@ function toFlowNode(
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
       outputSlots: computeOutputSlots(node.id, node.kind, edges),
       argvSlots: computeArgvSlots(node.id, node.kind, edges),
+      previewTabs: computePreviewTabs(node.id, node.kind, edges),
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
       onDelete: handlers.onDelete,
@@ -770,6 +776,29 @@ function WorkspaceCanvas() {
                     previews: {
                       ...(nextState[event.to_node_id]?.previews ?? {}),
                       stdin: {
+                        bytes: concatBytes(previous, nextBytes),
+                        completed: false,
+                      },
+                    },
+                  };
+                }
+
+                if (targetPort === "argv") {
+                  const targetHandle = edgesRef.current.find((edge) => edge.id === event.edge_id)
+                    ?.targetHandle as string | null | undefined;
+                  const parsed = parseHandleId(targetHandle);
+                  const previewKey = parsed.slot ? `argv-${parsed.slot}` : "argv";
+                  const previous =
+                    current[event.to_node_id]?.previews?.[previewKey]?.bytes ??
+                    new Uint8Array();
+                  nextState[event.to_node_id] = {
+                    ...(nextState[event.to_node_id] ?? {
+                      running: false,
+                      portActivity: {},
+                    }),
+                    previews: {
+                      ...(nextState[event.to_node_id]?.previews ?? {}),
+                      [previewKey]: {
                         bytes: concatBytes(previous, nextBytes),
                         completed: false,
                       },

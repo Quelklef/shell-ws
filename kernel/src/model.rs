@@ -199,11 +199,11 @@ pub struct PersistedDisplayState {
 #[serde(rename_all = "camelCase")]
 pub struct NodeUiState {
     #[serde(default)]
-    pub active_preview_tab: Option<PortKind>,
+    pub active_preview_tab: Option<String>,
     #[serde(default)]
     pub editor_heights: std::collections::HashMap<String, f64>,
     #[serde(default)]
-    pub previews: std::collections::HashMap<PortKind, PersistedDisplayState>,
+    pub previews: std::collections::HashMap<String, PersistedDisplayState>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

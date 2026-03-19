@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nodeArgvSlots, nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "./nodePorts";
+import { nodeArgvSlots, nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs, nodePreviewTabsForNode } from "./nodePorts";
 
 describe("node port affordances", () => {
   it("gives every node stdout and stderr previews", () => {
@@ -37,3 +37,23 @@ describe("node port affordances", () => {
       nodeArgvSlots("script-1", "script", [], () => ({ port: "stdout" })),
     ).toEqual([1]);
   });
+
+
+it("shows only connected input previews plus unconditional outputs", () => {
+  expect(
+    nodePreviewTabsForNode(
+      "script-1",
+      "script",
+      [
+        { target: "script-1", targetHandle: "stdin" },
+        { target: "script-1", targetHandle: "argv-2" },
+      ],
+      (handleId) => {
+        const match = /^(stdin|argv|stdout|stderr)-(\d+)$/.exec(handleId ?? "");
+        return match
+          ? { port: match[1] as any, slot: Number(match[2]) }
+          : { port: (handleId ?? "stdout") as any };
+      },
+    ),
+  ).toEqual(["stdin", "argv-2", "stdout", "stderr"]);
+});

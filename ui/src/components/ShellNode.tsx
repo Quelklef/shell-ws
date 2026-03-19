@@ -94,7 +94,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
   const argsEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const previewTabs = nodePreviewTabs(model.kind);
+  const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
   const activePreview = activePreviewTab
