@@ -779,34 +779,52 @@ textarea {
   background: rgba(240, 138, 93, 0.12);
 }
 
-.zoom-controls-note {
-  margin-bottom: 48px;
+.zoom-controls-panel {
+  margin-bottom: 12px;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  flex-direction: row;
+  align-items: flex-end;
+  gap: 10px;
 }
 
-.zoom-controls-note button {
-  border: 1px solid var(--line);
-  color: var(--text);
-  background: rgba(10, 11, 12, 0.86);
-  border-radius: 7px;
-  padding: 6px 8px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  cursor: pointer;
+.custom-zoom-controls {
+  overflow: hidden;
+}
+
+.zoom-control-fit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  letter-spacing: -0.08em;
+}
+
+.zoom-control-reset {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.zoom-control-reset svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .zoom-wheel-note {
   padding: 6px 8px;
   border: 1px solid rgba(244, 236, 223, 0.14);
-  border-radius: 8px;
+  border-radius: 7px;
   background: rgba(10, 11, 12, 0.86);
   color: var(--text-soft);
   font-size: 10px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .html-pane {

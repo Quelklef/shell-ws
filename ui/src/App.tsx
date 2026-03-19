@@ -1,7 +1,6 @@
 import {
   Background,
   ConnectionLineType,
-  Controls,
   MiniMap,
   Panel,
   ReactFlow,
@@ -1324,11 +1323,49 @@ function WorkspaceCanvas() {
           }
         >
           <MiniMap pannable zoomable className="minimap" />
-          <Controls />
-          <Panel position="bottom-right" className="zoom-controls-note">
-            <button type="button" onClick={() => void flow.zoomTo(1)}>
-              reset zoom
-            </button>
+          <Panel position="bottom-left" className="zoom-controls-panel">
+            <div className="react-flow__controls custom-zoom-controls">
+              <button
+                type="button"
+                className="react-flow__controls-button"
+                title="zoom in"
+                onClick={() => void flow.zoomIn()}
+              >
+                +
+              </button>
+              <button
+                type="button"
+                className="react-flow__controls-button"
+                title="zoom out"
+                onClick={() => void flow.zoomOut()}
+              >
+                -
+              </button>
+              <button
+                type="button"
+                className="react-flow__controls-button"
+                title="fit view"
+                onClick={() => void flow.fitView()}
+              >
+                <span className="zoom-control-fit" aria-hidden="true">
+                  [ ]
+                </span>
+              </button>
+              <button
+                type="button"
+                className="react-flow__controls-button"
+                title="reset zoom"
+                onClick={() => void flow.zoomTo(1)}
+              >
+                <span className="zoom-control-reset" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" focusable="false">
+                    <circle cx="10" cy="10" r="5.5" />
+                    <path d="M14.5 14.5 20 20" />
+                    <path d="M7 10h6" />
+                  </svg>
+                </span>
+              </button>
+            </div>
             <div className="zoom-wheel-note">scroll wheel: zoom</div>
           </Panel>
           <Background gap={28} size={1} color="rgba(250, 244, 233, 0.08)" />
