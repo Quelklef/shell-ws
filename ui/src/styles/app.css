@@ -848,11 +848,12 @@ textarea {
 
 .port-preview-dot {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 0;
+  right: 0;
   width: 5px;
   height: 5px;
   border-radius: 999px;
+  transform: translate(40%, -40%);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
