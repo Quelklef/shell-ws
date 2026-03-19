@@ -25,6 +25,9 @@ export function nodeArgvSlots(nodeId: string, kind: NodeKind, edges: { target: s
     .map((edge) => parseHandleId(edge.targetHandle))
     .filter((entry) => entry.port === "argv")
     .map((entry) => entry.slot ?? 1);
-  const maxSlot = Math.max(1, ...usedSlots);
+  if (usedSlots.length === 0) {
+    return [1];
+  }
+  const maxSlot = Math.max(...usedSlots);
   return Array.from({ length: maxSlot + 1 }, (_, index) => index + 1);
 }

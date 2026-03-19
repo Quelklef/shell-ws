@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "./nodePorts";
+import { nodeArgvSlots, nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "./nodePorts";
 
 describe("node port affordances", () => {
   it("gives every node stdout and stderr previews", () => {
@@ -29,3 +29,9 @@ describe("node port affordances", () => {
     expect(nodeHasArgvPort("file")).toBe(false);
   });
 });
+
+  it("shows a single initial argv slot before any connections exist", () => {
+    expect(
+      nodeArgvSlots("script-1", "script", [], () => ({ port: "stdout" })),
+    ).toEqual([1]);
+  });
