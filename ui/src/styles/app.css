@@ -240,6 +240,8 @@ textarea {
 }
 
 .canvas-shell {
+  grid-column: 2;
+  min-width: 0;
   position: relative;
 }
 
@@ -613,6 +615,11 @@ textarea {
   .sidebar {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+
+  .canvas-shell {
+    grid-column: 1;
+    min-height: 0;
   }
 }
 
