@@ -826,6 +826,10 @@ textarea {
 }
 
 .port-preview-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid rgba(244, 232, 214, 0.16);
   background: rgba(9, 11, 13, 0.4);
   color: var(--text-soft);
@@ -843,28 +847,28 @@ textarea {
   background: rgba(56, 41, 16, 0.7);
 }
 
-.port-preview-tab-stdin.has-data {
-  border-color: rgba(242, 192, 120, 0.42);
-  color: #f6ddb2;
-  background: rgba(56, 41, 16, 0.62);
+.port-preview-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  flex: 0 0 auto;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.35);
 }
 
-.port-preview-tab-stdout.has-data {
-  border-color: rgba(143, 207, 158, 0.42);
-  color: #d7f4df;
-  background: rgba(21, 47, 28, 0.62);
+.port-preview-dot-stdin {
+  background: var(--accent-soft);
 }
 
-.port-preview-tab-stderr.has-data {
-  border-color: rgba(222, 93, 93, 0.52);
-  color: #f4c3c3;
-  background: rgba(59, 21, 21, 0.72);
+.port-preview-dot-stdout {
+  background: var(--success);
 }
 
-.port-preview-tab-argv.has-data {
-  border-color: rgba(120, 184, 242, 0.42);
-  color: #d4e9fb;
-  background: rgba(21, 36, 58, 0.62);
+.port-preview-dot-stderr {
+  background: var(--danger);
+}
+
+.port-preview-dot-argv {
+  background: #78b8f2;
 }
 
 .port-preview-pane {

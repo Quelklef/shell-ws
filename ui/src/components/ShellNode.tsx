@@ -528,7 +528,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
                   type="button"
                   className={`port-preview-tab port-preview-tab-${portClass} nodrag nopan ${
                     isOpen ? "is-active" : ""
-                  } ${hasData ? "has-data" : ""}`}
+                  }`}
                   onClick={() => {
                     const nextTabs = isOpen
                       ? openPreviewTabs.filter((entry) => entry !== port)
@@ -553,7 +553,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
                     });
                   }}
                 >
-                  {port}
+                  <span>{port}</span>
+                  {hasData && <span className={`port-preview-dot port-preview-dot-${portClass}`} />}
                 </button>
               );
             })}
