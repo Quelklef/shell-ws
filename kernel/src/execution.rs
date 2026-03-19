@@ -1028,7 +1028,6 @@ impl ExecutionContext {
         {
             let mut states = self.stream_states.lock();
             let state = states.entry(node_id.to_string()).or_default();
-            state.running = false;
             state.scheduled = false;
             state.stdin_writer = None;
         }
@@ -1038,8 +1037,6 @@ impl ExecutionContext {
         } else {
             self.live_outputs.lock().remove(node_id);
         }
-
-        self.emit_finished(node_id, exit_code);
 
         let edges = self
             .outgoing
@@ -1077,6 +1074,15 @@ impl ExecutionContext {
                     .await?;
             }
         }
+
+        // Keep the node marked running until downstream completion delivery finishes.
+        // Otherwise the run can appear idle before blocked targets have committed pulled inputs.
+        {
+            let mut states = self.stream_states.lock();
+            let state = states.entry(node_id.to_string()).or_default();
+            state.running = false;
+        }
+        self.emit_finished(node_id, exit_code);
         Ok(())
     }
 
@@ -1559,24 +1565,358 @@ mod tests {
         .expect("execution never completed")
     }
 
-    #[tokio::test]
-    async fn rerun_uses_materialized_inputs() {
-        let (tx, _) = broadcast::channel(64);
-        let manager = ExecutionManager::new(tx.clone());
-        let mut rx = tx.subscribe();
-        let mut script = node(NodeKind::Script, "script-1");
-        script.script = Some("grep hello >/dev/null; echo done >&2".to_string());
-        script.materialized_values.insert(
-            "stdin".to_string(),
-            MaterializedValue {
-                data_base64: encode_bytes(b"hello\n"),
-            },
-        );
-        let workspace = workspace(vec![script], vec![]);
 
-        let exec_id = manager.run(workspace, "script-1".to_string(), ExecutionAction::Rerun);
-        assert_eq!(wait_for_finish(&mut rx, &exec_id, "script-1").await, Some(0));
+    mod smoke {
+        use super::*;
+        use std::collections::{BTreeMap, BTreeSet};
+        use tempfile::tempdir;
+
+        type Snapshot = BTreeMap<String, BTreeMap<String, String>>;
+
+        fn smoke_script(id: &str, script: &str) -> Node {
+            let mut node = node(NodeKind::Script, id);
+            node.script = Some(script.to_string());
+            node
+        }
+
+        fn smoke_edge(id: &str, from: &str, to: &str) -> Edge {
+            let mut edge = edge(id, from, PortKind::Stdout, to, PortKind::Stdin, None);
+            edge.buffering = BufferingMode::Unbuffered;
+            edge
+        }
+
+        fn seed(node: &mut Node, key: &str, value: &str) {
+            node.materialized_values.insert(
+                key.to_string(),
+                MaterializedValue {
+                    data_base64: encode_bytes(value.as_bytes()),
+                },
+            );
+        }
+
+        fn seeded_snapshot() -> Snapshot {
+            BTreeMap::from([
+                (
+                    "a".to_string(),
+                    BTreeMap::from([
+                        ("stdout".to_string(), "old-a".to_string()),
+                        ("stderr".to_string(), "old-a-err".to_string()),
+                    ]),
+                ),
+                (
+                    "b".to_string(),
+                    BTreeMap::from([
+                        ("stdin".to_string(), "old-b-in".to_string()),
+                        ("stdout".to_string(), "old-b-out".to_string()),
+                        ("stderr".to_string(), "old-b-err".to_string()),
+                    ]),
+                ),
+                (
+                    "c".to_string(),
+                    BTreeMap::from([
+                        ("stdin".to_string(), "old-c-in".to_string()),
+                        ("stdout".to_string(), "old-c-out".to_string()),
+                        ("stderr".to_string(), "old-c-err".to_string()),
+                    ]),
+                ),
+            ])
+        }
+
+        fn build_smoke_context(action: ExecutionAction) -> (Arc<ExecutionContext>, tempfile::TempDir, Snapshot) {
+            let tempdir = tempdir().expect("tempdir");
+            let mut a = smoke_script("a", "printf 'A' >> trace.log; printf 'a'");
+            let mut b = smoke_script(
+                "b",
+                r#"printf 'B' >> trace.log; input=$(cat); printf '%s b' "$input""#,
+            );
+            let mut c = smoke_script(
+                "c",
+                r#"printf 'C' >> trace.log; input=$(cat); printf '%s c' "$input""#,
+            );
+
+            seed(&mut a, "stdout", "old-a");
+            seed(&mut a, "stderr", "old-a-err");
+            seed(&mut b, "stdin", "old-b-in");
+            seed(&mut b, "stdout", "old-b-out");
+            seed(&mut b, "stderr", "old-b-err");
+            seed(&mut c, "stdin", "old-c-in");
+            seed(&mut c, "stdout", "old-c-out");
+            seed(&mut c, "stderr", "old-c-err");
+
+            let mut ws = workspace(
+                vec![a, b, c],
+                vec![smoke_edge("edge-ab", "a", "b"), smoke_edge("edge-bc", "b", "c")],
+            );
+            ws.cwd = tempdir.path().to_string_lossy().into_owned();
+            let context = Arc::new(
+                ExecutionContext::new(
+                    "smoke-exec".to_string(),
+                    ws,
+                    action,
+                    broadcast::channel(64).0,
+                    CancellationToken::new(),
+                )
+                .expect("context"),
+            );
+            (context, tempdir, seeded_snapshot())
+        }
+
+        fn trace_recomputed_nodes(tempdir: &tempfile::TempDir) -> BTreeSet<String> {
+            let trace = std::fs::read_to_string(tempdir.path().join("trace.log")).unwrap_or_default();
+            trace.chars()
+                .filter_map(|marker| match marker {
+                    'A' => Some("a".to_string()),
+                    'B' => Some("b".to_string()),
+                    'C' => Some("c".to_string()),
+                    _ => None,
+                })
+                .collect()
+        }
+
+        fn final_snapshot(context: &ExecutionContext) -> Snapshot {
+            let materialized = context.materialized_values.lock();
+            let mut snapshot = BTreeMap::new();
+            for (node_id, ports) in [
+                ("a", ["stdout", "stderr"].as_slice()),
+                ("b", ["stdin", "stdout", "stderr"].as_slice()),
+                ("c", ["stdin", "stdout", "stderr"].as_slice()),
+            ] {
+                let values = ports
+                    .iter()
+                    .map(|port| {
+                        let bytes = materialized
+                            .get(node_id)
+                            .and_then(|node_ports| node_ports.get(*port))
+                            .cloned()
+                            .unwrap_or_default();
+                        (
+                            (*port).to_string(),
+                            String::from_utf8(bytes).expect("materialized utf8"),
+                        )
+                    })
+                    .collect();
+                snapshot.insert(node_id.to_string(), values);
+            }
+            snapshot
+        }
+
+        fn rematerialized_ports(before: &Snapshot, after: &Snapshot) -> BTreeSet<String> {
+            let mut changed = BTreeSet::new();
+            for (node_id, ports) in after {
+                for (port, value) in ports {
+                    let old = before.get(node_id).and_then(|node| node.get(port));
+                    if old != Some(value) {
+                        changed.insert(format!("{node_id}.{port}"));
+                    }
+                }
+            }
+            changed
+        }
+
+        async fn assert_smoke_case(
+            action: ExecutionAction,
+            expected_recomputed: &[&str],
+            expected_rematerialized: &[&str],
+            expected_snapshot: Snapshot,
+        ) {
+            let (context, tempdir, seeded) = build_smoke_context(action);
+            context.clone().run("b".to_string()).await.expect("run");
+
+            let recomputed = trace_recomputed_nodes(&tempdir);
+            let final_values = final_snapshot(&context);
+            let rematerialized = rematerialized_ports(&seeded, &final_values);
+
+            assert_eq!(
+                recomputed,
+                expected_recomputed.iter().map(|node| (*node).to_string()).collect(),
+                "unexpected recomputed nodes for {:?}",
+                action
+            );
+            assert_eq!(
+                rematerialized,
+                expected_rematerialized.iter().map(|port| (*port).to_string()).collect(),
+                "unexpected rematerialized ports for {:?}",
+                action
+            );
+            assert_eq!(final_values, expected_snapshot, "unexpected final snapshot for {:?}", action);
+        }
+
+        #[tokio::test]
+        async fn smoke_test_pull_inputs() {
+            assert_smoke_case(
+                ExecutionAction::PullInputs,
+                &["a"],
+                &["a.stdout", "a.stderr", "b.stdin"],
+                BTreeMap::from([
+                    (
+                        "a".to_string(),
+                        BTreeMap::from([
+                            ("stdout".to_string(), "a".to_string()),
+                            ("stderr".to_string(), "".to_string()),
+                        ]),
+                    ),
+                    (
+                        "b".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "a".to_string()),
+                            ("stdout".to_string(), "old-b-out".to_string()),
+                            ("stderr".to_string(), "old-b-err".to_string()),
+                        ]),
+                    ),
+                    (
+                        "c".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-c-in".to_string()),
+                            ("stdout".to_string(), "old-c-out".to_string()),
+                            ("stderr".to_string(), "old-c-err".to_string()),
+                        ]),
+                    ),
+                ]),
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn smoke_test_pull_run() {
+            assert_smoke_case(
+                ExecutionAction::PullRun,
+                &["a", "b"],
+                &["a.stdout", "a.stderr", "b.stdin", "b.stdout", "b.stderr"],
+                BTreeMap::from([
+                    (
+                        "a".to_string(),
+                        BTreeMap::from([
+                            ("stdout".to_string(), "a".to_string()),
+                            ("stderr".to_string(), "".to_string()),
+                        ]),
+                    ),
+                    (
+                        "b".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "a".to_string()),
+                            ("stdout".to_string(), "a b".to_string()),
+                            ("stderr".to_string(), "".to_string()),
+                        ]),
+                    ),
+                    (
+                        "c".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-c-in".to_string()),
+                            ("stdout".to_string(), "old-c-out".to_string()),
+                            ("stderr".to_string(), "old-c-err".to_string()),
+                        ]),
+                    ),
+                ]),
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn smoke_test_rerun() {
+            assert_smoke_case(
+                ExecutionAction::Rerun,
+                &["b"],
+                &["b.stdout", "b.stderr"],
+                BTreeMap::from([
+                    (
+                        "a".to_string(),
+                        BTreeMap::from([
+                            ("stdout".to_string(), "old-a".to_string()),
+                            ("stderr".to_string(), "old-a-err".to_string()),
+                        ]),
+                    ),
+                    (
+                        "b".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-b-in".to_string()),
+                            ("stdout".to_string(), "old-b-in b".to_string()),
+                            ("stderr".to_string(), "".to_string()),
+                        ]),
+                    ),
+                    (
+                        "c".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-c-in".to_string()),
+                            ("stdout".to_string(), "old-c-out".to_string()),
+                            ("stderr".to_string(), "old-c-err".to_string()),
+                        ]),
+                    ),
+                ]),
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn smoke_test_rerun_push() {
+            assert_smoke_case(
+                ExecutionAction::RerunPush,
+                &["b", "c"],
+                &["b.stdout", "b.stderr", "c.stdin", "c.stdout", "c.stderr"],
+                BTreeMap::from([
+                    (
+                        "a".to_string(),
+                        BTreeMap::from([
+                            ("stdout".to_string(), "old-a".to_string()),
+                            ("stderr".to_string(), "old-a-err".to_string()),
+                        ]),
+                    ),
+                    (
+                        "b".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-b-in".to_string()),
+                            ("stdout".to_string(), "old-b-in b".to_string()),
+                            ("stderr".to_string(), "".to_string()),
+                        ]),
+                    ),
+                    (
+                        "c".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-b-in b".to_string()),
+                            ("stdout".to_string(), "old-b-in b c".to_string()),
+                            ("stderr".to_string(), "".to_string()),
+                        ]),
+                    ),
+                ]),
+            )
+            .await;
+        }
+
+        #[tokio::test]
+        async fn smoke_test_repush() {
+            assert_smoke_case(
+                ExecutionAction::Repush,
+                &["c"],
+                &["c.stdin", "c.stdout", "c.stderr"],
+                BTreeMap::from([
+                    (
+                        "a".to_string(),
+                        BTreeMap::from([
+                            ("stdout".to_string(), "old-a".to_string()),
+                            ("stderr".to_string(), "old-a-err".to_string()),
+                        ]),
+                    ),
+                    (
+                        "b".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-b-in".to_string()),
+                            ("stdout".to_string(), "old-b-out".to_string()),
+                            ("stderr".to_string(), "old-b-err".to_string()),
+                        ]),
+                    ),
+                    (
+                        "c".to_string(),
+                        BTreeMap::from([
+                            ("stdin".to_string(), "old-b-out".to_string()),
+                            ("stdout".to_string(), "old-b-out c".to_string()),
+                            ("stderr".to_string(), "".to_string()),
+                        ]),
+                    ),
+                ]),
+            )
+            .await;
+        }
     }
+
 
     #[tokio::test]
     async fn pull_inputs_runs_shared_dependencies_once() {
@@ -1662,37 +2002,6 @@ mod tests {
         assert_eq!(source_starts, 1, "shared dependency should execute once per pull_run");
     }
 
-    #[tokio::test]
-    async fn pull_inputs_materializes_without_running_target() {
-        let (tx, _) = broadcast::channel(128);
-        let manager = ExecutionManager::new(tx.clone());
-        let mut rx = tx.subscribe();
-        let mut text = node(NodeKind::Text, "text-1");
-        text.text = Some("hello\n".to_string());
-        let mut script = node(NodeKind::Script, "script-1");
-        script.script = Some("cat".to_string());
-        let workspace = workspace(
-            vec![text, script],
-            vec![edge("edge-1", "text-1", PortKind::Stdout, "script-1", PortKind::Stdin, None)],
-        );
-
-        let exec_id = manager.run(workspace, "script-1".to_string(), ExecutionAction::PullInputs);
-        assert_eq!(wait_for_finish(&mut rx, &exec_id, "text-1").await, Some(0));
-        let saw_target_start = timeout(Duration::from_millis(300), async {
-            loop {
-                match rx.recv().await {
-                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, .. })
-                        if seen == exec_id && node_id == "script-1" => return true,
-                    Ok(ServerEvent::ExecutionStopped { .. }) => return false,
-                    Ok(_) => {}
-                    Err(_) => return false,
-                }
-            }
-        })
-        .await
-        .unwrap_or(false);
-        assert!(!saw_target_start, "target should not run during pull_inputs");
-    }
 
     #[tokio::test]
     async fn rerun_push_reuses_cached_sibling_inputs() {
@@ -1829,83 +2138,8 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn rerun_does_not_propagate_downstream() {
-        let (tx, _) = broadcast::channel(256);
-        let manager = ExecutionManager::new(tx.clone());
-        let mut rx = tx.subscribe();
-        let mut source = node(NodeKind::Script, "source");
-        source.script = Some("printf 'hello\n'".to_string());
-        source.materialized_values.insert(
-            "stdin".to_string(),
-            MaterializedValue {
-                data_base64: encode_bytes(b"input\n"),
-            },
-        );
-        let mut sink = node(NodeKind::Script, "sink");
-        sink.script = Some("cat >/dev/null".to_string());
-        let workspace = workspace(
-            vec![source, sink],
-            vec![edge("edge-1", "source", PortKind::Stdout, "sink", PortKind::Stdin, None)],
-        );
 
-        let exec_id = manager.run(workspace, "source".to_string(), ExecutionAction::Rerun);
-        assert_eq!(wait_for_finish(&mut rx, &exec_id, "source").await, Some(0));
-        let saw_sink = timeout(Duration::from_millis(300), async {
-            loop {
-                match rx.recv().await {
-                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "sink" => return true,
-                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
-                    Ok(_) => {}
-                    Err(_) => return false,
-                }
-            }
-        })
-        .await
-        .unwrap_or(false);
-        assert!(!saw_sink, "rerun should not propagate beyond the target node");
-    }
 
-    #[tokio::test]
-    async fn repush_recomputes_downstream_nodes() {
-        let (tx, _) = broadcast::channel(256);
-        let manager = ExecutionManager::new(tx.clone());
-        let mut rx = tx.subscribe();
-        let mut source = node(NodeKind::Text, "source");
-        source.materialized_values.insert(
-            "stdout".to_string(),
-            MaterializedValue {
-                data_base64: encode_bytes(b"cached\n"),
-            },
-        );
-        let mut sink = node(NodeKind::Script, "sink");
-        sink.script = Some("grep cached >/dev/null".to_string());
-        let workspace = workspace(
-            vec![source, sink],
-            vec![edge("edge-1", "source", PortKind::Stdout, "sink", PortKind::Stdin, None)],
-        );
-
-        let exec_id = manager.run(workspace, "source".to_string(), ExecutionAction::Repush);
-        assert_eq!(wait_for_finish(&mut rx, &exec_id, "sink").await, Some(0));
-    }
-
-    #[tokio::test]
-    async fn repush_uses_materialized_outputs_without_running_node() {
-        let (tx, _) = broadcast::channel(128);
-        let manager = ExecutionManager::new(tx.clone());
-        let mut rx = tx.subscribe();
-        let mut text = node(NodeKind::Text, "text-1");
-        text.materialized_values.insert(
-            "stdout".to_string(),
-            MaterializedValue {
-                data_base64: encode_bytes(b"cached\n"),
-            },
-        );
-        let workspace = workspace(vec![text], vec![]);
-
-        let exec_id = manager.run(workspace, "text-1".to_string(), ExecutionAction::Repush);
-        assert_eq!(wait_for_finish(&mut rx, &exec_id, "text-1").await, Some(0));
-    }
 
     #[tokio::test]
     async fn materialized_empty_outputs_still_allow_repush() {
