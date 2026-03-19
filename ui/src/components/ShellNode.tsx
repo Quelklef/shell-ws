@@ -102,6 +102,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const argsEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
+  const nodeCardRef = useRef<HTMLDivElement | null>(null);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
@@ -162,6 +163,34 @@ export default function ShellNode({ data, selected }: NodeProps) {
     observer.observe(element);
     return () => observer.disconnect();
   });
+
+  useLayoutEffect(() => {
+    const element = nodeCardRef.current;
+    if (!element) {
+      return;
+    }
+    const measuredHeight = element.scrollHeight + 2;
+    if (measuredHeight > model.size.height + 1) {
+      typedData.onUpdate(model.id, {
+        size: {
+          ...model.size,
+          height: measuredHeight,
+        },
+      });
+    }
+  }, [
+    activePreviewTab,
+    autoRun.enabled,
+    htmlContent,
+    model.args,
+    model.comment,
+    model.kind,
+    model.path,
+    model.script,
+    model.size,
+    model.text,
+    renderedPreview,
+  ]);
 
   useLayoutEffect(() => {
     const element = commentRef.current;
@@ -262,7 +291,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         />
       </div>
 
-      <div className="node-card">
+      <div ref={nodeCardRef} className="node-card">
         <button
           type="button"
           className="node-delete nodrag nopan"
