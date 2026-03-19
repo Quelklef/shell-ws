@@ -16,6 +16,11 @@ import type {
 import { clamp } from "../lib/utils";
 
 const PREVIEW_HEIGHT_DELTA = 156;
+const PORT_SPACING = 24;
+const STDOUT_PORT_TOP = 84;
+const STDERR_PORT_TOP = STDOUT_PORT_TOP + PORT_SPACING;
+const STDIN_PORT_TOP = 96;
+const ARGV_FIRST_PORT_TOP = STDIN_PORT_TOP + PORT_SPACING;
 
 function AutoRunControls({
   config,
@@ -185,7 +190,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               ? "is-active"
               : ""
           }`}
-          style={{ top: nodeHasArgvPort(model.kind) ? 78 : 96 }}
+          style={{ top: nodeHasArgvPort(model.kind) ? STDIN_PORT_TOP : STDIN_PORT_TOP }}
         />
       )}
       {nodeHasArgvPort(model.kind) &&
@@ -201,7 +206,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 ? "is-active"
                 : ""
             }`}
-            style={{ top: 112 + index * 24 }}
+            style={{ top: ARGV_FIRST_PORT_TOP + index * PORT_SPACING }}
           />
         ))}
       {(model.kind === "script" ||
@@ -210,11 +215,11 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "text" ||
         model.kind === "passthru" ||
         model.kind === "html") &&
-        outputHandle("stdout", 84, "stdout", runtime.portActivity.stdout)}
+        outputHandle("stdout", STDOUT_PORT_TOP, "stdout", runtime.portActivity.stdout)}
       {(model.kind === "script" ||
         model.kind === "exec" ||
         model.kind === "file") &&
-        outputHandle("stderr", 128, "stderr", runtime.portActivity.stderr)}
+        outputHandle("stderr", STDERR_PORT_TOP, "stderr", runtime.portActivity.stderr)}
 
       <div className="node-comment-floating">
         <textarea
