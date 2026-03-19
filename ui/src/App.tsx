@@ -1341,6 +1341,8 @@ function WorkspaceCanvas() {
           zoomOnScroll
           panOnScroll={false}
           panOnDrag={[1, 2]}
+          minZoom={0.01}
+          maxZoom={64}
           colorMode="dark"
           connectionLineType={ConnectionLineType.SmoothStep}
           onMoveEnd={(_, viewport) =>
@@ -1360,8 +1362,11 @@ function WorkspaceCanvas() {
         >
           <MiniMap pannable zoomable className="minimap" />
           <Controls />
-          <Panel position="bottom-right" className="zoom-wheel-note">
-            scroll wheel: zoom
+          <Panel position="bottom-right" className="zoom-controls-note">
+            <button type="button" onClick={() => void flow.zoomTo(1)}>
+              reset zoom
+            </button>
+            <div className="zoom-wheel-note">scroll wheel: zoom</div>
           </Panel>
           <Background gap={28} size={1} color="rgba(250, 244, 233, 0.08)" />
         </ReactFlow>
