@@ -165,6 +165,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
     }
     const selectionStart = element.selectionStart;
     const selectionEnd = element.selectionEnd;
+    // A trailing newline does not reliably contribute a visual line to scrollHeight, so
+    // temporarily add a sentinel to size the editor for the final blank line.
     const needsTrailingLineSentinel = model.comment.endsWith("\n");
     if (needsTrailingLineSentinel) {
       element.value = `${model.comment} `;

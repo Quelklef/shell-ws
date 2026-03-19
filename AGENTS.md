@@ -10,6 +10,7 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - Keep the UI and kernel loosely coupled over explicit HTTP and WebSocket interfaces.
 - Preserve JSON workspace compatibility where reasonable.
 - Prefer small, testable pieces over large framework-heavy indirection.
+- Add brief comments for subtle, non-obvious logic where future readers would otherwise have to rediscover the reason.
 - Add or update tests whenever behavior changes materially.
 - Use `rg` for search.
 - Use `apply_patch` for manual edits.
