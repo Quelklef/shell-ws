@@ -650,9 +650,9 @@ function WorkspaceCanvas() {
         setRuntime((current) => {
           switch (event.type) {
             case "exec_started": {
-              const nodeKind = nodesRef.current.find(
-                (node) => node.id === event.node_id,
-              )?.data.model.kind;
+              const node = nodesRef.current.find((item) => item.id === event.node_id);
+              const previewTabs = node?.data.previewTabs ??
+                (node?.data.model.kind ? nodePreviewTabs(node.data.model.kind) : undefined);
               return {
                 ...current,
                 [event.node_id]: {
@@ -662,13 +662,9 @@ function WorkspaceCanvas() {
                   }),
                   running: true,
                   lastExecId: event.exec_id,
-                  display:
-                    nodeKind === "passthru"
-                      ? { bytes: new Uint8Array(), completed: false }
-                      : current[event.node_id]?.display,
-                  previews: nodeKind
+                  previews: previewTabs
                     ? Object.fromEntries(
-                        nodePreviewTabs(nodeKind).map((port) => [
+                        previewTabs.map((port) => [
                           port,
                           { bytes: new Uint8Array(), completed: false },
                         ]),
