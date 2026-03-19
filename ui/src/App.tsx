@@ -40,13 +40,12 @@ import type {
   AutoRunConfig,
   BufferingMode,
   ClientEvent,
-  ExecutionMode,
+  ExecutionAction,
   FlowEdge,
   FlowNode,
   NodeKind,
   NodeRuntimeState,
   NodeUiState,
-  PersistedDisplayState,
   PortKind,
   Workspace,
   WorkspaceEdge,
@@ -54,6 +53,7 @@ import type {
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
+import { missingConnectedInputs, missingOutputs, outputPortsForKind, runtimePreviewsFromNode, splitMaterializedFromRuntime } from "./lib/materialized";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -64,28 +64,6 @@ const edgeTypes = {
   workspace: WorkspaceEdgeView,
 };
 
-
-function serializeDisplayState(state?: { bytes: Uint8Array; completed: boolean }):
-  | PersistedDisplayState
-  | undefined {
-  if (!state) {
-    return undefined;
-  }
-  return {
-    dataBase64: toBase64(state.bytes),
-    completed: state.completed,
-  };
-}
-
-function deserializeDisplayState(state?: PersistedDisplayState | null) {
-  if (!state) {
-    return undefined;
-  }
-  return {
-    bytes: fromBase64(state.dataBase64),
-    completed: state.completed,
-  };
-}
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {
   const previewOpenByDefault = ["stdout"];
@@ -103,6 +81,8 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
+    materializedInputs: {},
+    materializedOutputs: {},
     autoRun: null,
     uiState: { openPreviewTabs: previewOpenByDefault },
   };
@@ -205,6 +185,7 @@ function syncNodeData(
       previewTabs: computePreviewTabs(node.id, node.data.model.kind, edges),
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
+      getActionReason: handlers.getActionReason,
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
@@ -219,7 +200,7 @@ function toFlowNode(
   generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate"
+    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate"
   >,
   edges: FlowEdge[],
 ): FlowNode {
@@ -235,6 +216,7 @@ function toFlowNode(
       previewTabs: computePreviewTabs(node.id, node.kind, edges),
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
+      getActionReason: handlers.getActionReason,
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
@@ -301,7 +283,8 @@ function flowEdgeToWorkspaceEdge(edge: FlowEdge): WorkspaceEdge {
 
 type ShellNodeActions = {
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
-  onRun: (nodeId: string, mode: ExecutionMode) => void;
+  onRun: (nodeId: string, action: ExecutionAction) => void;
+  getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
@@ -399,21 +382,13 @@ function WorkspaceCanvas() {
         nodes: nodesArg.map((node) => {
           const model = flowNodeToWorkspaceNode(node);
           const runtimeState = runtimeArg[node.id];
+          const materialized = splitMaterializedFromRuntime(runtimeState?.previews);
           return {
             ...model,
-            uiState: {
-              ...(model.uiState ?? {}),
-              previews: runtimeState?.previews
-                ? Object.fromEntries(
-                    Object.entries(runtimeState.previews)
-                      .map(([port, state]) => [
-                        port,
-                        serializeDisplayState(state),
-                      ])
-                      .filter((entry): entry is [string, PersistedDisplayState] => Boolean(entry[1])),
-                  )
-                : model.uiState?.previews,
-            },
+            materializedInputs:
+              runtimeState?.previews ? materialized.materializedInputs : model.materializedInputs,
+            materializedOutputs:
+              runtimeState?.previews ? materialized.materializedOutputs : model.materializedOutputs,
           };
         }),
         edges: edgesArg.map(flowEdgeToWorkspaceEdge),
@@ -480,7 +455,7 @@ function WorkspaceCanvas() {
   );
 
   const sendRunRequest = useCallback(
-    (nodeId: string, mode: ExecutionMode, silenceIfDisconnected = false) => {
+    (nodeId: string, action: ExecutionAction, silenceIfDisconnected = false) => {
       const workspace = buildWorkspace();
       if (!workspace) {
         return;
@@ -489,7 +464,7 @@ function WorkspaceCanvas() {
         type: "run_node",
         workspace,
         node_id: nodeId,
-        mode,
+        action,
       };
       if (!socketRef.current?.ready) {
         if (!silenceIfDisconnected) {
@@ -512,6 +487,30 @@ function WorkspaceCanvas() {
       exec_id: execId,
     });
   }, [persistRuntimeSoon]);
+
+  const getActionReason = useCallback((nodeId: string, action: ExecutionAction) => {
+    const node = nodesRef.current.find((item) => item.id === nodeId)?.data.model;
+    if (!node) {
+      return "node is unavailable";
+    }
+    if (action === "pull_inputs" || action === "pull_run") {
+      return null;
+    }
+    if (action === "rerun" || action === "rerun_push") {
+      const missing = missingConnectedInputs(
+        node,
+        edgesRef.current,
+        runtimeRef.current[nodeId],
+        parseHandleId,
+      );
+      return missing.length > 0 ? `missing materialized ${missing.join(", ")}` : null;
+    }
+    if (outputPortsForKind(node.kind).length === 0) {
+      return "this node has no outputs to push";
+    }
+    const missing = missingOutputs(node, runtimeRef.current[nodeId]);
+    return missing.length > 0 ? `missing materialized ${missing.join(", ")}` : null;
+  }, []);
 
   const handlers: ShellNodeActions = useMemo(
     () => ({
@@ -542,9 +541,10 @@ function WorkspaceCanvas() {
           return next;
         });
       },
-      onRun: (nodeId, mode) => {
-        sendRunRequest(nodeId, mode);
+      onRun: (nodeId, action) => {
+        sendRunRequest(nodeId, action);
       },
+      getActionReason,
       onDelete: (nodeId) => {
         setNodes((current) => {
           const next = current.filter((node) => node.id !== nodeId);
@@ -653,7 +653,7 @@ function WorkspaceCanvas() {
         }
       },
     }),
-    [persistSoon, sendRunRequest, setNodes],
+    [getActionReason, persistSoon, sendRunRequest, setNodes],
   );
 
   useEffect(() => {
@@ -675,42 +675,26 @@ function WorkspaceCanvas() {
             ? { ...loaded.ui, zoom: 0.5 }
             : loaded.ui;
         setWorkspaceMeta({ id: loaded.id, name: loaded.name, cwd: loaded.cwd, openaiApiKey: loaded.openaiApiKey, ui });
-        setRuntime(
-          Object.fromEntries(
-            loaded.nodes.map((node) => [
-              node.id,
-              {
-                running: false,
-                portActivity: {},
-                previews: node.uiState?.previews
-                  ? Object.fromEntries(
-                      Object.entries(node.uiState.previews)
-                        .map(([port, state]) => [port, deserializeDisplayState(state)])
-                        .filter((entry): entry is [string, NonNullable<ReturnType<typeof deserializeDisplayState>>] => Boolean(entry[1])),
-                    )
-                  : undefined,
-              },
-            ]),
-          ),
+        const loadedRuntime = Object.fromEntries(
+          loaded.nodes.map((node) => [
+            node.id,
+            {
+              running: false,
+              portActivity: {},
+              previews: runtimePreviewsFromNode(node),
+            },
+          ]),
         );
+        const loadedEdges = loaded.edges.map((edge) =>
+          toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
+        );
+        setRuntime(loadedRuntime);
         setNodes(
           loaded.nodes.map((node) =>
-            toFlowNode(
-              node,
-              {},
-              {},
-              handlers,
-              loaded.edges.map((edge) =>
-                toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
-              ),
-            ),
+            toFlowNode(node, loadedRuntime, {}, handlers, loadedEdges),
           ),
         );
-        setEdges(
-          loaded.edges.map((edge) =>
-            toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
-          ),
-        );
+        setEdges(loadedEdges);
       })
       .catch((error) => setToast(String(error)));
 
@@ -746,9 +730,14 @@ function WorkspaceCanvas() {
         setRuntime((current) => {
           switch (event.type) {
             case "exec_started": {
-              const node = nodesRef.current.find((item) => item.id === event.node_id);
-              const previewTabs = node?.data.previewTabs ??
-                (node?.data.model.kind ? nodePreviewTabs(node.data.model.kind) : undefined);
+              const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
+              const previousPreviews = current[event.node_id]?.previews ?? {};
+              const nextPreviews = { ...previousPreviews };
+              if (node) {
+                for (const port of outputPortsForKind(node.kind)) {
+                  nextPreviews[port] = { bytes: new Uint8Array(), completed: false };
+                }
+              }
               return {
                 ...current,
                 [event.node_id]: {
@@ -758,14 +747,7 @@ function WorkspaceCanvas() {
                   }),
                   running: true,
                   lastExecId: event.exec_id,
-                  previews: previewTabs
-                    ? Object.fromEntries(
-                        previewTabs.map((port) => [
-                          port,
-                          { bytes: new Uint8Array(), completed: false },
-                        ]),
-                      )
-                    : current[event.node_id]?.previews,
+                  previews: nextPreviews,
                 },
               };
             }
@@ -778,16 +760,6 @@ function WorkspaceCanvas() {
                     portActivity: {},
                   }),
                   running: false,
-                  previews: current[event.node_id]?.previews
-                    ? Object.fromEntries(
-                        Object.entries(
-                          current[event.node_id]?.previews ?? {},
-                        ).map(([port, preview]) => [
-                          port,
-                          preview ? { ...preview, completed: true } : preview,
-                        ]),
-                      )
-                    : current[event.node_id]?.previews,
                 },
               };
             case "port_activity":
@@ -807,8 +779,9 @@ function WorkspaceCanvas() {
             case "node_output": {
               const nextBytes = fromBase64(event.data_base64);
               const previous =
-                current[event.node_id]?.previews?.[event.port]?.bytes ??
-                new Uint8Array();
+                event.reset
+                  ? new Uint8Array()
+                  : current[event.node_id]?.previews?.[event.port]?.bytes ?? new Uint8Array();
               return {
                 ...current,
                 [event.node_id]: {
@@ -820,112 +793,45 @@ function WorkspaceCanvas() {
                     ...(current[event.node_id]?.previews ?? {}),
                     [event.port]: {
                       bytes: concatBytes(previous, nextBytes),
-                      completed: false,
+                      completed: true,
                     },
                   },
                 },
               };
             }
             case "stream_chunk": {
+              const targetExists = nodesRef.current.some((node) => node.id === event.to_node_id);
+              if (!targetExists) {
+                return current;
+              }
               const nextBytes = fromBase64(event.data_base64);
-              const nextState = { ...current };
-              const sourceExists = nodesRef.current.some(
-                (node) => node.id === event.from_node_id,
-              );
-              const targetExists = nodesRef.current.some(
-                (node) => node.id === event.to_node_id,
-              );
-
-              if (sourceExists) {
-                const previous =
-                  current[event.from_node_id]?.previews?.[event.port]?.bytes ??
-                  new Uint8Array();
-                nextState[event.from_node_id] = {
-                  ...(nextState[event.from_node_id] ?? {
+              const targetHandle = edgesRef.current.find((edge) => edge.id === event.edge_id)
+                ?.targetHandle as string | null | undefined;
+              const parsed = parseHandleId(targetHandle);
+              const previewKey = parsed.port === "argv" ? `argv-${parsed.slot ?? 1}` : "stdin";
+              const previous = event.reset
+                ? new Uint8Array()
+                : current[event.to_node_id]?.previews?.[previewKey]?.bytes ?? new Uint8Array();
+              return {
+                ...current,
+                [event.to_node_id]: {
+                  ...(current[event.to_node_id] ?? {
                     running: false,
                     portActivity: {},
                   }),
                   previews: {
-                    ...(nextState[event.from_node_id]?.previews ?? {}),
-                    [event.port]: {
+                    ...(current[event.to_node_id]?.previews ?? {}),
+                    [previewKey]: {
                       bytes: concatBytes(previous, nextBytes),
-                      completed: false,
+                      completed: true,
                     },
-                  },
-                };
-              }
-
-              if (targetExists) {
-                const targetPort = parseHandleId(
-                  edgesRef.current.find((edge) => edge.id === event.edge_id)
-                    ?.targetHandle as string | null | undefined,
-                ).port;
-                if (targetPort === "stdin") {
-                  const previous =
-                    current[event.to_node_id]?.previews?.stdin?.bytes ??
-                    new Uint8Array();
-                  nextState[event.to_node_id] = {
-                    ...(nextState[event.to_node_id] ?? {
-                      running: false,
-                      portActivity: {},
-                    }),
-                    previews: {
-                      ...(nextState[event.to_node_id]?.previews ?? {}),
-                      stdin: {
-                        bytes: concatBytes(previous, nextBytes),
-                        completed: false,
-                      },
-                    },
-                  };
-                }
-
-                if (targetPort === "argv") {
-                  const targetHandle = edgesRef.current.find((edge) => edge.id === event.edge_id)
-                    ?.targetHandle as string | null | undefined;
-                  const parsed = parseHandleId(targetHandle);
-                  const previewKey = parsed.slot ? `argv-${parsed.slot}` : "argv";
-                  const previous =
-                    current[event.to_node_id]?.previews?.[previewKey]?.bytes ??
-                    new Uint8Array();
-                  nextState[event.to_node_id] = {
-                    ...(nextState[event.to_node_id] ?? {
-                      running: false,
-                      portActivity: {},
-                    }),
-                    previews: {
-                      ...(nextState[event.to_node_id]?.previews ?? {}),
-                      [previewKey]: {
-                        bytes: concatBytes(previous, nextBytes),
-                        completed: false,
-                      },
-                    },
-                  };
-                }
-              }
-
-              return nextState;
-            }
-
-            case "display_update": {
-              const nextBytes = fromBase64(event.data_base64);
-              const previous =
-                current[event.node_id]?.display?.bytes ?? new Uint8Array();
-              return {
-                ...current,
-                [event.node_id]: {
-                  ...(current[event.node_id] ?? {
-                    running: false,
-                    portActivity: {},
-                  }),
-                  display: {
-                    bytes: event.completed
-                      ? previous
-                      : concatBytes(previous, nextBytes),
-                    completed: event.completed,
                   },
                 },
               };
             }
+
+            case "display_update":
+              return current;
             case "execution_stopped": {
               const nextState = { ...current };
               for (const [nodeId, state] of Object.entries(current)) {

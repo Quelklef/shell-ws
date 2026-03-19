@@ -137,3 +137,39 @@ it("migrates legacy active preview tabs to open preview tab arrays", () => {
   const sanitized = sanitizeWorkspace(workspace);
   expect(sanitized.nodes[0]?.uiState?.openPreviewTabs).toEqual(["stdout"]);
 });
+
+
+it("migrates legacy preview bytes into materialized inputs and outputs", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    openaiApiKey: "",
+    nodes: [
+      {
+        id: "x",
+        kind: "script",
+        title: "",
+        comment: "",
+        position: { x: 0, y: 0 },
+        size: { width: 10, height: 10 },
+        uiState: {
+          previews: {
+            stdin: { dataBase64: "aGVsbG8=", completed: true },
+            stdout: { dataBase64: "d29ybGQ=", completed: true },
+          },
+        },
+      },
+    ],
+    edges: [],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitized.nodes[0]?.materializedInputs).toEqual({
+    stdin: { dataBase64: "aGVsbG8=" },
+  });
+  expect(sanitized.nodes[0]?.materializedOutputs).toEqual({
+    stdout: { dataBase64: "d29ybGQ=" },
+  });
+});

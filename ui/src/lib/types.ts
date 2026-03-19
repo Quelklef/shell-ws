@@ -11,11 +11,20 @@ export type NodeKind =
 
 export type PortKind = "stdin" | "argv" | "stdout" | "stderr";
 export type BufferingMode = "unbuffered" | "line_or_1024" | "on_complete";
-export type ExecutionMode = "push" | "pull";
+export type ExecutionAction =
+  | "pull_inputs"
+  | "pull_run"
+  | "rerun"
+  | "rerun_push"
+  | "repush";
 
-export interface PersistedDisplayState {
+export interface MaterializedValue {
   dataBase64: string;
-  completed: boolean;
+}
+
+export interface LegacyPersistedDisplayState {
+  dataBase64: string;
+  completed?: boolean;
 }
 
 export interface NodeUiState {
@@ -23,7 +32,7 @@ export interface NodeUiState {
   openPreviewTabs?: string[];
   showAutoControls?: boolean;
   editorHeights?: Partial<Record<"script" | "args" | "text" | "description", number>>;
-  previews?: Record<string, PersistedDisplayState>;
+  previews?: Record<string, LegacyPersistedDisplayState>;
 }
 
 export interface Workspace {
@@ -54,13 +63,15 @@ export interface WorkspaceNode {
   path?: string | null;
   args?: string[] | null;
   text?: string | null;
+  materializedInputs?: Record<string, MaterializedValue> | null;
+  materializedOutputs?: Record<string, MaterializedValue> | null;
   autoRun?: AutoRunConfig | null;
   uiState?: NodeUiState | null;
 }
 
 export interface AutoRunConfig {
   enabled: boolean;
-  mode: ExecutionMode;
+  mode: ExecutionAction;
   intervalMs: number;
 }
 
@@ -81,7 +92,7 @@ export type ClientEvent =
       type: "run_node";
       workspace: Workspace;
       node_id: string;
-      mode: ExecutionMode;
+      action: ExecutionAction;
     }
   | {
       type: "stop_execution";
@@ -115,6 +126,7 @@ export type ServerEvent =
       node_id: string;
       port: PortKind;
       data_base64: string;
+      reset?: boolean;
       timestamp: number;
     }
   | {
@@ -124,6 +136,7 @@ export type ServerEvent =
       to_node_id: string;
       port: PortKind;
       data_base64: string;
+      reset?: boolean;
       timestamp: number;
     }
   | {
@@ -153,7 +166,6 @@ export interface NodeRuntimeState {
   running: boolean;
   lastExecId?: string;
   portActivity: Partial<Record<PortKind, number>>;
-  display?: DisplayState;
   previews?: Record<string, DisplayState>;
 }
 
@@ -180,7 +192,8 @@ export interface ShellNodeData extends Record<string, unknown> {
   previewTabs?: string[];
   generation?: AiGenerationState;
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
-  onRun: (nodeId: string, mode: ExecutionMode) => void;
+  onRun: (nodeId: string, action: ExecutionAction) => void;
+  getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;

@@ -1,4 +1,4 @@
-import type { Workspace } from "./types";
+import type { MaterializedValue, Workspace } from "./types";
 
 const REMOVED_NODE_KINDS = new Set([
   "tee",
@@ -7,6 +7,29 @@ const REMOVED_NODE_KINDS = new Set([
   "merge_byte",
   "merge_shell",
 ]);
+
+const INPUT_PORT_KEYS = new Set(["stdin"]);
+
+function isOutputKey(key: string) {
+  return key === "stdout" || key === "stderr";
+}
+
+function isInputKey(key: string) {
+  return INPUT_PORT_KEYS.has(key) || /^argv-\d+$/.test(key);
+}
+
+function migrateLegacyPreviews(previews?: Record<string, { dataBase64: string }> | null) {
+  const materializedInputs: Record<string, MaterializedValue> = {};
+  const materializedOutputs: Record<string, MaterializedValue> = {};
+  for (const [key, value] of Object.entries(previews ?? {})) {
+    if (isInputKey(key)) {
+      materializedInputs[key] = { dataBase64: value.dataBase64 };
+    } else if (isOutputKey(key)) {
+      materializedOutputs[key] = { dataBase64: value.dataBase64 };
+    }
+  }
+  return { materializedInputs, materializedOutputs };
+}
 
 export function sanitizeWorkspace(workspace: Workspace): Workspace {
   const nodes = workspace.nodes
@@ -26,17 +49,34 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
     ...workspace,
     cwd: workspace.cwd ?? "",
     openaiApiKey: workspace.openaiApiKey ?? "",
-    nodes: nodes.map((node) => ({
-      ...node,
-      uiState: node.uiState
-        ? {
-            ...node.uiState,
-            openPreviewTabs:
-              node.uiState.openPreviewTabs ??
-              (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []),
-          }
-        : node.uiState,
-    })),
+    nodes: nodes.map((node) => {
+      const migrated = migrateLegacyPreviews(node.uiState?.previews);
+      return {
+        ...node,
+        autoRun:
+          node.autoRun && node.autoRun.mode === ("push" as never)
+            ? { ...node.autoRun, mode: "rerun_push" }
+            : node.autoRun && node.autoRun.mode === ("pull" as never)
+              ? { ...node.autoRun, mode: "pull_run" }
+              : node.autoRun,
+        materializedInputs:
+          node.materializedInputs && Object.keys(node.materializedInputs).length > 0
+            ? node.materializedInputs
+            : migrated.materializedInputs,
+        materializedOutputs:
+          node.materializedOutputs && Object.keys(node.materializedOutputs).length > 0
+            ? node.materializedOutputs
+            : migrated.materializedOutputs,
+        uiState: node.uiState
+          ? {
+              ...node.uiState,
+              openPreviewTabs:
+                node.uiState.openPreviewTabs ??
+                (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []),
+            }
+          : node.uiState,
+      };
+    }),
     edges: workspace.edges.filter(
       (edge) =>
         !(edge.to.port === "argv" && edge.to.slot == null) &&

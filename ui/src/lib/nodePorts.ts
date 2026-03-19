@@ -1,4 +1,5 @@
 import type { NodeKind, PortKind } from "./types";
+import { outputPortsForKind } from "./materialized";
 
 export function nodeHasInputPort(kind: NodeKind) {
   return kind !== "text" && kind !== "file";
@@ -9,14 +10,19 @@ export function nodeHasArgvPort(kind: NodeKind) {
 }
 
 export function nodePreviewTabs(kind: NodeKind): PortKind[] {
-  const tabs: PortKind[] = ["stdout", "stderr"];
+  const tabs: PortKind[] = [...outputPortsForKind(kind)];
   if (nodeHasInputPort(kind)) {
     tabs.unshift("stdin");
   }
   return tabs;
 }
 
-export function nodeArgvSlots(nodeId: string, kind: NodeKind, edges: { target: string; targetHandle?: string | null }[], parseHandleId: (handleId: string | null | undefined) => { port: PortKind; slot?: number; }) {
+export function nodeArgvSlots(
+  nodeId: string,
+  kind: NodeKind,
+  edges: { target: string; targetHandle?: string | null }[],
+  parseHandleId: (handleId: string | null | undefined) => { port: PortKind; slot?: number },
+) {
   if (!nodeHasArgvPort(kind)) {
     return undefined;
   }
@@ -55,6 +61,6 @@ export function nodePreviewTabsForNode(
     ).sort((a, b) => a - b);
     tabs.push(...argvSlots.map((slot) => `argv-${slot}`));
   }
-  tabs.push("stdout", "stderr");
+  tabs.push(...outputPortsForKind(kind));
   return tabs;
 }

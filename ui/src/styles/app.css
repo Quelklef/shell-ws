@@ -307,6 +307,40 @@ textarea {
   color: #f4c3c3;
 }
 
+.node-action-toolbar {
+  flex-wrap: wrap;
+}
+
+.node-action-button {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
+}
+
+.node-action-button svg {
+  width: 14px;
+  height: 14px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.node-action-button:disabled {
+  cursor: help;
+  opacity: 0.45;
+  transform: none;
+}
+
+.node-action-button:disabled:hover {
+  transform: none;
+  border-color: var(--line);
+  background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
+}
+
 .node-card {
   position: relative;
   width: 100%;

@@ -3,13 +3,13 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import { renderDisplay } from "../lib/format";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
 import type {
   AutoRunConfig,
-  ExecutionMode,
+  ExecutionAction,
   PortKind,
   ShellNodeData,
 } from "../lib/types";
@@ -21,6 +21,67 @@ const STDOUT_PORT_TOP = 84;
 const STDERR_PORT_TOP = STDOUT_PORT_TOP + PORT_SPACING;
 const STDIN_PORT_TOP = 96;
 const ARGV_FIRST_PORT_TOP = STDIN_PORT_TOP + PORT_SPACING;
+
+const ACTIONS: { action: ExecutionAction; label: string; icon: ReactNode }[] = [
+  {
+    action: "pull_inputs",
+    label: "pull inputs",
+    icon: (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M1.5 8h5" />
+        <path d="M4.5 5 7.5 8l-3 3" />
+        <rect x="8.5" y="3.5" width="5" height="9" rx="1.4" />
+      </svg>
+    ),
+  },
+  {
+    action: "pull_run",
+    label: "pull + run",
+    icon: (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M1 8h14" />
+        <path d="M4 5 7 8l-3 3" />
+        <path d="M9 5.5v5" />
+        <rect x="6.5" y="3.5" width="3" height="9" rx="1.1" fill="none" />
+      </svg>
+    ),
+  },
+  {
+    action: "rerun",
+    label: "rerun",
+    icon: (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="3" y="3" width="10" height="10" rx="1.5" />
+        <path d="M10.8 7.2A2.8 2.8 0 1 0 8.2 10.8" />
+        <path d="M9.4 4.9h2.3v2.3" />
+      </svg>
+    ),
+  },
+  {
+    action: "rerun_push",
+    label: "rerun + push",
+    icon: (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="2.5" y="3" width="6.5" height="10" rx="1.3" />
+        <path d="M6.8 5.1A2.6 2.6 0 1 0 5 9.6" />
+        <path d="M6.2 4.5h2.1v2.1" />
+        <path d="M8.5 8h5" />
+        <path d="M11.5 5 14.5 8l-3 3" />
+      </svg>
+    ),
+  },
+  {
+    action: "repush",
+    label: "repush",
+    icon: (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="2.5" y="3.5" width="5" height="9" rx="1.4" />
+        <path d="M7.5 8h6" />
+        <path d="M10.5 5 13.5 8l-3 3" />
+      </svg>
+    ),
+  },
+];
 
 function AutoRunControls({
   config,
@@ -47,12 +108,15 @@ function AutoRunControls({
           onChange={(event) =>
             onChange({
               ...config,
-              mode: event.target.value as ExecutionMode,
+              mode: event.target.value as ExecutionAction,
             })
           }
         >
-          <option value="push">push</option>
-          <option value="pull">pull</option>
+          <option value="pull_inputs">pull inputs</option>
+          <option value="pull_run">pull + run</option>
+          <option value="rerun">rerun</option>
+          <option value="rerun_push">rerun + push</option>
+          <option value="repush">repush</option>
         </select>
         <input
           className="nodrag nopan"
@@ -99,16 +163,15 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const shellExtensions = useMemo(() => [StreamLanguage.define(shell)], []);
   const autoRun = model.autoRun ?? {
     enabled: false,
-    mode: "push" as const,
+    mode: "rerun_push" as const,
     intervalMs: 1000,
   };
-  const openPreviewTabs = model.uiState?.openPreviewTabs ?? (model.uiState?.activePreviewTab ? [model.uiState.activePreviewTab] : []);
+  const openPreviewTabs =
+    model.uiState?.openPreviewTabs ??
+    (model.uiState?.activePreviewTab ? [model.uiState.activePreviewTab] : []);
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
-  const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
-  const descriptionEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditingComment, setIsEditingComment] = useState(false);
-  const nodeCardRef = useRef<HTMLDivElement | null>(null);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
@@ -116,10 +179,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
 
-  const syncEditorHeight = (
-    key: "script" | "args" | "text" | "description",
-    height: number,
-  ) => {
+  const syncEditorHeight = (key: "script" | "args" | "text" | "description", height: number) => {
     const currentHeight = model.uiState?.editorHeights?.[key];
     if (currentHeight && Math.abs(currentHeight - height) < 1) {
       return;
@@ -184,9 +244,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   }, [isEditingComment]);
 
   return (
-    <div
-      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""}`}
-    >
+    <div className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""}`}>
       <NodeResizer
         minWidth={260}
         minHeight={160}
@@ -200,12 +258,11 @@ export default function ShellNode({ data, selected }: NodeProps) {
           type="target"
           position={Position.Left}
           className={`shell-handle shell-handle-stdin ${
-            runtime.portActivity.stdin &&
-            Date.now() - runtime.portActivity.stdin < 800
+            runtime.portActivity.stdin && Date.now() - runtime.portActivity.stdin < 800
               ? "is-active"
               : ""
           }`}
-          style={{ top: nodeHasArgvPort(model.kind) ? STDIN_PORT_TOP : STDIN_PORT_TOP }}
+          style={{ top: STDIN_PORT_TOP }}
         />
       )}
       {nodeHasArgvPort(model.kind) &&
@@ -216,26 +273,16 @@ export default function ShellNode({ data, selected }: NodeProps) {
             type="target"
             position={Position.Left}
             className={`shell-handle shell-handle-argv ${
-              runtime.portActivity.argv &&
-              Date.now() - runtime.portActivity.argv < 800
+              runtime.portActivity.argv && Date.now() - runtime.portActivity.argv < 800
                 ? "is-active"
                 : ""
             }`}
             style={{ top: ARGV_FIRST_PORT_TOP + index * PORT_SPACING }}
           />
         ))}
-      {(model.kind === "script" ||
-        model.kind === "ai_script" ||
-        model.kind === "exec" ||
-        model.kind === "file" ||
-        model.kind === "text" ||
-        model.kind === "passthru" ||
-        model.kind === "html") &&
+      {nodePreviewTabs(model.kind).includes("stdout") &&
         outputHandle("stdout", STDOUT_PORT_TOP, "stdout", runtime.portActivity.stdout)}
-      {(model.kind === "script" ||
-        model.kind === "ai_script" ||
-        model.kind === "exec" ||
-        model.kind === "file") &&
+      {nodePreviewTabs(model.kind).includes("stderr") &&
         outputHandle("stderr", STDERR_PORT_TOP, "stderr", runtime.portActivity.stderr)}
 
       <div className="node-comment-floating">
@@ -253,11 +300,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 setIsEditingComment(false);
               }
             }}
-            onChange={(event) =>
-              typedData.onUpdate(model.id, {
-                comment: event.target.value,
-              })
-            }
+            onChange={(event) => typedData.onUpdate(model.id, { comment: event.target.value })}
           />
         ) : (
           <div
@@ -284,7 +327,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         )}
       </div>
 
-      <div ref={nodeCardRef} className="node-card">
+      <div className="node-card">
         <button
           type="button"
           className="node-delete nodrag nopan"
@@ -307,23 +350,18 @@ export default function ShellNode({ data, selected }: NodeProps) {
               className="shell-input nodrag nopan"
               value={model.shell ?? "bash"}
               onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) =>
-                typedData.onUpdate(model.id, { shell: event.target.value })
-              }
+              onChange={(event) => typedData.onUpdate(model.id, { shell: event.target.value })}
               placeholder="shell"
             />
             {model.kind === "ai_script" && (
               <>
                 <textarea
-                  ref={descriptionEditorRef}
                   className="script-editor ai-description-editor nodrag nopan"
                   style={{ height: model.uiState?.editorHeights?.description ?? 72 }}
                   value={model.description ?? ""}
                   placeholder="describe the script you want generated"
                   onWheelCapture={(event) => event.stopPropagation()}
-                  onChange={(event) =>
-                    typedData.onUpdate(model.id, { description: event.target.value })
-                  }
+                  onChange={(event) => typedData.onUpdate(model.id, { description: event.target.value })}
                 />
                 <div className="ai-generate-shell">
                   <button
@@ -369,9 +407,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
                   highlightActiveLine: false,
                   highlightActiveLineGutter: false,
                 }}
-                onChange={(value) =>
-                  typedData.onUpdate(model.id, { script: value })
-                }
+                onChange={(value) => typedData.onUpdate(model.id, { script: value })}
               />
             </div>
           </>
@@ -383,9 +419,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               className="shell-input nodrag nopan"
               value={model.path ?? ""}
               onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) =>
-                typedData.onUpdate(model.id, { path: event.target.value })
-              }
+              onChange={(event) => typedData.onUpdate(model.id, { path: event.target.value })}
               placeholder="binary path"
             />
             <div className="exec-args-shell">
@@ -418,11 +452,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               <button
                 type="button"
                 className="nodrag nopan exec-arg-add"
-                onClick={() =>
-                  typedData.onUpdate(model.id, {
-                    args: [...(model.args ?? []), ""],
-                  })
-                }
+                onClick={() => typedData.onUpdate(model.id, { args: [...(model.args ?? []), ""] })}
               >
                 add arg
               </button>
@@ -436,9 +466,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               className="shell-input nodrag nopan"
               value={model.path ?? ""}
               onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) =>
-                typedData.onUpdate(model.id, { path: event.target.value })
-              }
+              onChange={(event) => typedData.onUpdate(model.id, { path: event.target.value })}
               placeholder="file path"
             />
             <button
@@ -453,15 +481,12 @@ export default function ShellNode({ data, selected }: NodeProps) {
 
         {model.kind === "text" && (
           <textarea
-            ref={textEditorRef}
             className="script-editor nodrag nopan"
             style={{ height: model.uiState?.editorHeights?.text }}
             value={model.text ?? ""}
             placeholder="text output"
             onWheelCapture={(event) => event.stopPropagation()}
-            onChange={(event) =>
-              typedData.onUpdate(model.id, { text: event.target.value })
-            }
+            onChange={(event) => typedData.onUpdate(model.id, { text: event.target.value })}
           />
         )}
 
@@ -477,21 +502,24 @@ export default function ShellNode({ data, selected }: NodeProps) {
           </div>
         )}
 
-        <div className="node-toolbar">
-          <button
-            className="nodrag nopan"
-            type="button"
-            onClick={() => typedData.onRun(model.id, "push")}
-          >
-            push
-          </button>
-          <button
-            className="nodrag nopan"
-            type="button"
-            onClick={() => typedData.onRun(model.id, "pull")}
-          >
-            pull
-          </button>
+        <div className="node-toolbar node-action-toolbar">
+          {ACTIONS.map(({ action, label, icon }) => {
+            const reason = typedData.getActionReason(model.id, action);
+            const disabled = reason !== null;
+            return (
+              <button
+                key={action}
+                className="nodrag nopan node-action-button"
+                type="button"
+                disabled={disabled}
+                title={disabled ? `${label}: ${reason}` : label}
+                aria-label={label}
+                onClick={() => typedData.onRun(model.id, action)}
+              >
+                {icon}
+              </button>
+            );
+          })}
           <button
             type="button"
             className={`nodrag nopan ${model.uiState?.showAutoControls ? "is-live" : ""}`}
@@ -503,16 +531,14 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 },
               })
             }
+            title="toggle auto controls"
           >
             auto
           </button>
         </div>
 
         {model.uiState?.showAutoControls && (
-          <AutoRunControls
-            config={autoRun}
-            onChange={(next) => typedData.onToggleAutorun(model.id, next)}
-          />
+          <AutoRunControls config={autoRun} onChange={(next) => typedData.onToggleAutorun(model.id, next)} />
         )}
 
         <div className="port-preview-shell">
@@ -520,7 +546,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
             {previewTabs.map((port) => {
               const isOpen = openPreviewTabs.includes(port);
               const previewBytes = runtime.previews?.[port]?.bytes;
-              const hasData = Boolean(previewBytes && previewBytes.length > 0);
+              const hasData = port in (runtime.previews ?? {});
               const portClass = port.startsWith("argv-") ? "argv" : port;
               return (
                 <button
@@ -544,10 +570,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
                         openedCountDelta !== 0
                           ? {
                               ...model.size,
-                              height: Math.max(
-                                160,
-                                model.size.height + PREVIEW_HEIGHT_DELTA * openedCountDelta,
-                              ),
+                              height: Math.max(160, model.size.height + PREVIEW_HEIGHT_DELTA * openedCountDelta),
                             }
                           : model.size,
                     });
@@ -565,7 +588,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               ? renderDisplay(preview.bytes)
               : {
                   label: port,
-                  content: <div className="display-empty">no recent {port}</div>,
+                  content: <div className="display-empty">no materialized {port}</div>,
                 };
             return (
               <div
