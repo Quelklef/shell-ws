@@ -312,6 +312,10 @@ pub enum ServerEvent {
         data_base64: String,
         #[serde(default)]
         reset: bool,
+        #[serde(default)]
+        completed: bool,
+        #[serde(default = "default_true")]
+        success: bool,
         timestamp: u64,
     },
     DisplayUpdate {
@@ -402,6 +406,10 @@ fn default_shell_option() -> Option<String> {
 
 fn default_zoom() -> f64 {
     0.5
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[cfg(test)]

@@ -22,6 +22,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import "@xyflow/react/dist/style.css";
 
+import ActionIconLab from "./components/ActionIconLab";
 import ShellNode from "./components/ShellNode";
 import WorkspaceEdgeView from "./components/WorkspaceEdge";
 import {
@@ -731,11 +732,12 @@ function WorkspaceCanvas() {
           switch (event.type) {
             case "exec_started": {
               const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
-              const previousPreviews = current[event.node_id]?.previews ?? {};
-              const nextPreviews = { ...previousPreviews };
+              // Keep the last committed materialized outputs intact until this execution finishes successfully.
+              const previousLive = current[event.node_id]?.livePreviews ?? {};
+              const nextLive = { ...previousLive };
               if (node) {
                 for (const port of outputPortsForKind(node.kind)) {
-                  nextPreviews[port] = { bytes: new Uint8Array(), completed: false };
+                  nextLive[port] = { bytes: new Uint8Array(), completed: false };
                 }
               }
               return {
@@ -747,21 +749,37 @@ function WorkspaceCanvas() {
                   }),
                   running: true,
                   lastExecId: event.exec_id,
-                  previews: nextPreviews,
+                  livePreviews: nextLive,
                 },
               };
             }
-            case "exec_finished":
+            case "exec_finished": {
+              const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
+              const previous = current[event.node_id] ?? {
+                running: false,
+                portActivity: {},
+              };
+              const committed = { ...(previous.previews ?? {}) };
+              const live = { ...(previous.livePreviews ?? {}) };
+              if (node) {
+                for (const port of outputPortsForKind(node.kind)) {
+                  const candidate = live[port];
+                  if (event.exit_code === 0 && candidate) {
+                    committed[port] = { ...candidate, completed: true };
+                  }
+                  delete live[port];
+                }
+              }
               return {
                 ...current,
                 [event.node_id]: {
-                  ...(current[event.node_id] ?? {
-                    running: false,
-                    portActivity: {},
-                  }),
+                  ...previous,
                   running: false,
+                  previews: committed,
+                  livePreviews: Object.keys(live).length > 0 ? live : undefined,
                 },
               };
+            }
             case "port_activity":
               return {
                 ...current,
@@ -781,7 +799,7 @@ function WorkspaceCanvas() {
               const previous =
                 event.reset
                   ? new Uint8Array()
-                  : current[event.node_id]?.previews?.[event.port]?.bytes ?? new Uint8Array();
+                  : current[event.node_id]?.livePreviews?.[event.port]?.bytes ?? new Uint8Array();
               return {
                 ...current,
                 [event.node_id]: {
@@ -789,11 +807,11 @@ function WorkspaceCanvas() {
                     running: false,
                     portActivity: {},
                   }),
-                  previews: {
-                    ...(current[event.node_id]?.previews ?? {}),
+                  livePreviews: {
+                    ...(current[event.node_id]?.livePreviews ?? {}),
                     [event.port]: {
                       bytes: concatBytes(previous, nextBytes),
-                      completed: true,
+                      completed: false,
                     },
                   },
                 },
@@ -809,23 +827,34 @@ function WorkspaceCanvas() {
                 ?.targetHandle as string | null | undefined;
               const parsed = parseHandleId(targetHandle);
               const previewKey = parsed.port === "argv" ? `argv-${parsed.slot ?? 1}` : "stdin";
-              const previous = event.reset
+              const previousState = current[event.to_node_id] ?? {
+                running: false,
+                portActivity: {},
+              };
+              const previousLive = event.reset
                 ? new Uint8Array()
-                : current[event.to_node_id]?.previews?.[previewKey]?.bytes ?? new Uint8Array();
+                : previousState.livePreviews?.[previewKey]?.bytes ?? new Uint8Array();
+              const livePreviews = {
+                ...(previousState.livePreviews ?? {}),
+                [previewKey]: {
+                  bytes: concatBytes(previousLive, nextBytes),
+                  completed: Boolean(event.completed),
+                },
+              };
+              const committed = { ...(previousState.previews ?? {}) };
+              // Input streams commit into materialized state only when the edge closes successfully.
+              if (event.completed) {
+                if (event.success !== false) {
+                  committed[previewKey] = { ...livePreviews[previewKey], completed: true };
+                }
+                delete livePreviews[previewKey];
+              }
               return {
                 ...current,
                 [event.to_node_id]: {
-                  ...(current[event.to_node_id] ?? {
-                    running: false,
-                    portActivity: {},
-                  }),
-                  previews: {
-                    ...(current[event.to_node_id]?.previews ?? {}),
-                    [previewKey]: {
-                      bytes: concatBytes(previous, nextBytes),
-                      completed: true,
-                    },
-                  },
+                  ...previousState,
+                  previews: committed,
+                  livePreviews: Object.keys(livePreviews).length > 0 ? livePreviews : undefined,
                 },
               };
             }
@@ -839,6 +868,7 @@ function WorkspaceCanvas() {
                   nextState[nodeId] = {
                     ...state,
                     running: false,
+                    livePreviews: undefined,
                   };
                 }
               }
@@ -1221,6 +1251,8 @@ function WorkspaceCanvas() {
             </section>
           )}
         </div>
+        <div className="sidebar-divider" />
+        <ActionIconLab />
         <div className="sidebar-divider" />
         <div className="node-palette-groups">
           {paletteGroups().map((group) => (

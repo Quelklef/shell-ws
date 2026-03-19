@@ -137,6 +137,8 @@ export type ServerEvent =
       port: PortKind;
       data_base64: string;
       reset?: boolean;
+      completed?: boolean;
+      success?: boolean;
       timestamp: number;
     }
   | {
@@ -167,6 +169,7 @@ export interface NodeRuntimeState {
   lastExecId?: string;
   portActivity: Partial<Record<PortKind, number>>;
   previews?: Record<string, DisplayState>;
+  livePreviews?: Record<string, DisplayState>;
 }
 
 export interface AiGenerationState {

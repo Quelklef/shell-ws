@@ -3,9 +3,10 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { renderDisplay } from "../lib/format";
+import { ACTION_ICON_FAMILIES, DEFAULT_ACTION_ICON_FAMILY } from "../lib/actionIcons";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
 import type {
   AutoRunConfig,
@@ -22,66 +23,7 @@ const STDERR_PORT_TOP = STDOUT_PORT_TOP + PORT_SPACING;
 const STDIN_PORT_TOP = 96;
 const ARGV_FIRST_PORT_TOP = STDIN_PORT_TOP + PORT_SPACING;
 
-const ACTIONS: { action: ExecutionAction; label: string; icon: ReactNode }[] = [
-  {
-    action: "pull_inputs",
-    label: "pull inputs",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M1.5 8h5" />
-        <path d="M4.5 5 7.5 8l-3 3" />
-        <rect x="8.5" y="3.5" width="5" height="9" rx="1.4" />
-      </svg>
-    ),
-  },
-  {
-    action: "pull_run",
-    label: "pull + run",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M1 8h14" />
-        <path d="M4 5 7 8l-3 3" />
-        <path d="M9 5.5v5" />
-        <rect x="6.5" y="3.5" width="3" height="9" rx="1.1" fill="none" />
-      </svg>
-    ),
-  },
-  {
-    action: "rerun",
-    label: "rerun",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="3" y="3" width="10" height="10" rx="1.5" />
-        <path d="M10.8 7.2A2.8 2.8 0 1 0 8.2 10.8" />
-        <path d="M9.4 4.9h2.3v2.3" />
-      </svg>
-    ),
-  },
-  {
-    action: "rerun_push",
-    label: "rerun + push",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="2.5" y="3" width="6.5" height="10" rx="1.3" />
-        <path d="M6.8 5.1A2.6 2.6 0 1 0 5 9.6" />
-        <path d="M6.2 4.5h2.1v2.1" />
-        <path d="M8.5 8h5" />
-        <path d="M11.5 5 14.5 8l-3 3" />
-      </svg>
-    ),
-  },
-  {
-    action: "repush",
-    label: "repush",
-    icon: (
-      <svg viewBox="0 0 16 16" aria-hidden="true">
-        <rect x="2.5" y="3.5" width="5" height="9" rx="1.4" />
-        <path d="M7.5 8h6" />
-        <path d="M10.5 5 13.5 8l-3 3" />
-      </svg>
-    ),
-  },
-];
+const ACTIONS = ACTION_ICON_FAMILIES.find((family) => family.id === DEFAULT_ACTION_ICON_FAMILY)?.actions ?? [];
 
 function AutoRunControls({
   config,
@@ -173,7 +115,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditingComment, setIsEditingComment] = useState(false);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
-  const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
+  const getVisiblePreview = (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port];
+  const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
   const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port));
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
@@ -545,8 +488,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
           <div className="port-preview-tabs">
             {previewTabs.map((port) => {
               const isOpen = openPreviewTabs.includes(port);
-              const previewBytes = runtime.previews?.[port]?.bytes;
-              const hasData = port in (runtime.previews ?? {});
+              const hasData = Boolean(runtime.livePreviews?.[port] ?? runtime.previews?.[port]);
               const portClass = port.startsWith("argv-") ? "argv" : port;
               return (
                 <button
@@ -583,7 +525,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
             })}
           </div>
           {orderedOpenPreviewTabs.map((port) => {
-            const preview = runtime.previews?.[port];
+            const preview = getVisiblePreview(port);
             const renderedPreview = preview
               ? renderDisplay(preview.bytes)
               : {
