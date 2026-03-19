@@ -253,9 +253,9 @@ async fn handle_client_event(event: ClientEvent, state: AppState) -> Result<(), 
         ClientEvent::RunNode {
             workspace,
             node_id,
-            mode,
+            action,
         } => {
-            state.execution.run(workspace, node_id, mode);
+            state.execution.run(workspace, node_id, action);
         }
         ClientEvent::StopExecution { exec_id, node_id } => {
             if let Some(exec_id) = exec_id {

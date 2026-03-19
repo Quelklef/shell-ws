@@ -271,6 +271,8 @@ mod tests {
             path: None,
             args: None,
             text: None,
+            materialized_inputs: Default::default(),
+            materialized_outputs: Default::default(),
             auto_run: None,
             ui_state: Default::default(),
         }

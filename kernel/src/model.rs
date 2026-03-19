@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,8 +29,8 @@ impl Workspace {
                 Node {
                     id: "text-1".to_string(),
                     kind: NodeKind::Text,
-                    title: "".to_string(),
-                    comment: "".to_string(),
+                    title: String::new(),
+                    comment: String::new(),
                     position: Position { x: 80.0, y: 120.0 },
                     size: Size {
                         width: 320.0,
@@ -41,15 +42,17 @@ impl Workspace {
                     include_sample_inputs: None,
                     path: None,
                     args: None,
-                    text: Some("".to_string()),
+                    text: Some(String::new()),
+                    materialized_inputs: HashMap::new(),
+                    materialized_outputs: HashMap::new(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
                 Node {
                     id: "passthru-1".to_string(),
                     kind: NodeKind::Passthru,
-                    title: "".to_string(),
-                    comment: "".to_string(),
+                    title: String::new(),
+                    comment: String::new(),
                     position: Position { x: 520.0, y: 120.0 },
                     size: Size {
                         width: 360.0,
@@ -62,6 +65,8 @@ impl Workspace {
                     path: None,
                     args: None,
                     text: None,
+                    materialized_inputs: HashMap::new(),
+                    materialized_outputs: HashMap::new(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
@@ -109,6 +114,10 @@ pub struct Node {
     pub args: Option<Vec<String>>,
     #[serde(default)]
     pub text: Option<String>,
+    #[serde(default)]
+    pub materialized_inputs: HashMap<String, MaterializedValue>,
+    #[serde(default)]
+    pub materialized_outputs: HashMap<String, MaterializedValue>,
     #[serde(default, alias = "auto_run")]
     pub auto_run: Option<AutoRunConfig>,
     #[serde(default)]
@@ -182,24 +191,28 @@ impl Default for BufferingMode {
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum ExecutionMode {
-    Push,
-    Pull,
+pub enum ExecutionAction {
+    PullInputs,
+    #[serde(alias = "pull")]
+    PullRun,
+    Rerun,
+    #[serde(alias = "push")]
+    RerunPush,
+    Repush,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AutoRunConfig {
     pub enabled: bool,
-    pub mode: ExecutionMode,
+    pub mode: ExecutionAction,
     pub interval_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct PersistedDisplayState {
+pub struct MaterializedValue {
     pub data_base64: String,
-    pub completed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -212,9 +225,17 @@ pub struct NodeUiState {
     #[serde(default)]
     pub show_auto_controls: bool,
     #[serde(default)]
-    pub editor_heights: std::collections::HashMap<String, f64>,
+    pub editor_heights: HashMap<String, f64>,
     #[serde(default)]
-    pub previews: std::collections::HashMap<String, PersistedDisplayState>,
+    pub previews: HashMap<String, LegacyPersistedDisplayState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct LegacyPersistedDisplayState {
+    pub data_base64: String,
+    #[serde(default)]
+    pub completed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -247,7 +268,7 @@ pub enum ClientEvent {
     RunNode {
         workspace: Workspace,
         node_id: String,
-        mode: ExecutionMode,
+        action: ExecutionAction,
     },
     StopExecution {
         exec_id: Option<String>,
@@ -279,6 +300,8 @@ pub enum ServerEvent {
         node_id: String,
         port: PortKind,
         data_base64: String,
+        #[serde(default)]
+        reset: bool,
         timestamp: u64,
     },
     StreamChunk {
@@ -287,6 +310,8 @@ pub enum ServerEvent {
         to_node_id: String,
         port: PortKind,
         data_base64: String,
+        #[serde(default)]
+        reset: bool,
         timestamp: u64,
     },
     DisplayUpdate {
@@ -312,21 +337,12 @@ pub struct WorkspaceSummary {
 }
 
 pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
-    const REMOVED: &[&str] = &[
-        "tee",
-        "merge_concat",
-        "merge_line",
-        "merge_byte",
-        "merge_shell",
-    ];
+    const REMOVED: &[&str] = &["tee", "merge_concat", "merge_line", "merge_byte", "merge_shell"];
     let Some(obj) = value.as_object_mut() else {
         return;
     };
     let mut removed_ids = std::collections::HashSet::new();
-    if let Some(nodes) = obj
-        .get_mut("nodes")
-        .and_then(serde_json::Value::as_array_mut)
-    {
+    if let Some(nodes) = obj.get_mut("nodes").and_then(serde_json::Value::as_array_mut) {
         nodes.retain(|node| {
             let Some(kind) = node.get("kind").and_then(serde_json::Value::as_str) else {
                 return true;
@@ -340,10 +356,7 @@ pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
             true
         });
     }
-    if let Some(edges) = obj
-        .get_mut("edges")
-        .and_then(serde_json::Value::as_array_mut)
-    {
+    if let Some(edges) = obj.get_mut("edges").and_then(serde_json::Value::as_array_mut) {
         edges.retain(|edge| {
             let from = edge
                 .get("from")
@@ -355,8 +368,20 @@ pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
                 .and_then(serde_json::Value::as_object)
                 .and_then(|port| port.get("nodeId").or_else(|| port.get("node_id")))
                 .and_then(serde_json::Value::as_str);
+            let is_legacy_unslotted_argv = edge
+                .get("to")
+                .and_then(serde_json::Value::as_object)
+                .map(|port| {
+                    port.get("port").and_then(serde_json::Value::as_str) == Some("argv")
+                        && !port.contains_key("slot")
+                })
+                .unwrap_or(false);
             match (from, to) {
-                (Some(from), Some(to)) => !removed_ids.contains(from) && !removed_ids.contains(to),
+                (Some(from), Some(to)) => {
+                    !is_legacy_unslotted_argv
+                        && !removed_ids.contains(from)
+                        && !removed_ids.contains(to)
+                }
                 _ => true,
             }
         });
@@ -381,12 +406,11 @@ fn default_zoom() -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_cwd, ClientEvent, Workspace};
+    use super::{default_cwd, ClientEvent, ExecutionAction, Workspace};
 
     #[test]
     fn buffering_mode_serializes_with_expected_underscore() {
-        let value =
-            serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
+        let value = serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
         assert_eq!(value, "\"line_or_1024\"");
 
         let parsed: super::BufferingMode =
@@ -396,22 +420,19 @@ mod tests {
 
     #[test]
     fn legacy_process_kind_deserializes_as_script() {
-        let kind: super::NodeKind =
-            serde_json::from_str("\"process\"").expect("deserialize legacy process kind");
+        let kind: super::NodeKind = serde_json::from_str("\"process\"").expect("deserialize legacy process kind");
         assert_eq!(kind, super::NodeKind::Script);
     }
 
     #[test]
     fn legacy_cat_kind_deserializes_as_file() {
-        let kind: super::NodeKind =
-            serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
+        let kind: super::NodeKind = serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
         assert_eq!(kind, super::NodeKind::File);
     }
 
     #[test]
     fn legacy_display_kind_deserializes_as_passthru() {
-        let kind: super::NodeKind =
-            serde_json::from_str("\"display\"").expect("deserialize legacy display kind");
+        let kind: super::NodeKind = serde_json::from_str("\"display\"").expect("deserialize legacy display kind");
         assert_eq!(kind, super::NodeKind::Passthru);
     }
 
@@ -446,8 +467,7 @@ mod tests {
             "ui": {}
         });
         super::sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace =
-            serde_json::from_value(value).expect("deserialize sanitized workspace");
+        let workspace: Workspace = serde_json::from_value(value).expect("deserialize sanitized workspace");
         assert_eq!(workspace.nodes.len(), 1);
         assert_eq!(workspace.nodes[0].id, "text-1");
         assert!(workspace.edges.is_empty());
@@ -460,16 +480,15 @@ mod tests {
             "type": "run_node",
             "workspace": workspace,
             "node_id": "text-1",
-            "mode": "push"
+            "action": "rerun_push"
         });
 
         let event: ClientEvent = serde_json::from_value(payload).expect("deserialize run event");
         match event {
-            ClientEvent::RunNode {
-                workspace, node_id, ..
-            } => {
+            ClientEvent::RunNode { workspace, node_id, action } => {
                 assert_eq!(workspace.id, "default");
                 assert_eq!(node_id, "text-1");
+                assert_eq!(action, ExecutionAction::RerunPush);
             }
             _ => panic!("expected run_node event"),
         }
