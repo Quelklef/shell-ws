@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::model::{Node, NodeKind, Workspace};
 
 const OPENAI_RESPONSES_URL: &str = "https://api.openai.com/v1/chat/completions";
-const DEFAULT_MODEL: &str = "gpt-4.1-mini";
+const DEFAULT_MODEL: &str = "gpt-5.1";
 const MAX_SAMPLE_CHARS: usize = 4_096;
 
 #[derive(Debug, Clone, Deserialize)]
