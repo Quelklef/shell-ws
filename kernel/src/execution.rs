@@ -186,8 +186,7 @@ struct ExecutionContext {
     nodes: HashMap<String, Node>,
     outgoing: HashMap<String, Vec<Edge>>,
     incoming: HashMap<String, Vec<Edge>>,
-    materialized_inputs: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
-    materialized_outputs: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
+    materialized_values: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
     execution_scope: Arc<Mutex<HashSet<String>>>,
     pull_target: Arc<Mutex<Option<String>>>,
     edge_buffers: Arc<Mutex<HashMap<String, EdgeBufferState>>>,
@@ -252,15 +251,10 @@ impl ExecutionContext {
             }
         }
 
-        let materialized_inputs = workspace
+        let materialized_values = workspace
             .nodes
             .iter()
-            .map(|node| (node.id.clone(), materialized_input_map(node)))
-            .collect();
-        let materialized_outputs = workspace
-            .nodes
-            .iter()
-            .map(|node| (node.id.clone(), materialized_output_map(node)))
+            .map(|node| (node.id.clone(), materialized_value_map(node)))
             .collect();
 
         Ok(Self {
@@ -272,8 +266,7 @@ impl ExecutionContext {
             nodes,
             outgoing,
             incoming,
-            materialized_inputs: Arc::new(Mutex::new(materialized_inputs)),
-            materialized_outputs: Arc::new(Mutex::new(materialized_outputs)),
+            materialized_values: Arc::new(Mutex::new(materialized_values)),
             execution_scope: Arc::new(Mutex::new(HashSet::new())),
             pull_target: Arc::new(Mutex::new(None)),
             edge_buffers: Arc::new(Mutex::new(HashMap::new())),
@@ -337,20 +330,26 @@ impl ExecutionContext {
         keys
     }
 
-    fn node_materialized_inputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
-        self.materialized_inputs
+    fn node_materialized_values(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
+        self.materialized_values
             .lock()
             .get(node_id)
             .cloned()
             .unwrap_or_default()
     }
 
+    fn node_materialized_inputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
+        self.node_materialized_values(node_id)
+            .into_iter()
+            .filter(|(key, _)| key == "stdin" || key.starts_with("argv-"))
+            .collect()
+    }
+
     fn node_materialized_outputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
-        self.materialized_outputs
-            .lock()
-            .get(node_id)
-            .cloned()
-            .unwrap_or_default()
+        self.node_materialized_values(node_id)
+            .into_iter()
+            .filter(|(key, _)| key == "stdout" || key == "stderr")
+            .collect()
     }
 
     fn ensure_rerunnable(&self, node_id: &str) -> Result<(), String> {
@@ -1242,7 +1241,7 @@ impl ExecutionContext {
             let key = output_key(*port).to_string();
             next.insert(key.clone(), outputs.get(&key).cloned().unwrap_or_default());
         }
-        self.materialized_outputs.lock().insert(node_id.to_string(), next);
+        self.replace_materialized_outputs(node_id, next);
     }
 
     fn emit_node_output_chunk(&self, node_id: &str, port: PortKind, payload: &[u8]) {
@@ -1289,11 +1288,22 @@ impl ExecutionContext {
     }
 
     fn set_materialized_input(&self, node_id: &str, key: &str, bytes: Vec<u8>) {
-        self.materialized_inputs
+        self.set_materialized_value(node_id, key, bytes);
+    }
+
+    fn set_materialized_value(&self, node_id: &str, key: &str, bytes: Vec<u8>) {
+        self.materialized_values
             .lock()
             .entry(node_id.to_string())
             .or_default()
             .insert(key.to_string(), bytes);
+    }
+
+    fn replace_materialized_outputs(&self, node_id: &str, outputs: HashMap<String, Vec<u8>>) {
+        let mut materialized = self.materialized_values.lock();
+        let values = materialized.entry(node_id.to_string()).or_default();
+        values.retain(|key, _| key != "stdout" && key != "stderr");
+        values.extend(outputs);
     }
 
     fn emit_started(&self, node_id: &str) {
@@ -1395,33 +1405,15 @@ enum StdinMessage {
     Close,
 }
 
-fn materialized_input_map(node: &Node) -> HashMap<String, Vec<u8>> {
+fn materialized_value_map(node: &Node) -> HashMap<String, Vec<u8>> {
     let mut values: HashMap<String, Vec<u8>> = node
-        .materialized_inputs
+        .materialized_values
         .iter()
         .map(|(key, value)| (key.clone(), decode_materialized_value(value)))
         .collect();
     if values.is_empty() {
         for (key, value) in &node.ui_state.previews {
-            if key == "stdin" || key.starts_with("argv-") {
-                values.insert(key.clone(), decode_legacy_preview(value));
-            }
-        }
-    }
-    values
-}
-
-fn materialized_output_map(node: &Node) -> HashMap<String, Vec<u8>> {
-    let mut values: HashMap<String, Vec<u8>> = node
-        .materialized_outputs
-        .iter()
-        .map(|(key, value)| (key.clone(), decode_materialized_value(value)))
-        .collect();
-    if values.is_empty() {
-        for (key, value) in &node.ui_state.previews {
-            if key == "stdout" || key == "stderr" {
-                values.insert(key.clone(), decode_legacy_preview(value));
-            }
+            values.insert(key.clone(), decode_legacy_preview(value));
         }
     }
     values
@@ -1458,8 +1450,7 @@ mod tests {
             path: None,
             args: None,
             text: None,
-            materialized_inputs: HashMap::new(),
-            materialized_outputs: HashMap::new(),
+            materialized_values: HashMap::new(),
             auto_run: Some(AutoRunConfig {
                 enabled: false,
                 mode: ExecutionAction::RerunPush,
@@ -1521,7 +1512,7 @@ mod tests {
         let mut rx = tx.subscribe();
         let mut script = node(NodeKind::Script, "script-1");
         script.script = Some("grep hello >/dev/null; echo done >&2".to_string());
-        script.materialized_inputs.insert(
+        script.materialized_values.insert(
             "stdin".to_string(),
             MaterializedValue {
                 data_base64: encode_bytes(b"hello\n"),
@@ -1658,7 +1649,7 @@ mod tests {
         text.text = Some("hello\n".to_string());
         let mut script = node(NodeKind::Script, "script-1");
         script.script = Some("printf '%s %s\n' \"$1\" \"$(cat)\"".to_string());
-        script.materialized_inputs.insert(
+        script.materialized_values.insert(
             "argv-1".to_string(),
             MaterializedValue {
                 data_base64: encode_bytes(b"world\n"),
@@ -1737,7 +1728,7 @@ mod tests {
                     {
                         let mut source = node(NodeKind::Script, "script-1");
                         source.script = Some("printf 'fresh\n'; exit 1".to_string());
-                        source.materialized_outputs.insert(
+                        source.materialized_values.insert(
                             "stdout".to_string(),
                             MaterializedValue {
                                 data_base64: encode_bytes(b"old-output\n"),
@@ -1745,7 +1736,7 @@ mod tests {
                         );
                         let mut sink = node(NodeKind::Script, "script-2");
                         sink.script = Some("cat >/dev/null".to_string());
-                        sink.materialized_inputs.insert(
+                        sink.materialized_values.insert(
                             "stdin".to_string(),
                             MaterializedValue {
                                 data_base64: encode_bytes(b"old-input\n"),
@@ -1766,7 +1757,7 @@ mod tests {
 
         assert_eq!(
             context
-                .materialized_outputs
+                .materialized_values
                 .lock()
                 .get("script-1")
                 .and_then(|ports| ports.get("stdout"))
@@ -1775,7 +1766,7 @@ mod tests {
         );
         assert_eq!(
             context
-                .materialized_inputs
+                .materialized_values
                 .lock()
                 .get("script-2")
                 .and_then(|ports| ports.get("stdin"))
@@ -1791,7 +1782,7 @@ mod tests {
         let mut rx = tx.subscribe();
         let mut source = node(NodeKind::Script, "source");
         source.script = Some("printf 'hello\n'".to_string());
-        source.materialized_inputs.insert(
+        source.materialized_values.insert(
             "stdin".to_string(),
             MaterializedValue {
                 data_base64: encode_bytes(b"input\n"),
@@ -1827,7 +1818,7 @@ mod tests {
         let manager = ExecutionManager::new(tx.clone());
         let mut rx = tx.subscribe();
         let mut source = node(NodeKind::Text, "source");
-        source.materialized_outputs.insert(
+        source.materialized_values.insert(
             "stdout".to_string(),
             MaterializedValue {
                 data_base64: encode_bytes(b"cached\n"),
@@ -1850,7 +1841,7 @@ mod tests {
         let manager = ExecutionManager::new(tx.clone());
         let mut rx = tx.subscribe();
         let mut text = node(NodeKind::Text, "text-1");
-        text.materialized_outputs.insert(
+        text.materialized_values.insert(
             "stdout".to_string(),
             MaterializedValue {
                 data_base64: encode_bytes(b"cached\n"),
@@ -1868,13 +1859,13 @@ mod tests {
         let manager = ExecutionManager::new(tx.clone());
         let mut rx = tx.subscribe();
         let mut file = node(NodeKind::File, "file-1");
-        file.materialized_outputs.insert(
+        file.materialized_values.insert(
             "stdout".to_string(),
             MaterializedValue {
                 data_base64: encode_bytes(b""),
             },
         );
-        file.materialized_outputs.insert(
+        file.materialized_values.insert(
             "stderr".to_string(),
             MaterializedValue {
                 data_base64: encode_bytes(b""),

@@ -53,7 +53,7 @@ import type {
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
-import { missingConnectedInputs, missingOutputs, outputPortsForKind, runtimePreviewsFromNode, splitMaterializedFromRuntime } from "./lib/materialized";
+import { missingConnectedInputs, missingOutputs, outputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -81,8 +81,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
-    materializedInputs: {},
-    materializedOutputs: {},
+    materializedValues: {},
     autoRun: null,
     uiState: { openPreviewTabs: previewOpenByDefault },
   };
@@ -382,13 +381,10 @@ function WorkspaceCanvas() {
         nodes: nodesArg.map((node) => {
           const model = flowNodeToWorkspaceNode(node);
           const runtimeState = runtimeArg[node.id];
-          const materialized = splitMaterializedFromRuntime(runtimeState?.previews);
+          const materializedValues = materializedValuesFromRuntime(runtimeState?.previews);
           return {
             ...model,
-            materializedInputs:
-              runtimeState?.previews ? materialized.materializedInputs : model.materializedInputs,
-            materializedOutputs:
-              runtimeState?.previews ? materialized.materializedOutputs : model.materializedOutputs,
+            materializedValues: runtimeState?.previews ? materializedValues : model.materializedValues,
           };
         }),
         edges: edgesArg.map(flowEdgeToWorkspaceEdge),

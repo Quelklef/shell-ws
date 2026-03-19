@@ -63,8 +63,7 @@ export interface WorkspaceNode {
   path?: string | null;
   args?: string[] | null;
   text?: string | null;
-  materializedInputs?: Record<string, MaterializedValue> | null;
-  materializedOutputs?: Record<string, MaterializedValue> | null;
+  materializedValues?: Record<string, MaterializedValue> | null;
   autoRun?: AutoRunConfig | null;
   uiState?: NodeUiState | null;
 }

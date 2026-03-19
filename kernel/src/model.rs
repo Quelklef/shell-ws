@@ -43,8 +43,7 @@ impl Workspace {
                     path: None,
                     args: None,
                     text: Some(String::new()),
-                    materialized_inputs: HashMap::new(),
-                    materialized_outputs: HashMap::new(),
+                    materialized_values: HashMap::new(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
@@ -65,8 +64,7 @@ impl Workspace {
                     path: None,
                     args: None,
                     text: None,
-                    materialized_inputs: HashMap::new(),
-                    materialized_outputs: HashMap::new(),
+                    materialized_values: HashMap::new(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
@@ -115,9 +113,7 @@ pub struct Node {
     #[serde(default)]
     pub text: Option<String>,
     #[serde(default)]
-    pub materialized_inputs: HashMap<String, MaterializedValue>,
-    #[serde(default)]
-    pub materialized_outputs: HashMap<String, MaterializedValue>,
+    pub materialized_values: HashMap<String, MaterializedValue>,
     #[serde(default, alias = "auto_run")]
     pub auto_run: Option<AutoRunConfig>,
     #[serde(default)]
@@ -347,6 +343,11 @@ pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
     };
     let mut removed_ids = std::collections::HashSet::new();
     if let Some(nodes) = obj.get_mut("nodes").and_then(serde_json::Value::as_array_mut) {
+        for node in nodes.iter_mut() {
+            if let Some(node_obj) = node.as_object_mut() {
+                merge_legacy_materialized_values(node_obj);
+            }
+        }
         nodes.retain(|node| {
             let Some(kind) = node.get("kind").and_then(serde_json::Value::as_str) else {
                 return true;
@@ -389,6 +390,28 @@ pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
                 _ => true,
             }
         });
+    }
+}
+
+fn merge_legacy_materialized_values(node: &mut serde_json::Map<String, serde_json::Value>) {
+    let mut merged = node
+        .remove("materializedValues")
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+
+    for legacy_key in ["materializedInputs", "materialized_inputs"] {
+        if let Some(values) = node.remove(legacy_key).and_then(|value| value.as_object().cloned()) {
+            merged.extend(values);
+        }
+    }
+    for legacy_key in ["materializedOutputs", "materialized_outputs"] {
+        if let Some(values) = node.remove(legacy_key).and_then(|value| value.as_object().cloned()) {
+            merged.extend(values);
+        }
+    }
+
+    if !merged.is_empty() {
+        node.insert("materializedValues".to_string(), serde_json::Value::Object(merged));
     }
 }
 
@@ -457,6 +480,39 @@ mod tests {
 
         assert_eq!(workspace.cwd, default_cwd());
         assert_eq!(workspace.openai_api_key.unwrap_or_default(), "");
+    }
+
+    #[test]
+    fn sanitize_workspace_json_merges_legacy_materialized_maps() {
+        let mut value = serde_json::json!({
+            "id": "w",
+            "name": "w",
+            "cwd": "/tmp",
+            "nodes": [
+                {
+                    "id": "script-1",
+                    "kind": "script",
+                    "title": "",
+                    "comment": "",
+                    "position": {"x": 0, "y": 0},
+                    "size": {"width": 1, "height": 1},
+                    "materializedInputs": {"stdin": {"dataBase64": "aGVsbG8="}},
+                    "materialized_outputs": {"stdout": {"dataBase64": "d29ybGQ="}}
+                }
+            ],
+            "edges": [],
+            "ui": {}
+        });
+        super::sanitize_workspace_json_value(&mut value);
+        let workspace: Workspace = serde_json::from_value(value).expect("deserialize sanitized workspace");
+        assert_eq!(
+            workspace.nodes[0].materialized_values.get("stdin").map(|value| value.data_base64.as_str()),
+            Some("aGVsbG8=")
+        );
+        assert_eq!(
+            workspace.nodes[0].materialized_values.get("stdout").map(|value| value.data_base64.as_str()),
+            Some("d29ybGQ=")
+        );
     }
 
     #[test]

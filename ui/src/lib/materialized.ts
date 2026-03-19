@@ -37,13 +37,7 @@ export function serializeMaterializedValue(state?: { bytes: Uint8Array }): Mater
 
 export function runtimePreviewsFromNode(node: WorkspaceNode) {
   const previews: Record<string, DisplayState> = {};
-  for (const [key, value] of Object.entries(node.materializedInputs ?? {})) {
-    const deserialized = deserializeMaterializedValue(value);
-    if (deserialized) {
-      previews[key] = deserialized;
-    }
-  }
-  for (const [key, value] of Object.entries(node.materializedOutputs ?? {})) {
+  for (const [key, value] of Object.entries(node.materializedValues ?? {})) {
     const deserialized = deserializeMaterializedValue(value);
     if (deserialized) {
       previews[key] = deserialized;
@@ -52,21 +46,18 @@ export function runtimePreviewsFromNode(node: WorkspaceNode) {
   return Object.keys(previews).length > 0 ? previews : undefined;
 }
 
-export function splitMaterializedFromRuntime(previews?: Record<string, DisplayState>) {
-  const materializedInputs: Record<string, MaterializedValue> = {};
-  const materializedOutputs: Record<string, MaterializedValue> = {};
+export function materializedValuesFromRuntime(previews?: Record<string, DisplayState>) {
+  const materializedValues: Record<string, MaterializedValue> = {};
   for (const [key, state] of Object.entries(previews ?? {})) {
     const serialized = serializeMaterializedValue(state);
     if (!serialized) {
       continue;
     }
-    if (isInputPreviewKey(key)) {
-      materializedInputs[key] = serialized;
-    } else if (isOutputPreviewKey(key)) {
-      materializedOutputs[key] = serialized;
+    if (isInputPreviewKey(key) || isOutputPreviewKey(key)) {
+      materializedValues[key] = serialized;
     }
   }
-  return { materializedInputs, materializedOutputs };
+  return materializedValues;
 }
 
 export function outputPortsForKind(kind: NodeKind): PortKind[] {

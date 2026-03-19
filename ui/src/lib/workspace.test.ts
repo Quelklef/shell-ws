@@ -166,10 +166,42 @@ it("migrates legacy preview bytes into materialized inputs and outputs", () => {
   } as unknown as Workspace;
 
   const sanitized = sanitizeWorkspace(workspace);
-  expect(sanitized.nodes[0]?.materializedInputs).toEqual({
+  expect(sanitized.nodes[0]?.materializedValues).toEqual({
     stdin: { dataBase64: "aGVsbG8=" },
+    stdout: { dataBase64: "d29ybGQ=" },
   });
-  expect(sanitized.nodes[0]?.materializedOutputs).toEqual({
+});
+
+
+it("merges legacy materialized input and output maps", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    openaiApiKey: "",
+    nodes: [
+      {
+        id: "x",
+        kind: "script",
+        title: "",
+        comment: "",
+        position: { x: 0, y: 0 },
+        size: { width: 10, height: 10 },
+        materializedInputs: {
+          stdin: { dataBase64: "aGVsbG8=" },
+        },
+        materializedOutputs: {
+          stdout: { dataBase64: "d29ybGQ=" },
+        },
+      },
+    ],
+    edges: [],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitized.nodes[0]?.materializedValues).toEqual({
+    stdin: { dataBase64: "aGVsbG8=" },
     stdout: { dataBase64: "d29ybGQ=" },
   });
 });

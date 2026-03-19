@@ -1,4 +1,9 @@
-import type { MaterializedValue, Workspace } from "./types";
+import type { MaterializedValue, Workspace, WorkspaceNode } from "./types";
+
+type LegacyMaterializedNode = WorkspaceNode & {
+  materializedInputs?: Record<string, MaterializedValue> | null;
+  materializedOutputs?: Record<string, MaterializedValue> | null;
+};
 
 const REMOVED_NODE_KINDS = new Set([
   "tee",
@@ -19,16 +24,13 @@ function isInputKey(key: string) {
 }
 
 function migrateLegacyPreviews(previews?: Record<string, { dataBase64: string }> | null) {
-  const materializedInputs: Record<string, MaterializedValue> = {};
-  const materializedOutputs: Record<string, MaterializedValue> = {};
+  const materializedValues: Record<string, MaterializedValue> = {};
   for (const [key, value] of Object.entries(previews ?? {})) {
-    if (isInputKey(key)) {
-      materializedInputs[key] = { dataBase64: value.dataBase64 };
-    } else if (isOutputKey(key)) {
-      materializedOutputs[key] = { dataBase64: value.dataBase64 };
+    if (isInputKey(key) || isOutputKey(key)) {
+      materializedValues[key] = { dataBase64: value.dataBase64 };
     }
   }
-  return { materializedInputs, materializedOutputs };
+  return materializedValues;
 }
 
 export function sanitizeWorkspace(workspace: Workspace): Workspace {
@@ -51,6 +53,16 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
     openaiApiKey: workspace.openaiApiKey ?? "",
     nodes: nodes.map((node) => {
       const migrated = migrateLegacyPreviews(node.uiState?.previews);
+      // Older workspaces persisted materialized inputs and outputs separately.
+      const legacyNode = node as LegacyMaterializedNode;
+      const materializedValues =
+        node.materializedValues && Object.keys(node.materializedValues).length > 0
+          ? node.materializedValues
+          : {
+              ...(legacyNode.materializedInputs ?? {}),
+              ...(legacyNode.materializedOutputs ?? {}),
+              ...migrated,
+            };
       return {
         ...node,
         autoRun:
@@ -59,14 +71,7 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
             : node.autoRun && node.autoRun.mode === ("pull" as never)
               ? { ...node.autoRun, mode: "pull_run" }
               : node.autoRun,
-        materializedInputs:
-          node.materializedInputs && Object.keys(node.materializedInputs).length > 0
-            ? node.materializedInputs
-            : migrated.materializedInputs,
-        materializedOutputs:
-          node.materializedOutputs && Object.keys(node.materializedOutputs).length > 0
-            ? node.materializedOutputs
-            : migrated.materializedOutputs,
+        materializedValues,
         uiState: node.uiState
           ? {
               ...node.uiState,
