@@ -3,7 +3,7 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 
 import { renderDisplay } from "../lib/format";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
@@ -101,6 +101,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
   const argsEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const htmlBytes = runtime.previews?.stdin?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
@@ -161,6 +162,15 @@ export default function ShellNode({ data, selected }: NodeProps) {
     observer.observe(element);
     return () => observer.disconnect();
   });
+
+  useLayoutEffect(() => {
+    const element = commentRef.current;
+    if (!element) {
+      return;
+    }
+    element.style.height = "0px";
+    element.style.height = `${element.scrollHeight}px`;
+  }, [model.comment]);
 
   useEffect(() => {
     const element = textEditorRef.current;
@@ -239,6 +249,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
 
       <div className="node-comment-floating">
         <textarea
+          ref={commentRef}
           className="nodrag nopan"
           value={model.comment}
           placeholder="Add a comment"

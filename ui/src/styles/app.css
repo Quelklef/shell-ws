@@ -370,25 +370,32 @@ textarea {
 
 .node-comment-floating {
   position: absolute;
-  left: 0;
-  right: 28px;
-  top: -34px;
+  left: 16px;
+  right: 16px;
+  bottom: calc(100% + 3px);
   z-index: 6;
 }
 
 .node-comment-floating textarea {
   width: 100%;
-  min-height: 26px;
-  max-height: 90px;
-  resize: vertical;
+  min-height: 22px;
+  resize: none;
   border: none;
+  outline: none;
+  box-shadow: none;
   background: transparent;
   color: var(--text);
-  font-size: 15px;
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 17px;
   font-weight: 700;
-  line-height: 1.2;
+  line-height: 1.15;
   padding: 0;
   overflow: hidden;
+}
+
+.node-comment-floating textarea:focus {
+  outline: none;
+  box-shadow: none;
 }
 
 .node-comment-floating textarea::placeholder {
