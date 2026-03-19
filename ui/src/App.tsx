@@ -121,11 +121,6 @@ function paletteGroups(): {
           label: "byte",
           help: "Interleave upstream inputs byte by byte.",
         },
-        {
-          kind: "merge_shell",
-          label: "shell",
-          help: "Merge inputs with a custom shell snippet.",
-        },
       ],
     },
     {
