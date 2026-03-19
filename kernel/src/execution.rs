@@ -1188,12 +1188,13 @@ impl RunController {
         if !chunk.is_empty() {
             self.context.emit_port_activity(from_node_id, port, chunk.len());
             self.append_live_output(from_node_id, port, &chunk);
+            // The first chunk for a port resets the UI preview; later chunks append onto it.
             let reset = self.state_mut(from_node_id).output_resets.insert(port);
             let _ = self.context.broadcaster.send(ServerEvent::NodeOutput {
                 node_id: from_node_id.to_string(),
                 port,
                 data_base64: encode_bytes(&chunk),
-                reset: !reset,
+                reset,
                 timestamp: now_ms(),
             });
         }

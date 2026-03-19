@@ -54,6 +54,7 @@ import type {
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
+import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -790,11 +791,6 @@ function WorkspaceCanvas() {
                 },
               };
             case "node_output": {
-              const nextBytes = fromBase64(event.data_base64);
-              const previous =
-                event.reset
-                  ? new Uint8Array()
-                  : current[event.node_id]?.livePreviews?.[event.port]?.bytes ?? new Uint8Array();
               return {
                 ...current,
                 [event.node_id]: {
@@ -802,13 +798,7 @@ function WorkspaceCanvas() {
                     running: false,
                     portActivity: {},
                   }),
-                  livePreviews: {
-                    ...(current[event.node_id]?.livePreviews ?? {}),
-                    [event.port]: {
-                      bytes: concatBytes(previous, nextBytes),
-                      completed: false,
-                    },
-                  },
+                  livePreviews: applyNodeOutputEvent(current[event.node_id]?.livePreviews, event),
                 },
               };
             }
