@@ -219,7 +219,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
             >
               <CodeMirror
                 value={model.script ?? ""}
-                height="132px"
+                height="100%"
                 theme={oneDark}
                 extensions={shellExtensions}
                 basicSetup={{
