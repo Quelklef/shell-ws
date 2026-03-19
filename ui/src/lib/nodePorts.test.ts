@@ -14,12 +14,14 @@ describe("node port affordances", () => {
     expect(nodeHasInputPort("text")).toBe(false);
     expect(nodeHasInputPort("file")).toBe(false);
     expect(nodeHasInputPort("script")).toBe(true);
+    expect(nodeHasInputPort("ai_script")).toBe(true);
     expect(nodeHasInputPort("passthru")).toBe(true);
     expect(nodeHasInputPort("html")).toBe(true);
   });
 
   it("adds argv ports only to command nodes", () => {
     expect(nodeHasArgvPort("script")).toBe(true);
+    expect(nodeHasArgvPort("ai_script")).toBe(true);
     expect(nodeHasArgvPort("exec")).toBe(true);
     expect(nodeHasArgvPort("passthru")).toBe(false);
     expect(nodeHasArgvPort("file")).toBe(false);

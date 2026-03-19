@@ -105,6 +105,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const activePreviewTab = model.uiState?.activePreviewTab ?? null;
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
   const textEditorRef = useRef<HTMLTextAreaElement | null>(null);
+  const descriptionEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditingComment, setIsEditingComment] = useState(false);
   const nodeCardRef = useRef<HTMLDivElement | null>(null);
@@ -128,7 +129,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const commentBody = commentBodyLines.join("\n").trim();
 
   const syncEditorHeight = (
-    key: "script" | "args" | "text",
+    key: "script" | "args" | "text" | "description",
     height: number,
   ) => {
     const currentHeight = model.uiState?.editorHeights?.[key];
@@ -236,6 +237,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
           />
         ))}
       {(model.kind === "script" ||
+        model.kind === "ai_script" ||
         model.kind === "exec" ||
         model.kind === "file" ||
         model.kind === "text" ||
@@ -243,6 +245,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
         model.kind === "html") &&
         outputHandle("stdout", STDOUT_PORT_TOP, "stdout", runtime.portActivity.stdout)}
       {(model.kind === "script" ||
+        model.kind === "ai_script" ||
         model.kind === "exec" ||
         model.kind === "file") &&
         outputHandle("stderr", STDERR_PORT_TOP, "stderr", runtime.portActivity.stderr)}
@@ -310,7 +313,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
           </span>
         </div>
 
-        {model.kind === "script" && (
+        {(model.kind === "script" || model.kind === "ai_script") && (
           <>
             <input
               className="shell-input nodrag nopan"
@@ -321,6 +324,46 @@ export default function ShellNode({ data, selected }: NodeProps) {
               }
               placeholder="shell"
             />
+            {model.kind === "ai_script" && (
+              <>
+                <textarea
+                  ref={descriptionEditorRef}
+                  className="script-editor ai-description-editor nodrag nopan"
+                  style={{ height: model.uiState?.editorHeights?.description ?? 72 }}
+                  value={model.description ?? ""}
+                  placeholder="describe the script you want generated"
+                  onWheelCapture={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    typedData.onUpdate(model.id, { description: event.target.value })
+                  }
+                />
+                <div className="ai-generate-shell">
+                  <button
+                    type="button"
+                    className="nodrag nopan"
+                    disabled={typedData.generation?.loading}
+                    onClick={() => void typedData.onGenerate(model.id)}
+                  >
+                    {typedData.generation?.loading ? "generating..." : "generate"}
+                  </button>
+                  <label className="ai-generate-samples nodrag nopan">
+                    <input
+                      type="checkbox"
+                      checked={model.includeSampleInputs ?? false}
+                      onChange={(event) =>
+                        typedData.onUpdate(model.id, {
+                          includeSampleInputs: event.target.checked,
+                        })
+                      }
+                    />
+                    <span>include sample inputs from previous execution</span>
+                  </label>
+                  {typedData.generation?.error && (
+                    <div className="node-inline-error">{typedData.generation.error}</div>
+                  )}
+                </div>
+              </>
+            )}
             <div
               ref={scriptEditorRef}
               className="script-editor-codemirror nodrag nopan"

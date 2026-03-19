@@ -354,6 +354,36 @@ textarea {
   resize: vertical;
 }
 
+.ai-description-editor {
+  min-height: 72px;
+}
+
+.ai-generate-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ai-generate-samples {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.3;
+  cursor: pointer;
+}
+
+.ai-generate-samples input {
+  margin: 2px 0 0;
+}
+
+.node-inline-error {
+  color: #f4c3c3;
+  font-size: 11px;
+  line-height: 1.3;
+}
+
 .script-editor-codemirror {
   min-height: 132px;
   height: 132px;

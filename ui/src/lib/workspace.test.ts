@@ -10,6 +10,7 @@ describe("sanitizeWorkspace", () => {
       name: "w",
       ui: { viewportX: 0, viewportY: 0, zoom: 1 },
       cwd: "",
+      openaiApiKey: "",
       nodes: [
         {
           id: "cat-1",
@@ -32,6 +33,7 @@ describe("sanitizeWorkspace", () => {
       name: "w",
       ui: { viewportX: 0, viewportY: 0, zoom: 1 },
       cwd: "",
+      openaiApiKey: "",
       nodes: [
         {
           id: "display-1",
@@ -54,6 +56,7 @@ describe("sanitizeWorkspace", () => {
       name: "w",
       ui: { viewportX: 0, viewportY: 0, zoom: 1 },
       cwd: "",
+      openaiApiKey: "",
       nodes: [
         { id: "a", kind: "text", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },
         { id: "b", kind: "script", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },

@@ -26,14 +26,17 @@ import ShellNode from "./components/ShellNode";
 import WorkspaceEdgeView from "./components/WorkspaceEdge";
 import {
   createWorkspace,
+  generateScript,
   getWorkspace,
   listWorkspaces,
   pickFilePath,
   saveWorkspace,
 } from "./lib/api";
+import { collectAiScriptSamples } from "./lib/aiScript";
 import { layoutSelectedNodes } from "./lib/layout";
 import { nodeArgvSlots, nodeHasArgvPort, nodePreviewTabs, nodePreviewTabsForNode } from "./lib/nodePorts";
 import type {
+  AiGenerationState,
   AutoRunConfig,
   BufferingMode,
   ClientEvent,
@@ -91,9 +94,11 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     title: "",
     comment: "",
     position: { x: 140 + count * 30, y: 140 + count * 24 },
-    size: { width: 320, height: kind === "html" ? 300 : 230 },
+    size: { width: 320, height: kind === "html" ? 300 : kind === "ai_script" ? 320 : 230 },
     shell: "bash",
-    script: kind === "script" ? "printf 'hello\n'" : null,
+    script: kind === "script" ? "printf 'hello\n'" : kind === "ai_script" ? "" : null,
+    description: kind === "ai_script" ? "" : null,
+    includeSampleInputs: kind === "ai_script" ? false : null,
     path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
@@ -120,6 +125,11 @@ function paletteGroups(): {
           kind: "script",
           label: "script",
           help: "Run a shell snippet with the selected shell.",
+        },
+        {
+          kind: "ai_script",
+          label: "ai script",
+          help: "Generate and run a shell snippet with OpenAI.",
         },
         {
           kind: "exec",
@@ -178,6 +188,7 @@ function computePreviewTabs(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
 function syncNodeData(
   current: FlowNode[],
   runtime: Record<string, NodeRuntimeState>,
+  generation: Record<string, AiGenerationState>,
   handlers: ShellNodeActions,
   edges: FlowEdge[],
 ) {
@@ -187,6 +198,7 @@ function syncNodeData(
       ...node.data,
       model: node.data.model,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
+      generation: generation[node.id],
       argvSlots: computeArgvSlots(node.id, node.data.model.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.data.model.kind, edges),
       onUpdate: handlers.onUpdate,
@@ -194,6 +206,7 @@ function syncNodeData(
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
+      onGenerate: handlers.onGenerate,
     },
   }));
 }
@@ -201,9 +214,10 @@ function syncNodeData(
 function toFlowNode(
   node: WorkspaceNode,
   runtime: Record<string, NodeRuntimeState>,
+  generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "onDelete" | "onPickFile" | "onToggleAutorun"
+    "onUpdate" | "onRun" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate"
   >,
   edges: FlowEdge[],
 ): FlowNode {
@@ -214,6 +228,7 @@ function toFlowNode(
     data: {
       model: node,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
+      generation: generation[node.id],
       argvSlots: computeArgvSlots(node.id, node.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.kind, edges),
       onUpdate: handlers.onUpdate,
@@ -221,6 +236,7 @@ function toFlowNode(
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
+      onGenerate: handlers.onGenerate,
     },
     width: node.size.width,
     height: node.size.height,
@@ -287,6 +303,7 @@ type ShellNodeActions = {
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
+  onGenerate: (nodeId: string) => Promise<void>;
 };
 
 type AutorunHandle = {
@@ -297,9 +314,10 @@ type AutorunHandle = {
 function WorkspaceCanvas() {
   const [workspaceMeta, setWorkspaceMeta] = useState<Pick<
     Workspace,
-    "id" | "name" | "cwd" | "ui"
+    "id" | "name" | "cwd" | "openaiApiKey" | "ui"
   > | null>(null);
   const [kernelConnected, setKernelConnected] = useState(false);
+  const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
   const [activeExecutions, setActiveExecutions] = useState<
     { execId: string; nodeId: string }[]
@@ -322,7 +340,7 @@ function WorkspaceCanvas() {
     startY: 0,
     moved: false,
   });
-  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "cwd" | "ui"> | null>(
+  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "cwd" | "openaiApiKey" | "ui"> | null>(
     null,
   );
   const nodesRef = useRef<FlowNode[]>([]);
@@ -330,6 +348,7 @@ function WorkspaceCanvas() {
   const autorunRef = useRef<Map<string, AutorunHandle>>(new Map());
   const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
   const persistTimerRef = useRef<number | null>(null);
+  const generationRef = useRef<Record<string, AiGenerationState>>({});
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
 
@@ -352,13 +371,17 @@ function WorkspaceCanvas() {
     runtimeRef.current = runtime;
   }, [runtime]);
 
+  useEffect(() => {
+    generationRef.current = generation;
+  }, [generation]);
+
   const buildWorkspace = useCallback(
     (
       nodesArg: FlowNode[] = nodesRef.current,
       edgesArg: FlowEdge[] = edgesRef.current,
       metaArg: Pick<
         Workspace,
-        "id" | "name" | "cwd" | "ui"
+        "id" | "name" | "cwd" | "openaiApiKey" | "ui"
       > | null = workspaceMetaRef.current,
       runtimeArg: Record<string, NodeRuntimeState> = runtimeRef.current,
     ): Workspace | null => {
@@ -370,6 +393,7 @@ function WorkspaceCanvas() {
         name: metaArg.name,
         ui: metaArg.ui,
         cwd: metaArg.cwd,
+        openaiApiKey: metaArg.openaiApiKey,
         nodes: nodesArg.map((node) => {
           const model = flowNodeToWorkspaceNode(node);
           const runtimeState = runtimeArg[node.id];
@@ -418,6 +442,23 @@ function WorkspaceCanvas() {
       persistTimerRef.current = null;
     }, 150);
   }, [buildWorkspace]);
+
+  const updateWorkspaceApiKey = useCallback(
+    (openaiApiKey: string) => {
+      setWorkspaceMeta((current) => {
+        if (!current) {
+          return current;
+        }
+        const next = { ...current, openaiApiKey };
+        const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
+        if (nextWorkspace) {
+          saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+        }
+        return next;
+      });
+    },
+    [buildWorkspace],
+  );
 
   const updateWorkspaceCwd = useCallback(
     (cwd: string) => {
@@ -558,6 +599,57 @@ function WorkspaceCanvas() {
           return updated;
         });
       },
+      onGenerate: async (nodeId) => {
+        const workspace = buildWorkspace();
+        const node = nodesRef.current.find((item) => item.id === nodeId)?.data.model;
+        if (!workspace || !node || node.kind !== "ai_script") {
+          return;
+        }
+        setGeneration((current) => ({
+          ...current,
+          [nodeId]: { loading: true, error: null },
+        }));
+        try {
+          const samples = collectAiScriptSamples(
+            nodeId,
+            runtimeRef.current[nodeId],
+            edgesRef.current,
+          );
+          const result = await generateScript({
+            workspace,
+            nodeId,
+            stdinSample: samples.stdinSample,
+            argvSamples: samples.argvSamples,
+          });
+          setNodes((current) => {
+            const next = current.map((flowNode) =>
+              flowNode.id === nodeId
+                ? {
+                    ...flowNode,
+                    data: {
+                      ...flowNode.data,
+                      model: {
+                        ...flowNode.data.model,
+                        script: result.script,
+                      },
+                    },
+                  }
+                : flowNode,
+            );
+            persistSoon(next, edgesRef.current);
+            return next;
+          });
+          setGeneration((current) => ({
+            ...current,
+            [nodeId]: { loading: false, error: null },
+          }));
+        } catch (error) {
+          setGeneration((current) => ({
+            ...current,
+            [nodeId]: { loading: false, error: String(error) },
+          }));
+        }
+      },
     }),
     [persistSoon, sendRunRequest, setNodes],
   );
@@ -580,7 +672,7 @@ function WorkspaceCanvas() {
           loaded.ui.zoom === 1
             ? { ...loaded.ui, zoom: 0.5 }
             : loaded.ui;
-        setWorkspaceMeta({ id: loaded.id, name: loaded.name, cwd: loaded.cwd, ui });
+        setWorkspaceMeta({ id: loaded.id, name: loaded.name, cwd: loaded.cwd, openaiApiKey: loaded.openaiApiKey, ui });
         setRuntime(
           Object.fromEntries(
             loaded.nodes.map((node) => [
@@ -604,6 +696,7 @@ function WorkspaceCanvas() {
             toFlowNode(
               node,
               {},
+              {},
               handlers,
               loaded.edges.map((edge) =>
                 toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
@@ -626,9 +719,9 @@ function WorkspaceCanvas() {
 
   useEffect(() => {
     setNodes((current) =>
-      syncNodeData(current, runtime, handlers, edgesRef.current),
+      syncNodeData(current, runtime, generationRef.current, handlers, edgesRef.current),
     );
-  }, [edges, handlers, runtime, setNodes]);
+  }, [edges, generation, handlers, runtime, setNodes]);
 
   useEffect(() => {
     const connection = connectKernel(
@@ -969,7 +1062,7 @@ function WorkspaceCanvas() {
       setEdges((current) => {
         const next = applyEdgeChanges(changes, current);
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
         );
         const shouldPersist = changes.some(
           (change) => change.type !== "select",
@@ -980,7 +1073,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [handlers, persistSoon, runtime, setEdges, setNodes],
+    [handlers, persistSoon, setEdges, setNodes],
   );
 
   const deleteEdge = useCallback(
@@ -988,13 +1081,13 @@ function WorkspaceCanvas() {
       setEdges((current) => {
         const next = current.filter((edge) => edge.id !== edgeId);
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
         );
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [handlers, persistSoon, runtime, setEdges, setNodes],
+    [handlers, persistSoon, setEdges, setNodes],
   );
 
   const cycleEdgeBuffering = useCallback(
@@ -1026,13 +1119,13 @@ function WorkspaceCanvas() {
           };
         });
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
         );
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [handlers, persistSoon, runtime, setEdges, setNodes],
+    [handlers, persistSoon, setEdges, setNodes],
   );
 
   const onConnect = useCallback(
@@ -1100,13 +1193,13 @@ function WorkspaceCanvas() {
           current,
         ) as FlowEdge[];
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
         );
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [handlers, persistSoon, runtime, setEdges, setNodes],
+    [handlers, persistSoon, setEdges, setNodes],
   );
 
   const addNode = useCallback(
@@ -1126,6 +1219,7 @@ function WorkspaceCanvas() {
         const nextNode = toFlowNode(
           nextNodeModel,
           runtime,
+          generationRef.current,
           handlers,
           edgesRef.current,
         );
@@ -1182,6 +1276,18 @@ function WorkspaceCanvas() {
               onChange={(event) => updateWorkspaceCwd(event.target.value)}
               placeholder="/home/user"
               title="working directory for kernel execution"
+            />
+          </label>
+          <label className="sidebar-field">
+            <span className="sidebar-label">openai api key</span>
+            <input
+              className="sidebar-input"
+              type="password"
+              autoComplete="off"
+              value={workspaceMeta.openaiApiKey}
+              onChange={(event) => updateWorkspaceApiKey(event.target.value)}
+              placeholder="sk-..."
+              title="workspace-level OpenAI API key for AI SCRIPT generation"
             />
           </label>
           {activeExecutions.length > 0 && (

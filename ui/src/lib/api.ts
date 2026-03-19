@@ -1,4 +1,4 @@
-import type { Workspace, WorkspaceSummary } from "./types";
+import type { GenerateScriptRequest, GenerateScriptResponse, Workspace, WorkspaceSummary } from "./types";
 
 function kernelOrigin() {
   if (typeof window === "undefined") {
@@ -53,4 +53,11 @@ export function saveWorkspace(workspace: Workspace) {
 
 export function pickFilePath() {
   return request<{ path: string }>(`${kernelOrigin()}/api/pick-file`, { method: "POST" });
+}
+
+export function generateScript(requestBody: GenerateScriptRequest) {
+  return request<GenerateScriptResponse>(`${kernelOrigin()}/api/generate-script`, {
+    method: "POST",
+    body: JSON.stringify(requestBody),
+  });
 }

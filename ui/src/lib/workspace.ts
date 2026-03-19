@@ -25,6 +25,7 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
   return {
     ...workspace,
     cwd: workspace.cwd ?? "",
+    openaiApiKey: workspace.openaiApiKey ?? "",
     nodes,
     edges: workspace.edges.filter(
       (edge) =>

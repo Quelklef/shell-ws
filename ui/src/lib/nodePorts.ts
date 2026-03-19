@@ -5,7 +5,7 @@ export function nodeHasInputPort(kind: NodeKind) {
 }
 
 export function nodeHasArgvPort(kind: NodeKind) {
-  return kind === "script" || kind === "exec";
+  return kind === "script" || kind === "ai_script" || kind === "exec";
 }
 
 export function nodePreviewTabs(kind: NodeKind): PortKind[] {

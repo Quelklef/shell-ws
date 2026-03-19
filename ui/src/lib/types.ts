@@ -2,6 +2,7 @@ import type { Edge, Node } from "@xyflow/react";
 
 export type NodeKind =
   | "script"
+  | "ai_script"
   | "exec"
   | "file"
   | "passthru"
@@ -20,7 +21,7 @@ export interface PersistedDisplayState {
 export interface NodeUiState {
   activePreviewTab?: string | null;
   showAutoControls?: boolean;
-  editorHeights?: Partial<Record<"script" | "args" | "text", number>>;
+  editorHeights?: Partial<Record<"script" | "args" | "text" | "description", number>>;
   previews?: Record<string, PersistedDisplayState>;
 }
 
@@ -28,6 +29,7 @@ export interface Workspace {
   id: string;
   name: string;
   cwd: string;
+  openaiApiKey: string;
   nodes: WorkspaceNode[];
   edges: WorkspaceEdge[];
   ui: {
@@ -46,6 +48,8 @@ export interface WorkspaceNode {
   size: { width: number; height: number };
   shell?: string | null;
   script?: string | null;
+  description?: string | null;
+  includeSampleInputs?: boolean | null;
   path?: string | null;
   args?: string[] | null;
   text?: string | null;
@@ -152,16 +156,34 @@ export interface NodeRuntimeState {
   previews?: Record<string, DisplayState>;
 }
 
+export interface AiGenerationState {
+  loading: boolean;
+  error?: string | null;
+}
+
+export interface GenerateScriptRequest {
+  workspace: Workspace;
+  nodeId: string;
+  stdinSample?: string;
+  argvSamples: { slot: number; value: string }[];
+}
+
+export interface GenerateScriptResponse {
+  script: string;
+}
+
 export interface ShellNodeData extends Record<string, unknown> {
   model: WorkspaceNode;
   runtime: NodeRuntimeState;
   argvSlots?: number[];
   previewTabs?: string[];
+  generation?: AiGenerationState;
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, mode: ExecutionMode) => void;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
+  onGenerate: (nodeId: string) => Promise<void>;
 }
 
 export interface FlowEdgeData extends Record<string, unknown> {
