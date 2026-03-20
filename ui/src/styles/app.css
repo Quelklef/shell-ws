@@ -284,6 +284,10 @@ textarea {
   font-size: 14px;
 }
 
+.node-palette-icon-display {
+  font-size: 22px;
+}
+
 .canvas-shell {
   grid-column: 2;
   min-width: 0;
