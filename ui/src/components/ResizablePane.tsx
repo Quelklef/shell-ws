@@ -32,6 +32,7 @@ export default function ResizablePane({
   const widthSettleTimerRef = useRef<number | null>(null);
   const layoutFrameRef = useRef<number | null>(null);
   const observedHeightRef = useRef(height);
+  const nodeChromeWidthRef = useRef(0);
 
   useLayoutEffect(() => {
     const element = elementRef.current;
@@ -68,14 +69,20 @@ export default function ResizablePane({
       // same unscaled coordinate system as `node.size.width` and pane heights.
       const widthFromDom = Math.round(element.offsetWidth);
       const heightFromDom = Math.round(element.offsetHeight);
+      const nodeWidthFromDom = Math.round(
+        (element.closest(".react-flow__node") as HTMLElement | null)?.offsetWidth ?? width,
+      );
       observedHeightRef.current = heightFromDom;
       notifyLayout();
 
-      // A pane that is actively resizing itself gets an inline width from the browser.
-      // Mirror that into the shared node width, then clear the pane-local width once the
-      // drag settles so every important box goes back to following the node width in CSS.
+      if (!element.style.width) {
+        nodeChromeWidthRef.current = Math.max(0, nodeWidthFromDom - widthFromDom);
+      }
+
+      // The resizable pane lives inside the node card, so the persisted node width must include
+      // the surrounding non-pane chrome as well as the pane itself.
       if (element.style.width) {
-        const nextWidth = Math.max(MIN_NODE_WIDTH, widthFromDom);
+        const nextWidth = Math.max(MIN_NODE_WIDTH, widthFromDom + nodeChromeWidthRef.current);
         if (Math.abs(nextWidth - width) >= 1) {
           onWidthChange(nextWidth);
         }
