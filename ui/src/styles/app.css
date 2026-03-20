@@ -207,7 +207,7 @@ textarea {
 
 .node-palette {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 6px;
 }
 
@@ -242,6 +242,35 @@ textarea {
   transform: translateY(-1px);
   border-color: var(--line-strong);
   background: rgba(240, 138, 93, 0.12);
+}
+
+.node-palette button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  text-align: left;
+  padding: 8px 9px;
+}
+
+.node-palette-icon {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+  background: rgba(240, 138, 93, 0.12);
+  color: var(--accent-soft);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.node-palette-text {
+  flex: 1;
 }
 
 .canvas-shell {

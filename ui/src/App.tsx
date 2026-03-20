@@ -91,34 +91,48 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
 
 function paletteGroups(): {
   label: string;
-  items: { kind: NodeKind; label: string; help: string }[];
+  items: { kind: NodeKind; label: string; icon: string; help: string }[];
 }[] {
   return [
     {
       label: "sources",
       items: [
-        { kind: "text", label: "text", help: "Emit literal text on stdout." },
-        { kind: "file", label: "file", help: "Read a file path and emit its bytes." },
-        { kind: "formula", label: "formula", help: "Evaluate a math expression from argv inputs." },
+        { kind: "text", label: "text", icon: "T", help: "Emit literal text on stdout." },
+        { kind: "file", label: "file", icon: "F", help: "Read a file path and emit its bytes." },
       ],
     },
     {
-      label: "run",
+      label: "computers",
       items: [
         {
           kind: "script",
           label: "script",
+          icon: "§",
           help: "Run a shell snippet with the selected shell.",
         },
         {
           kind: "ai_script",
           label: "ai script",
+          icon: "AI",
           help: "Generate and run a shell snippet with OpenAI.",
         },
         {
           kind: "exec",
           label: "exec",
+          icon: ">_",
           help: "Exec a binary path with one argument per line.",
+        },
+        {
+          kind: "formula",
+          label: "formula",
+          icon: "∑",
+          help: "Evaluate a math expression from argv inputs.",
+        },
+        {
+          kind: "passthru",
+          label: "passthru",
+          icon: "→",
+          help: "Forward stdin to stdout with rich debug previews.",
         },
       ],
     },
@@ -126,13 +140,9 @@ function paletteGroups(): {
       label: "sinks",
       items: [
         {
-          kind: "passthru",
-          label: "passthru",
-          help: "Forward stdin to stdout with rich debug previews.",
-        },
-        {
           kind: "html",
           label: "html",
+          icon: "<>",
           help: "Render stdin as sandboxed HTML in the browser.",
         },
       ],
@@ -1252,7 +1262,8 @@ function WorkspaceCanvas() {
                     aria-label={`${choice.label}: ${choice.help}`}
                     onClick={() => addNode(choice.kind)}
                   >
-                    {choice.label}
+                    <span className="node-palette-icon" aria-hidden="true">{choice.icon}</span>
+                    <span className="node-palette-text">{choice.label}</span>
                   </button>
                 ))}
               </div>
