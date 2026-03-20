@@ -2,6 +2,8 @@ import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 
 import { MIN_NODE_WIDTH } from "../lib/paneLayout";
 
+const MAX_OBSERVED_PANE_HEIGHT = 2000;
+
 type ResizablePaneProps = {
   paneId: string;
   height: number;
@@ -91,6 +93,15 @@ export default function ResizablePane({
           window.clearTimeout(heightCommitTimerRef.current);
         }
         heightCommitTimerRef.current = window.setTimeout(() => {
+          // Guard against runaway layout feedback loops. If a pane starts growing without user
+          // intent, stop committing larger heights so the browser cannot ratchet the node forever.
+          if (heightFromDom > MAX_OBSERVED_PANE_HEIGHT) {
+            console.error(
+              `[ResizablePane] refusing to persist runaway height for ${paneId}: ${heightFromDom}px`,
+            );
+            heightCommitTimerRef.current = null;
+            return;
+          }
           onHeightChange(paneId, heightFromDom);
           heightCommitTimerRef.current = null;
         }, 140);
