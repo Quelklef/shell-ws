@@ -88,13 +88,16 @@ export default function ResizablePane({
         }, 140);
       }
 
-      if (Math.abs(heightFromDom - height) >= 1) {
+      const inlineHeight = Math.round(parseFloat(element.style.height || "0"));
+      const browserOwnsHeight = Math.abs(inlineHeight - height) >= 1;
+      if (browserOwnsHeight && Math.abs(heightFromDom - height) >= 1) {
         if (heightCommitTimerRef.current !== null) {
           window.clearTimeout(heightCommitTimerRef.current);
         }
         heightCommitTimerRef.current = window.setTimeout(() => {
-          // Guard against runaway layout feedback loops. If a pane starts growing without user
-          // intent, stop committing larger heights so the browser cannot ratchet the node forever.
+          // Only persist heights when the browser wrote an inline size from an actual pane resize.
+          // Ordinary layout growth (preview toggles, flex sizing, CodeMirror settling) must not
+          // rewrite pane state or the observer will ratchet the node taller forever.
           if (heightFromDom > MAX_OBSERVED_PANE_HEIGHT) {
             console.error(
               `[ResizablePane] refusing to persist runaway height for ${paneId}: ${heightFromDom}px`,
