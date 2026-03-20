@@ -485,6 +485,7 @@ function WorkspaceCanvas() {
     }
   }, []);
 
+  // Keep nodes visually active for a short minimum duration so fast runs do not flicker.
   const scheduleRunningClear = useCallback((nodeId: string, execId: string) => {
     clearRunningTimer(nodeId);
     const startedAt = runningStartedAtRef.current[nodeId] ?? Date.now();

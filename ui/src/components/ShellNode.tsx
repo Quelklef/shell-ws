@@ -21,10 +21,7 @@ import { clamp } from "../lib/utils";
 
 const PREVIEW_HEIGHT_DELTA = 156;
 const PORT_SPACING = 30;
-const STDOUT_PORT_TOP = 84;
-const STDERR_PORT_TOP = STDOUT_PORT_TOP + PORT_SPACING;
-const STDIN_PORT_TOP = 84;
-const ARGV_FIRST_PORT_TOP = STDIN_PORT_TOP + PORT_SPACING;
+const PORT_STACK_TOP = 84;
 
 function AutoRunControls({
   config,
@@ -125,6 +122,22 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
   const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
   const execArgs = model.args ?? [];
+  const leftPorts = useMemo(() => {
+    const ports: Array<{ key: string; port: PortKind; slot?: number; activeAt?: number }> = [];
+    if (nodeHasInputPort(model.kind)) {
+      ports.push({ key: "stdin", port: "stdin", activeAt: runtime.portActivity.stdin });
+    }
+    if (nodeHasArgvPort(model.kind)) {
+      for (const slot of typedData.argvSlots ?? [1]) {
+        ports.push({ key: `argv-${slot}`, port: "argv", slot, activeAt: runtime.portActivity.argv });
+      }
+    }
+    return ports;
+  }, [model.kind, runtime.portActivity.argv, runtime.portActivity.stdin, typedData.argvSlots]);
+  const rightPorts = useMemo(
+    () => outputPortsForKind(model.kind).map((port) => ({ key: port, port, activeAt: runtime.portActivity[port] })),
+    [model.kind, runtime.portActivity],
+  );
 
   useLayoutEffect(() => {
     const element = commentRef.current;
@@ -171,38 +184,22 @@ export default function ShellNode({ data, selected }: NodeProps) {
         lineClassName="node-resizer-line"
         handleClassName="node-resizer-handle"
       />
-      {nodeHasInputPort(model.kind) && (
-        <Handle
-          id="stdin"
-          type="target"
-          position={Position.Left}
-          className={`shell-handle shell-handle-stdin ${
-            runtime.portActivity.stdin && Date.now() - runtime.portActivity.stdin < 800
-              ? "is-active"
-              : ""
-          }`}
-          style={{ top: STDIN_PORT_TOP }}
-        />
-      )}
-      {nodeHasArgvPort(model.kind) &&
-        (typedData.argvSlots ?? [1]).map((slot, index) => (
+      {leftPorts.map(({ key, port, activeAt }, index) => {
+        const active = activeAt ? Date.now() - activeAt < 800 : false;
+        return (
           <Handle
-            key={`argv-${slot}`}
-            id={`argv-${slot}`}
+            key={key}
+            id={key}
             type="target"
             position={Position.Left}
-            className={`shell-handle shell-handle-argv ${
-              runtime.portActivity.argv && Date.now() - runtime.portActivity.argv < 800
-                ? "is-active"
-                : ""
-            }`}
-            style={{ top: ARGV_FIRST_PORT_TOP + index * PORT_SPACING }}
+            className={`shell-handle shell-handle-${port} ${active ? "is-active" : ""}`}
+            style={{ top: PORT_STACK_TOP + index * PORT_SPACING }}
           />
-        ))}
-      {outputPortsForKind(model.kind).includes("stdout") &&
-        outputHandle("stdout", STDOUT_PORT_TOP, "stdout", runtime.portActivity.stdout)}
-      {outputPortsForKind(model.kind).includes("stderr") &&
-        outputHandle("stderr", STDERR_PORT_TOP, "stderr", runtime.portActivity.stderr)}
+        );
+      })}
+      {rightPorts.map(({ key, port, activeAt }, index) =>
+        outputHandle(port, PORT_STACK_TOP + index * PORT_SPACING, key, activeAt),
+      )}
 
       <div className="node-comment-floating">
         {isEditingComment ? (

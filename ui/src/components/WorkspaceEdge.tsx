@@ -18,6 +18,7 @@ export default function WorkspaceEdge({
   style,
   markerEnd,
   data,
+  animated,
 }: EdgeProps) {
   const [path, labelX, labelY] = getSmoothStepPath({
     sourceX,
@@ -30,15 +31,15 @@ export default function WorkspaceEdge({
   });
   const typedData = (data ?? {}) as FlowEdgeData;
   const edgeStyle = {
-    stroke: "rgba(242, 192, 120, 0.95)",
-    strokeWidth: 3.4,
-    filter: "drop-shadow(0 0 8px rgba(242, 192, 120, 0.26))",
+    stroke: "rgba(242, 192, 120, 0.9)",
+    strokeWidth: 3.1,
+    filter: "drop-shadow(0 0 4px rgba(242, 192, 120, 0.14))",
     ...(style ?? {}),
   };
 
   return (
     <>
-      <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} />
+      <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} className={`workspace-edge-path ${animated ? "is-animated" : ""}`} />
       <EdgeLabelRenderer>
         <div
           className="edge-toolbar nodrag nopan"

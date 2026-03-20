@@ -394,6 +394,7 @@ textarea {
 
 .node-card {
   position: relative;
+  z-index: 2;
   width: 100%;
   height: 100%;
   display: flex;
@@ -780,6 +781,7 @@ textarea {
   width: 13px;
   height: 13px;
   pointer-events: none;
+  z-index: 0;
   background: rgba(var(--handle-rgb, 242, 192, 120), 0.42);
   border: 2px solid rgb(var(--handle-rgb, 242, 192, 120));
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
@@ -793,7 +795,7 @@ textarea {
 .shell-handle::before {
   content: "";
   position: absolute;
-  inset: -8px;
+  inset: -12px;
   z-index: -1;
   border-radius: 999px;
   background: rgba(var(--handle-rgb, 242, 192, 120), 0.2);
@@ -902,6 +904,21 @@ textarea {
   letter-spacing: 0.02em;
 }
 
+
+
+.workspace-edge-path.is-animated {
+  stroke-dasharray: 8 6;
+  animation: workspace-edge-crawl 800ms linear infinite;
+}
+
+@keyframes workspace-edge-crawl {
+  from {
+    stroke-dashoffset: 0;
+  }
+  to {
+    stroke-dashoffset: -14;
+  }
+}
 
 .edge-toolbar {
   position: absolute;
