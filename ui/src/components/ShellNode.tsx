@@ -25,6 +25,14 @@ import { clamp } from "../lib/utils";
 const PORT_SPACING = 30;
 const PORT_STACK_TOP = 84;
 
+function selectionPreviewRingWidth(nodeId: string) {
+  let hash = 0;
+  for (let index = 0; index < nodeId.length; index += 1) {
+    hash = (hash * 31 + nodeId.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % 2 === 0 ? 1 : 2;
+}
+
 function AutoRunControls({
   config,
   onChange,
@@ -124,6 +132,7 @@ export default function ShellNode({ data }: NodeProps) {
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
+  const selectionPreviewWidth = useMemo(() => selectionPreviewRingWidth(model.id), [model.id]);
   const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
   const execArgs = model.args ?? [];
   const paneSizeSignature = useMemo(() => JSON.stringify(model.uiState?.paneSizes ?? {}), [model.uiState?.paneSizes]);
@@ -220,7 +229,10 @@ export default function ShellNode({ data }: NodeProps) {
   ]);
 
   return (
-    <div className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""}`}>
+    <div
+      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""}`}
+      style={{ ["--selection-preview-width" as string]: `${selectionPreviewWidth}px` }}
+    >
       {leftPorts.map(({ key, port, activeAt }, index) => {
         const active = activeAt ? Date.now() - activeAt < 800 : false;
         return (
