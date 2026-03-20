@@ -32,7 +32,6 @@ export interface NodeUiState {
   activePreviewTab?: string | null;
   openPreviewTabs?: string[];
   showAutoControls?: boolean;
-  editorHeights?: Partial<Record<"script" | "args" | "text" | "description" | "formula", number>>;
   previews?: Record<string, LegacyPersistedDisplayState>;
 }
 

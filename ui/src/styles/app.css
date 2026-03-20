@@ -394,7 +394,6 @@ textarea {
 
 .script-editor {
   min-height: 112px;
-  resize: vertical;
 }
 
 .ai-description-editor {
@@ -498,7 +497,6 @@ textarea {
 .script-editor-codemirror {
   min-height: 132px;
   height: 132px;
-  resize: vertical;
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.54);
   border-radius: 7px;
@@ -1089,7 +1087,6 @@ textarea {
   cursor: pointer;
   width: 100%;
   min-height: 42px;
-  resize: vertical;
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.54);
   color: var(--text);

@@ -111,8 +111,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const openPreviewTabs =
     model.uiState?.openPreviewTabs ??
     (model.uiState?.activePreviewTab ? [model.uiState.activePreviewTab] : []);
-  const scriptEditorRef = useRef<HTMLDivElement | null>(null);
-  const formulaEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditingComment, setIsEditingComment] = useState(false);
   const [showFormulaHelp, setShowFormulaHelp] = useState(false);
@@ -125,46 +123,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const commentBody = commentBodyLines.join("\n").trim();
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
   const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
-
-  const syncEditorHeight = (key: "script" | "args" | "text" | "description" | "formula", height: number) => {
-    const currentHeight = model.uiState?.editorHeights?.[key];
-    if (currentHeight && Math.abs(currentHeight - height) < 1) {
-      return;
-    }
-    typedData.onUpdate(model.id, {
-      uiState: {
-        ...(model.uiState ?? {}),
-        editorHeights: {
-          ...(model.uiState?.editorHeights ?? {}),
-          [key]: height,
-        },
-      },
-    });
-  };
-
-  useEffect(() => {
-    const element = scriptEditorRef.current;
-    if (!element) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      syncEditorHeight("script", element.getBoundingClientRect().height);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  });
-
-  useEffect(() => {
-    const element = formulaEditorRef.current;
-    if (!element) {
-      return;
-    }
-    const observer = new ResizeObserver(() => {
-      syncEditorHeight("formula", element.getBoundingClientRect().height);
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  });
 
   useLayoutEffect(() => {
     const element = commentRef.current;
@@ -316,7 +274,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
               <>
                 <textarea
                   className="script-editor ai-description-editor nodrag nopan"
-                  style={{ height: model.uiState?.editorHeights?.description ?? 72 }}
                   value={model.description ?? ""}
                   placeholder="describe the script you want generated"
                   onWheelCapture={(event) => event.stopPropagation()}
@@ -350,9 +307,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               </>
             )}
             <div
-              ref={scriptEditorRef}
               className="script-editor-codemirror nodrag nopan"
-              style={{ height: model.uiState?.editorHeights?.script ?? 132 }}
               onWheelCapture={(event) => event.stopPropagation()}
             >
               <CodeMirror
@@ -441,7 +396,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
         {model.kind === "text" && (
           <textarea
             className="script-editor nodrag nopan"
-            style={{ height: model.uiState?.editorHeights?.text }}
             value={model.text ?? ""}
             placeholder="text output"
             onWheelCapture={(event) => event.stopPropagation()}
@@ -469,9 +423,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               </div>
             )}
             <textarea
-              ref={formulaEditorRef}
               className={`script-editor formula-editor nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`}
-              style={{ height: model.uiState?.editorHeights?.formula ?? 84 }}
               value={model.formula ?? ""}
               placeholder="$1 + 1"
               onWheelCapture={(event) => event.stopPropagation()}
