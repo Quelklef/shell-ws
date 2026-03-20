@@ -1,4 +1,5 @@
 mod execution;
+mod formula;
 mod model;
 mod openai;
 mod workspace_store;

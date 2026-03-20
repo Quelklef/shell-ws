@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::error;
 use uuid::Uuid;
 
+use crate::formula;
 use crate::model::{
     default_cwd, BufferingMode, Edge, ExecutionAction, LegacyPersistedDisplayState, MaterializedValue,
     Node, NodeKind, PortKind, ServerEvent, Workspace,
@@ -40,6 +41,10 @@ fn output_ports(kind: &NodeKind) -> &'static [PortKind] {
         NodeKind::Text | NodeKind::Passthru => &[PortKind::Stdout],
         NodeKind::Html => &[],
     }
+}
+
+fn node_accepts_stdin(kind: &NodeKind) -> bool {
+    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Passthru | NodeKind::Html)
 }
 
 fn node_accepts_argv(kind: &NodeKind) -> bool {
@@ -241,8 +246,9 @@ impl ExecutionContext {
             let edges = incoming.get(&node.id).cloned().unwrap_or_default();
             if node_accepts_argv(&node.kind) {
                 let stdin_count = edges.iter().filter(|edge| edge.to.port == PortKind::Stdin).count();
-                if stdin_count > 1 {
-                    return Err(format!("Node {} accepts at most one stdin wire.", node_label(node)));
+                let max_stdin = usize::from(node_accepts_stdin(&node.kind));
+                if stdin_count > max_stdin {
+                    return Err(format!("Node {} accepts at most {} stdin wire{}.", node_label(node), max_stdin, if max_stdin == 1 { "" } else { "s" }));
                 }
                 let mut argv_slots = HashSet::new();
                 for edge in edges.iter().filter(|edge| edge.to.port == PortKind::Argv) {
@@ -257,12 +263,16 @@ impl ExecutionContext {
                         ));
                     }
                 }
-            } else if edges.len() > 1 {
-                return Err(format!(
-                    "Node {} has {} input wires. This node accepts only one input.",
-                    node_label(node),
-                    edges.len()
-                ));
+            } else if node_accepts_stdin(&node.kind) {
+                if edges.len() > 1 {
+                    return Err(format!(
+                        "Node {} has {} input wires. This node accepts only one input.",
+                        node_label(node),
+                        edges.len()
+                    ));
+                }
+            } else if !edges.is_empty() {
+                return Err(format!("Node {} does not accept input wires.", node_label(node)));
             }
         }
 
@@ -971,7 +981,10 @@ impl RunController {
                 self.spawn_command_node(node, stdin, close_after_start, argv, true)
                     .await
             }
-            NodeKind::Formula => Err("formula execution not implemented yet".to_string()),
+            NodeKind::Formula => {
+                let (_, _, argv) = self.take_streaming_command_inputs(&node.id);
+                self.run_formula_node(node, argv).await
+            }
             NodeKind::Exec => {
                 let (stdin, close_after_start, argv) = self.take_streaming_command_inputs(&node.id);
                 self.spawn_command_node(node, stdin, close_after_start, argv, false)
@@ -1048,6 +1061,28 @@ impl RunController {
             Err(error) => {
                 self.handle_output_chunk(&node.id, PortKind::Stderr, format!("file {}: {error}
 ", path).into_bytes())
+                    .await?;
+                Some(1)
+            }
+        };
+        self.handle_node_exit(&node.id, exit_code).await
+    }
+
+    async fn run_formula_node(&mut self, node: Node, argv: Vec<String>) -> Result<(), String> {
+        self.begin_node(&node.id);
+        let source = node
+            .formula
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| format!("{} is missing a formula", node_label(&node)))?;
+        let exit_code = match formula::evaluate(&source, &argv) {
+            Ok(output) => {
+                self.handle_output_chunk(&node.id, PortKind::Stdout, output.into_bytes()).await?;
+                Some(0)
+            }
+            Err(error) => {
+                self.handle_output_chunk(&node.id, PortKind::Stderr, format!("{error}
+").into_bytes())
                     .await?;
                 Some(1)
             }
@@ -1397,7 +1432,7 @@ impl RunController {
                     self.handle_node_exit(&target.id, Some(0)).await?;
                 }
             }
-            NodeKind::Script | NodeKind::AiScript | NodeKind::Exec => match edge.to.port {
+            NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Formula => match edge.to.port {
                 PortKind::Argv => {
                     let state = self.state_mut(&target.id);
                     state.argv_inputs.entry(edge.id.clone()).or_default().extend_from_slice(&payload);
@@ -1439,7 +1474,6 @@ impl RunController {
                 }
                 _ => {}
             },
-            NodeKind::Formula => {}
             NodeKind::Text | NodeKind::File => {}
         }
 
@@ -2388,5 +2422,63 @@ mod tests {
 
         let exec_id = manager.run(workspace, "file-1".to_string(), ExecutionAction::Repush);
         assert_eq!(wait_for_finish(&mut rx, &exec_id, "file-1").await, Some(0));
+    }
+
+    #[tokio::test]
+    async fn formula_pull_run_evaluates_from_argv_input() {
+        let (tx, _) = broadcast::channel(64);
+        let manager = ExecutionManager::new(tx.clone());
+        let mut rx = tx.subscribe();
+        let mut source = node(NodeKind::Text, "text-1");
+        source.text = Some("4".to_string());
+        let mut formula_node = node(NodeKind::Formula, "formula-1");
+        formula_node.formula = Some("$1^2 + 1".to_string());
+        let workspace = workspace(
+            vec![source, formula_node],
+            vec![edge("edge-1", "text-1", PortKind::Stdout, "formula-1", PortKind::Argv, Some(1))],
+        );
+
+        let exec_id = manager.run(workspace, "formula-1".to_string(), ExecutionAction::PullRun);
+        assert_eq!(wait_for_finish(&mut rx, &exec_id, "formula-1").await, Some(0));
+    }
+
+    #[tokio::test]
+    async fn formula_rerun_uses_materialized_argv() {
+        let (tx, _) = broadcast::channel(64);
+        let context = Arc::new(
+            ExecutionContext::new(
+                "formula-rerun".to_string(),
+                workspace(
+                    {
+                        let source = node(NodeKind::Text, "text-1");
+                        let mut formula_node = node(NodeKind::Formula, "formula-1");
+                        formula_node.formula = Some("let x = $1 + 2 in x * 3".to_string());
+                        formula_node.materialized_values.insert(
+                            "argv-1".to_string(),
+                            MaterializedValue {
+                                data_base64: encode_bytes(b"5"),
+                            },
+                        );
+                        vec![source, formula_node]
+                    },
+                    vec![edge("edge-1", "text-1", PortKind::Stdout, "formula-1", PortKind::Argv, Some(1))],
+                ),
+                ExecutionAction::Rerun,
+                tx,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        );
+
+        context.clone().run("formula-1".to_string()).await.expect("run");
+        assert_eq!(
+            context
+                .materialized_values
+                .lock()
+                .get("formula-1")
+                .and_then(|ports| ports.get("stdout"))
+                .cloned(),
+            Some(b"21".to_vec())
+        );
     }
 }
