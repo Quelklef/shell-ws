@@ -34,6 +34,21 @@ export default function ResizablePane({
   const observedHeightRef = useRef(height);
   const stableNodeWidthRef = useRef(width);
   const stablePaneWidthRef = useRef(width);
+  const latestWidthRef = useRef(width);
+  const latestHeightRef = useRef(height);
+  const latestPaneIdRef = useRef(paneId);
+  const latestOnWidthChangeRef = useRef(onWidthChange);
+  const latestOnHeightChangeRef = useRef(onHeightChange);
+  const latestOnLayoutChangeRef = useRef(onLayoutChange);
+
+  useEffect(() => {
+    latestWidthRef.current = width;
+    latestHeightRef.current = height;
+    latestPaneIdRef.current = paneId;
+    latestOnWidthChangeRef.current = onWidthChange;
+    latestOnHeightChangeRef.current = onHeightChange;
+    latestOnLayoutChangeRef.current = onLayoutChange;
+  }, [height, onHeightChange, onLayoutChange, onWidthChange, paneId, width]);
 
   useLayoutEffect(() => {
     const element = elementRef.current;
@@ -55,12 +70,12 @@ export default function ResizablePane({
     }
 
     const notifyLayout = () => {
-      if (!onLayoutChange || layoutFrameRef.current !== null) {
+      if (!latestOnLayoutChangeRef.current || layoutFrameRef.current !== null) {
         return;
       }
       layoutFrameRef.current = window.requestAnimationFrame(() => {
         layoutFrameRef.current = null;
-        onLayoutChange();
+        latestOnLayoutChangeRef.current?.();
       });
     };
 
@@ -71,7 +86,7 @@ export default function ResizablePane({
       const widthFromDom = Math.round(element.offsetWidth);
       const heightFromDom = Math.round(element.offsetHeight);
       const nodeWidthFromDom = Math.round(
-        (element.closest(".react-flow__node") as HTMLElement | null)?.offsetWidth ?? width,
+        (element.closest(".react-flow__node") as HTMLElement | null)?.offsetWidth ?? latestWidthRef.current,
       );
       observedHeightRef.current = heightFromDom;
       notifyLayout();
@@ -88,8 +103,8 @@ export default function ResizablePane({
         const paneWidth = Math.max(MIN_RESIZABLE_PANE_WIDTH, widthFromDom);
         const nextWidth =
           stableNodeWidthRef.current + (paneWidth - stablePaneWidthRef.current);
-        if (Math.abs(nextWidth - width) >= 1) {
-          onWidthChange(nextWidth);
+        if (Math.abs(nextWidth - latestWidthRef.current) >= 1) {
+          latestOnWidthChangeRef.current(nextWidth);
         }
         if (widthSettleTimerRef.current !== null) {
           window.clearTimeout(widthSettleTimerRef.current);
@@ -104,8 +119,8 @@ export default function ResizablePane({
       }
 
       const inlineHeight = Math.round(parseFloat(element.style.height || "0"));
-      const browserOwnsHeight = Math.abs(inlineHeight - height) >= 1;
-      if (browserOwnsHeight && Math.abs(heightFromDom - height) >= 1) {
+      const browserOwnsHeight = Math.abs(inlineHeight - latestHeightRef.current) >= 1;
+      if (browserOwnsHeight && Math.abs(heightFromDom - latestHeightRef.current) >= 1) {
         if (heightCommitTimerRef.current !== null) {
           window.clearTimeout(heightCommitTimerRef.current);
         }
@@ -115,12 +130,12 @@ export default function ResizablePane({
           // rewrite pane state or the observer will ratchet the node taller forever.
           if (heightFromDom > MAX_OBSERVED_PANE_HEIGHT) {
             console.error(
-              `[ResizablePane] refusing to persist runaway height for ${paneId}: ${heightFromDom}px`,
+              `[ResizablePane] refusing to persist runaway height for ${latestPaneIdRef.current}: ${heightFromDom}px`,
             );
             heightCommitTimerRef.current = null;
             return;
           }
-          onHeightChange(paneId, heightFromDom);
+          latestOnHeightChangeRef.current(latestPaneIdRef.current, heightFromDom);
           heightCommitTimerRef.current = null;
         }, 140);
       }
@@ -140,7 +155,7 @@ export default function ResizablePane({
         window.cancelAnimationFrame(layoutFrameRef.current);
       }
     };
-  }, [height, onHeightChange, onLayoutChange, onWidthChange, paneId, width]);
+  }, []);
 
   return (
     <div
