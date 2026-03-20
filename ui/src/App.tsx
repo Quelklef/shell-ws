@@ -376,11 +376,9 @@ function WorkspaceCanvas() {
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
-  const userSelectionState = useStore((store) => ({
-    rect: store.userSelectionRect,
-    active: store.userSelectionActive,
-    transform: store.transform,
-  }));
+  const userSelectionRect = useStore((store) => store.userSelectionRect);
+  const userSelectionActive = useStore((store) => store.userSelectionActive);
+  const viewportTransform = useStore((store) => store.transform);
 
   const [nodes, setNodes] = useNodesState<FlowNode>([]);
   const [edges, setEdges] = useEdgesState<FlowEdge>([]);
@@ -402,21 +400,21 @@ function WorkspaceCanvas() {
   }, [runtime]);
 
   useEffect(() => {
-    const previewIds = userSelectionState.active && userSelectionState.rect
+    const previewIds = userSelectionActive && userSelectionRect
       ? new Set(
           flow
             .getIntersectingNodes(
-              selectionRectToFlowRect(userSelectionState.rect, userSelectionState.transform),
+              selectionRectToFlowRect(userSelectionRect, viewportTransform),
               true,
               nodesRef.current,
             )
             .map((node) => node.id),
         )
-      : new Set<string>();
+      : null;
     setNodes((current) => {
       let changed = false;
       const next = current.map((node) => {
-        const selectionPreview = previewIds.has(node.id);
+        const selectionPreview = previewIds?.has(node.id) ?? false;
         if (node.data.selectionPreview === selectionPreview) {
           return node;
         }
@@ -431,7 +429,7 @@ function WorkspaceCanvas() {
       });
       return changed ? next : current;
     });
-  }, [flow, setNodes, userSelectionState]);
+  }, [flow, setNodes, userSelectionActive, userSelectionRect, viewportTransform]);
 
   useEffect(() => {
     generationRef.current = generation;
