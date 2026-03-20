@@ -67,7 +67,7 @@ const edgeTypes = {
 
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {
-  const previewOpenByDefault = ["stdout"];
+  const previewOpenByDefault = kind === "formula" ? [] : ["stdout"];
   return {
     id: encodeId(kind),
     kind,
@@ -208,6 +208,8 @@ function syncNodeData(
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
       onGenerate: handlers.onGenerate,
+      onClearMaterialized: handlers.onClearMaterialized,
+      onConvertKind: handlers.onConvertKind,
     },
   }));
 }
@@ -218,7 +220,7 @@ function toFlowNode(
   generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate"
+    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind"
   >,
   edges: FlowEdge[],
 ): FlowNode {
@@ -239,6 +241,8 @@ function toFlowNode(
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
       onGenerate: handlers.onGenerate,
+      onClearMaterialized: handlers.onClearMaterialized,
+      onConvertKind: handlers.onConvertKind,
     },
     width: node.size.width,
     height: node.size.height,
@@ -295,7 +299,7 @@ function flowEdgeToWorkspaceEdge(edge: FlowEdge): WorkspaceEdge {
       ...parseHandleId(edge.targetHandle as string | null | undefined),
     },
     buffering:
-      (edge.data?.buffering as BufferingMode | undefined) ?? "line_or_1024",
+      (edge.data?.buffering as BufferingMode | undefined) ?? "unbuffered",
   };
 }
 
@@ -307,6 +311,8 @@ type ShellNodeActions = {
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
   onGenerate: (nodeId: string) => Promise<void>;
+  onClearMaterialized: (nodeId: string) => void;
+  onConvertKind: (nodeId: string, kind: Extract<NodeKind, "display" | "passthru">) => void;
 };
 
 type AutorunHandle = {
@@ -352,6 +358,8 @@ function WorkspaceCanvas() {
   const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
   const persistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
+  const runningStartedAtRef = useRef<Record<string, number>>({});
+  const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
 
@@ -468,6 +476,41 @@ function WorkspaceCanvas() {
     },
     [buildWorkspace],
   );
+
+  const clearRunningTimer = useCallback((nodeId: string) => {
+    const timerId = runningClearTimersRef.current.get(nodeId);
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      runningClearTimersRef.current.delete(nodeId);
+    }
+  }, []);
+
+  const scheduleRunningClear = useCallback((nodeId: string, execId: string) => {
+    clearRunningTimer(nodeId);
+    const startedAt = runningStartedAtRef.current[nodeId] ?? Date.now();
+    const remaining = Math.max(0, 500 - (Date.now() - startedAt));
+    if (remaining === 0) {
+      return false;
+    }
+    const timerId = window.setTimeout(() => {
+      setRuntime((current) => {
+        const state = current[nodeId];
+        if (!state || state.lastExecId !== execId) {
+          return current;
+        }
+        return {
+          ...current,
+          [nodeId]: {
+            ...state,
+            running: false,
+          },
+        };
+      });
+      runningClearTimersRef.current.delete(nodeId);
+    }, remaining);
+    runningClearTimersRef.current.set(nodeId, timerId);
+    return true;
+  }, [clearRunningTimer]);
 
   const sendRunRequest = useCallback(
     (nodeId: string, action: ExecutionAction, silenceIfDisconnected = false) => {
@@ -616,6 +659,42 @@ function WorkspaceCanvas() {
           return updated;
         });
       },
+      onClearMaterialized: (nodeId) => {
+        setRuntime((current) => ({
+          ...current,
+          [nodeId]: {
+            ...(current[nodeId] ?? { running: false, portActivity: {} }),
+            previews: {},
+            livePreviews: undefined,
+          },
+        }));
+        persistRuntimeSoon();
+      },
+      onConvertKind: (nodeId, kind) => {
+        setNodes((current) => {
+          let nextEdges = edgesRef.current;
+          if (kind === "display") {
+            nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId);
+            setEdges(nextEdges);
+          }
+          const next = current.map((node) =>
+            node.id === nodeId
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    model: {
+                      ...node.data.model,
+                      kind,
+                    },
+                  },
+                }
+              : node,
+          );
+          persistSoon(next, nextEdges);
+          return next;
+        });
+      },
       onGenerate: async (nodeId) => {
         const workspace = buildWorkspace();
         const node = nodesRef.current.find((item) => item.id === nodeId)?.data.model;
@@ -745,6 +824,8 @@ function WorkspaceCanvas() {
         setRuntime((current) => {
           switch (event.type) {
             case "exec_started": {
+              clearRunningTimer(event.node_id);
+              runningStartedAtRef.current[event.node_id] = Date.now();
               const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
               // Keep the last committed materialized outputs intact until this execution finishes successfully.
               const previousLive = current[event.node_id]?.livePreviews ?? {};
@@ -784,11 +865,12 @@ function WorkspaceCanvas() {
                   delete live[port];
                 }
               }
+              const keepRunning = scheduleRunningClear(event.node_id, event.exec_id);
               return {
                 ...current,
                 [event.node_id]: {
                   ...previous,
-                  running: false,
+                  running: keepRunning ? true : false,
                   previews: committed,
                   livePreviews: Object.keys(live).length > 0 ? live : undefined,
                 },
@@ -868,9 +950,10 @@ function WorkspaceCanvas() {
               const nextState = { ...current };
               for (const [nodeId, state] of Object.entries(current)) {
                 if (state.lastExecId === event.exec_id) {
+                  const keepRunning = scheduleRunningClear(nodeId, event.exec_id);
                   nextState[nodeId] = {
                     ...state,
-                    running: false,
+                    running: keepRunning ? true : false,
                     livePreviews: undefined,
                   };
                 }
@@ -940,6 +1023,10 @@ function WorkspaceCanvas() {
         window.clearTimeout(persistTimerRef.current);
       }
       autorunRef.current.clear();
+      for (const timerId of runningClearTimersRef.current.values()) {
+        window.clearTimeout(timerId);
+      }
+      runningClearTimersRef.current.clear();
     };
   }, []);
 
@@ -1046,7 +1133,7 @@ function WorkspaceCanvas() {
           const buffering =
             nextMode[
               (edge.data?.buffering as BufferingMode | undefined) ??
-                "line_or_1024"
+                "unbuffered"
             ];
           return {
             ...edge,
@@ -1125,11 +1212,11 @@ function WorkspaceCanvas() {
             ...connection,
             type: "workspace",
             data: {
-              buffering: "line_or_1024",
+              buffering: "unbuffered",
               onDelete: deleteEdge,
               onCycle: cycleEdgeBuffering,
             },
-            label: "line or 1024",
+            label: "unbuffered",
           },
           current,
         ) as FlowEdge[];
@@ -1358,18 +1445,24 @@ function WorkspaceCanvas() {
           colorMode="dark"
           connectionLineType={ConnectionLineType.SmoothStep}
           onMoveEnd={(_, viewport) =>
-            setWorkspaceMeta((current) =>
-              current
-                ? {
-                    ...current,
-                    ui: {
-                      viewportX: viewport.x,
-                      viewportY: viewport.y,
-                      zoom: viewport.zoom,
-                    },
-                  }
-                : current,
-            )
+            setWorkspaceMeta((current) => {
+              if (!current) {
+                return current;
+              }
+              const next = {
+                ...current,
+                ui: {
+                  viewportX: viewport.x,
+                  viewportY: viewport.y,
+                  zoom: viewport.zoom,
+                },
+              };
+              const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
+              if (nextWorkspace) {
+                saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+              }
+              return next;
+            })
           }
         >
           <MiniMap pannable zoomable className="minimap" />

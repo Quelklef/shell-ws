@@ -1,10 +1,66 @@
-import ReactMarkdown from "react-markdown";
 import TOML from "@iarna/toml";
-import YAML from "yaml";
+import { Fragment } from "react";
+import ReactMarkdown from "react-markdown";
 import xmlFormat from "xml-formatter";
+import YAML from "yaml";
 
 function looksLikeJson(text: string) {
   return text.trim().startsWith("{") || text.trim().startsWith("[");
+}
+
+function looksLikeJsona(text: string) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  if (lines.length < 2) {
+    return false;
+  }
+  try {
+    lines.forEach((line) => {
+      JSON.parse(line);
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function renderHighlightedJson(text: string, className = "display-code") {
+  const tokenPattern = /("(?:\\u[\da-fA-F]{4}|\\[^u]|[^\\"])*"\s*:?)|\b(?:true|false|null)\b|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/g;
+  const parts: Array<string | JSX.Element> = [];
+  let cursor = 0;
+  for (const match of text.matchAll(tokenPattern)) {
+    const [token] = match;
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      parts.push(text.slice(cursor, start));
+    }
+    let tokenClass = "display-token-number";
+    if (token.startsWith('"')) {
+      tokenClass = token.endsWith(":") ? "display-token-key" : "display-token-string";
+    } else if (token === "true" || token === "false") {
+      tokenClass = "display-token-boolean";
+    } else if (token === "null") {
+      tokenClass = "display-token-null";
+    }
+    parts.push(
+      <span key={`${start}-${token}`} className={tokenClass}>
+        {token}
+      </span>,
+    );
+    cursor = start + token.length;
+  }
+  if (cursor < text.length) {
+    parts.push(text.slice(cursor));
+  }
+  return (
+    <pre className={className}>
+      {parts.map((part, index) => (
+        <Fragment key={index}>{part}</Fragment>
+      ))}
+    </pre>
+  );
 }
 
 function looksLikeXml(text: string) {
@@ -35,7 +91,7 @@ function parseCsv(text: string) {
       continue;
     }
 
-    if (!inQuotes && char === ',') {
+    if (!inQuotes && char === ",") {
       row.push(cell);
       cell = "";
       continue;
@@ -65,7 +121,7 @@ function parseCsv(text: string) {
 
 function looksLikeCsv(text: string) {
   const trimmed = text.trim();
-  if (!trimmed || trimmed.includes("	")) {
+  if (!trimmed || trimmed.includes("\t")) {
     return false;
   }
   const rows = parseCsv(trimmed);
@@ -160,7 +216,24 @@ export function renderDisplay(bytes: Uint8Array) {
     if (looksLikeJson(text)) {
       return {
         label: "json",
-        content: <pre className="display-code">{JSON.stringify(JSON.parse(text), null, 2)}</pre>,
+        content: renderHighlightedJson(JSON.stringify(JSON.parse(text), null, 2), "display-code display-code-json"),
+      };
+    }
+  } catch {
+    // fall through
+  }
+
+  try {
+    if (looksLikeJsona(text)) {
+      const normalized = text
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .map((line) => JSON.stringify(JSON.parse(line)))
+        .join("\n");
+      return {
+        label: "jsona",
+        content: renderHighlightedJson(normalized, "display-code display-code-jsona"),
       };
     }
   } catch {

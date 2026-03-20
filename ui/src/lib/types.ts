@@ -24,6 +24,10 @@ export interface MaterializedValue {
   dataBase64: string;
 }
 
+export type ExecArg =
+  | { source: "literal"; value: string }
+  | { source: "argv"; slot: number };
+
 export interface LegacyPersistedDisplayState {
   dataBase64: string;
   completed?: boolean;
@@ -62,7 +66,7 @@ export interface WorkspaceNode {
   description?: string | null;
   includeSampleInputs?: boolean | null;
   path?: string | null;
-  args?: string[] | null;
+  args?: ExecArg[] | null;
   text?: string | null;
   formula?: string | null;
   materializedValues?: Record<string, MaterializedValue> | null;
@@ -202,6 +206,8 @@ export interface ShellNodeData extends Record<string, unknown> {
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
   onGenerate: (nodeId: string) => Promise<void>;
+  onClearMaterialized: (nodeId: string) => void;
+  onConvertKind: (nodeId: string, kind: Extract<NodeKind, "display" | "passthru">) => void;
 }
 
 export interface FlowEdgeData extends Record<string, unknown> {

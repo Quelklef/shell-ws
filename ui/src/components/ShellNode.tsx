@@ -23,7 +23,7 @@ const PREVIEW_HEIGHT_DELTA = 156;
 const PORT_SPACING = 30;
 const STDOUT_PORT_TOP = 84;
 const STDERR_PORT_TOP = STDOUT_PORT_TOP + PORT_SPACING;
-const STDIN_PORT_TOP = 96;
+const STDIN_PORT_TOP = 84;
 const ARGV_FIRST_PORT_TOP = STDIN_PORT_TOP + PORT_SPACING;
 
 function AutoRunControls({
@@ -124,6 +124,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const commentBody = commentBodyLines.join("\n").trim();
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
   const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
+  const execArgs = model.args ?? [];
 
   useLayoutEffect(() => {
     const element = commentRef.current;
@@ -257,6 +258,22 @@ export default function ShellNode({ data, selected }: NodeProps) {
         </button>
         <div className="node-meta">
           <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
+          {(model.kind === "display" || model.kind === "passthru") && (
+            <button
+              type="button"
+              className="node-kind-convert nodrag nopan"
+              title={model.kind === "display" ? "convert to passthru" : "convert to display"}
+              aria-label={model.kind === "display" ? "convert to passthru" : "convert to display"}
+              onClick={() => typedData.onConvertKind(model.id, model.kind === "display" ? "passthru" : "display")}
+            >
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                <path d="M3 5h7" />
+                <path d="M8 3l2 2-2 2" />
+                <path d="M13 11H6" />
+                <path d="M8 9l-2 2 2 2" />
+              </svg>
+            </button>
+          )}
           <span className={`node-state-pill ${runtime.running ? "is-running" : "is-idle"}`}>
             {runtime.running ? "running" : "idle"}
           </span>
@@ -338,24 +355,57 @@ export default function ShellNode({ data, selected }: NodeProps) {
               placeholder="binary path"
             />
             <div className="exec-args-shell">
-              {(model.args ?? []).map((arg, index) => (
+              {execArgs.map((arg, index) => (
                 <div key={`${model.id}-arg-${index}`} className="exec-arg-row">
-                  <textarea
-                    className="exec-arg-editor nodrag nopan"
-                    value={arg}
-                    placeholder={`arg ${index + 1}`}
+                  <select
+                    className="exec-arg-mode nodrag nopan"
+                    value={arg.source}
                     onWheelCapture={(event) => event.stopPropagation()}
                     onChange={(event) => {
-                      const nextArgs = [...(model.args ?? [])];
-                      nextArgs[index] = event.target.value;
+                      const nextArgs = [...execArgs];
+                      nextArgs[index] = event.target.value === "argv"
+                        ? { source: "argv", slot: 1 }
+                        : { source: "literal", value: arg.source === "literal" ? arg.value : "" };
                       typedData.onUpdate(model.id, { args: nextArgs });
                     }}
-                  />
+                  >
+                    <option value="literal">text</option>
+                    <option value="argv">argv</option>
+                  </select>
+                  {arg.source === "literal" ? (
+                    <textarea
+                      className="exec-arg-editor nodrag nopan"
+                      value={arg.value}
+                      placeholder={`arg ${index + 1}`}
+                      onWheelCapture={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        const nextArgs = [...execArgs];
+                        nextArgs[index] = { ...arg, value: event.target.value };
+                        typedData.onUpdate(model.id, { args: nextArgs });
+                      }}
+                    />
+                  ) : (
+                    <label className="exec-arg-argv nodrag nopan">
+                      <span>argv #</span>
+                      <input
+                        className="shell-input nodrag nopan"
+                        type="number"
+                        min={1}
+                        value={arg.slot}
+                        onWheelCapture={(event) => event.stopPropagation()}
+                        onChange={(event) => {
+                          const nextArgs = [...execArgs];
+                          nextArgs[index] = { source: "argv", slot: Math.max(1, Number(event.target.value) || 1) };
+                          typedData.onUpdate(model.id, { args: nextArgs });
+                        }}
+                      />
+                    </label>
+                  )}
                   <button
                     type="button"
                     className="nodrag nopan exec-arg-delete"
                     onClick={() => {
-                      const nextArgs = [...(model.args ?? [])];
+                      const nextArgs = [...execArgs];
                       nextArgs.splice(index, 1);
                       typedData.onUpdate(model.id, { args: nextArgs });
                     }}
@@ -367,7 +417,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
               <button
                 type="button"
                 className="nodrag nopan exec-arg-add"
-                onClick={() => typedData.onUpdate(model.id, { args: [...(model.args ?? []), ""] })}
+                onClick={() => typedData.onUpdate(model.id, { args: [...execArgs, { source: "literal", value: "" }] })}
               >
                 add arg
               </button>
@@ -407,7 +457,6 @@ export default function ShellNode({ data, selected }: NodeProps) {
         {model.kind === "formula" && (
           <div className="formula-shell">
             <div className="formula-header">
-              <div className="display-label">formula</div>
               <button
                 type="button"
                 className={`formula-help-bubble nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
@@ -423,13 +472,23 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 <pre>{FORMULA_SYNTAX_OVERVIEW}</pre>
               </div>
             )}
-            <textarea
-              className={`script-editor formula-editor nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`}
-              value={model.formula ?? ""}
-              placeholder="$1 + 1"
+            <div
+              className={`script-editor-codemirror formula-editor-codemirror nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`}
               onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) => typedData.onUpdate(model.id, { formula: event.target.value })}
-            />
+            >
+              <CodeMirror
+                value={model.formula ?? ""}
+                height="100%"
+                theme={oneDark}
+                basicSetup={{
+                  lineNumbers: false,
+                  foldGutter: false,
+                  highlightActiveLine: false,
+                  highlightActiveLineGutter: false,
+                }}
+                onChange={(value) => typedData.onUpdate(model.id, { formula: value })}
+              />
+            </div>
             {formulaAnalysis.ok ? (
               <div className="formula-preview nodrag nopan" dangerouslySetInnerHTML={{ __html: formulaHtml ?? "" }} />
             ) : (
@@ -483,6 +542,18 @@ export default function ShellNode({ data, selected }: NodeProps) {
           >
             auto
           </button>
+          <button
+            type="button"
+            className="nodrag nopan node-action-button"
+            title="clear materialized values"
+            aria-label="clear materialized values"
+            onClick={() => typedData.onClearMaterialized(model.id)}
+          >
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <path d="M4 4l8 8" />
+              <path d="M12 4 4 12" />
+            </svg>
+          </button>
         </div>
 
         {model.uiState?.showAutoControls && (
@@ -493,7 +564,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
           <div className="port-preview-tabs">
             {previewTabs.map((port) => {
               const isOpen = openPreviewTabs.includes(port);
-              const hasData = Boolean(runtime.livePreviews?.[port] ?? runtime.previews?.[port]);
+              const previewState = runtime.livePreviews?.[port] ?? runtime.previews?.[port];
+              const hasData = (previewState?.bytes.length ?? 0) > 0;
               const portClass = port.startsWith("argv-") ? "argv" : port;
               return (
                 <button
@@ -543,8 +615,22 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 className="port-preview-pane nodrag nopan"
                 onWheelCapture={(event) => event.stopPropagation()}
               >
-                <div className="display-label">
-                  {port} · {renderedPreview.label}
+                <div className="port-preview-header">
+                  <div className="display-label">
+                    {port} · {renderedPreview.label}
+                  </div>
+                  <button
+                    type="button"
+                    className="port-preview-copy nodrag nopan"
+                    title={`copy ${port}`}
+                    aria-label={`copy ${port}`}
+                    onClick={() => {
+                      const text = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
+                      void navigator.clipboard?.writeText(text);
+                    }}
+                  >
+                    copy
+                  </button>
                 </div>
                 {renderedPreview.content}
               </div>

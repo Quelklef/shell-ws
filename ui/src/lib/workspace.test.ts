@@ -206,3 +206,31 @@ it("merges legacy materialized input and output maps", () => {
     stdout: { dataBase64: "d29ybGQ=" },
   });
 });
+
+it("normalizes legacy exec arg strings into literal arg objects", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    openaiApiKey: "",
+    nodes: [
+      {
+        id: "x",
+        kind: "exec",
+        title: "",
+        comment: "",
+        position: { x: 0, y: 0 },
+        size: { width: 10, height: 10 },
+        args: ["--flag", "value"],
+      },
+    ],
+    edges: [],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitized.nodes[0]?.args).toEqual([
+    { source: "literal", value: "--flag" },
+    { source: "literal", value: "value" },
+  ]);
+});

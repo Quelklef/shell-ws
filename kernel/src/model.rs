@@ -83,7 +83,7 @@ impl Workspace {
                     port: PortKind::Stdin,
                     slot: None,
                 },
-                buffering: BufferingMode::LineOr1024,
+                buffering: BufferingMode::Unbuffered,
             }],
             ui: WorkspaceUi::default(),
         }
@@ -111,7 +111,7 @@ pub struct Node {
     #[serde(default)]
     pub path: Option<String>,
     #[serde(default)]
-    pub args: Option<Vec<String>>,
+    pub args: Option<Vec<ExecArg>>,
     #[serde(default)]
     pub text: Option<String>,
     #[serde(default)]
@@ -144,6 +144,33 @@ pub enum NodeKind {
     Html,
     Text,
     Formula,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(untagged)]
+pub enum ExecArg {
+    LegacyLiteral(String),
+    Configured(ExecArgConfig),
+}
+
+impl ExecArg {
+    pub fn resolve(&self, argv: &[String]) -> Result<String, String> {
+        match self {
+            Self::LegacyLiteral(value) => Ok(value.clone()),
+            Self::Configured(ExecArgConfig::Literal { value }) => Ok(value.clone()),
+            Self::Configured(ExecArgConfig::Argv { slot }) => argv
+                .get(slot.saturating_sub(1))
+                .cloned()
+                .ok_or_else(|| format!("missing argv-{slot} for exec argument")),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "source", rename_all = "snake_case")]
+pub enum ExecArgConfig {
+    Literal { value: String },
+    Argv { slot: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -186,7 +213,7 @@ pub enum BufferingMode {
 
 impl Default for BufferingMode {
     fn default() -> Self {
-        Self::LineOr1024
+        Self::Unbuffered
     }
 }
 

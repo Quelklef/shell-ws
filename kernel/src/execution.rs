@@ -1135,11 +1135,15 @@ impl RunController {
                 .filter(|value| !value.is_empty())
                 .ok_or_else(|| format!("{} is missing a binary path", node_label(&node)))?;
             let mut command = Command::new(path);
-            for arg in node.args.clone().unwrap_or_default() {
-                command.arg(arg);
-            }
-            for arg in argv {
-                command.arg(arg);
+            let configured_args = node.args.clone().unwrap_or_default();
+            if configured_args.is_empty() {
+                for arg in argv {
+                    command.arg(arg);
+                }
+            } else {
+                for arg in configured_args {
+                    command.arg(arg.resolve(&argv)?);
+                }
             }
             command
         };
@@ -1803,6 +1807,40 @@ mod tests {
                 assert_eq!(materialized_text(&context, "b", "stdout"), "testing", "iteration {iteration}: target stdout");
                 assert_eq!(materialized_text(&context, "b", "stderr"), "", "iteration {iteration}: target stderr");
             }
+        }
+
+        #[tokio::test]
+        async fn exec_test_configured_args_can_mix_literals_and_argv_slots() {
+            let mut source = node(NodeKind::Script, "a");
+            source.script = Some("printf 'wired'".to_string());
+            let mut target = node(NodeKind::Exec, "b");
+            target.path = Some("printf".to_string());
+            target.args = Some(vec![
+                crate::model::ExecArg::Configured(crate::model::ExecArgConfig::Literal {
+                    value: "%s|%s".to_string(),
+                }),
+                crate::model::ExecArg::Configured(crate::model::ExecArgConfig::Argv { slot: 1 }),
+                crate::model::ExecArg::Configured(crate::model::ExecArgConfig::Literal {
+                    value: "fixed".to_string(),
+                }),
+            ]);
+            let context = Arc::new(
+                ExecutionContext::new(
+                    "exec-configured-args".to_string(),
+                    workspace(
+                        vec![source, target],
+                        vec![edge("edge-ab", "a", PortKind::Stdout, "b", PortKind::Argv, Some(1))],
+                    ),
+                    ExecutionAction::PullRun,
+                    broadcast::channel(64).0,
+                    CancellationToken::new(),
+                )
+                .expect("context"),
+            );
+
+            context.clone().run("b".to_string()).await.expect("run");
+
+            assert_eq!(materialized_text(&context, "b", "stdout"), "wired|fixed");
         }
 
         #[tokio::test]

@@ -515,7 +515,12 @@ textarea {
   min-height: 84px;
 }
 
-.formula-editor.is-invalid {
+.formula-editor-codemirror {
+  min-height: 96px;
+  height: 96px;
+}
+
+.formula-editor-codemirror.is-invalid {
   border-color: rgba(222, 93, 93, 0.5);
 }
 
@@ -706,7 +711,7 @@ textarea {
 }
 
 .display-label {
-  margin-bottom: 0.5em;
+  margin-bottom: 0;
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--accent-soft);
@@ -774,40 +779,47 @@ textarea {
   position: absolute;
   width: 13px;
   height: 13px;
-  background: #1e2327;
-  border: 2px solid var(--accent-soft);
+  pointer-events: none;
+  background: rgba(var(--handle-rgb, 242, 192, 120), 0.42);
+  border: 2px solid rgb(var(--handle-rgb, 242, 192, 120));
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
   transition:
     background 120ms ease,
     box-shadow 120ms ease,
     border-color 120ms ease;
+  z-index: 1;
 }
 
 .shell-handle::before {
   content: "";
   position: absolute;
-  inset: -3px;
-  border-radius: inherit;
+  inset: -8px;
+  z-index: -1;
+  border-radius: 999px;
+  background: rgba(var(--handle-rgb, 242, 192, 120), 0.2);
+  opacity: 0;
+  pointer-events: auto;
+  transition: opacity 120ms ease;
 }
 
-.shell-handle.is-active {
-  transform: none;
+.shell-handle:hover::before {
+  opacity: 1;
 }
 
 .shell-handle-stdout {
-  border-color: var(--success);
+  --handle-rgb: 143, 207, 158;
 }
 
 .shell-handle-stderr {
-  border-color: var(--danger);
+  --handle-rgb: 222, 93, 93;
 }
 
 .shell-handle-stdin {
-  border-color: var(--accent-soft);
+  --handle-rgb: 242, 192, 120;
 }
 
 .shell-handle-argv {
-  border-color: #78b8f2;
+  --handle-rgb: 120, 184, 242;
 }
 
 .minimap {
@@ -864,22 +876,22 @@ textarea {
 }
 
 .shell-handle-stdout.is-active {
-  background: var(--success);
+  background: rgba(143, 207, 158, 0.56);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(143, 207, 158, 0.9);
 }
 
 .shell-handle-stderr.is-active {
-  background: var(--danger);
+  background: rgba(222, 93, 93, 0.56);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(222, 93, 93, 0.9);
 }
 
 .shell-handle-stdin.is-active {
-  background: var(--accent-soft);
+  background: rgba(242, 192, 120, 0.56);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(242, 192, 120, 0.9);
 }
 
 .shell-handle-argv.is-active {
-  background: #78b8f2;
+  background: rgba(120, 184, 242, 0.56);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(120, 184, 242, 0.85);
 }
 
@@ -963,6 +975,35 @@ textarea {
   background: rgba(46, 18, 18, 0.95);
 }
 
+.node-kind-convert {
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(244, 232, 214, 0.16);
+  border-radius: 999px;
+  background: rgba(9, 11, 13, 0.4);
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.node-kind-convert:hover {
+  border-color: rgba(242, 192, 120, 0.45);
+  color: var(--text);
+  background: rgba(56, 41, 16, 0.7);
+}
+
+.node-kind-convert svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 
 .port-preview-shell {
   display: flex;
@@ -1022,6 +1063,32 @@ textarea {
 
 .port-preview-dot-argv {
   background: #78b8f2;
+}
+
+.port-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.port-preview-copy {
+  border: 1px solid rgba(244, 232, 214, 0.16);
+  background: rgba(9, 11, 13, 0.4);
+  color: var(--text-soft);
+  border-radius: 7px;
+  padding: 3px 7px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.port-preview-copy:hover {
+  border-color: rgba(242, 192, 120, 0.45);
+  color: var(--text);
+  background: rgba(56, 41, 16, 0.7);
 }
 
 .port-preview-pane {
@@ -1122,11 +1189,41 @@ textarea {
 
 .exec-arg-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 78px minmax(0, 1fr) auto;
   gap: 8px;
   align-items: start;
 }
 
+
+.exec-arg-mode {
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.54);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 6px 8px;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.exec-arg-argv {
+  display: grid;
+  grid-template-columns: auto 80px;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.54);
+  color: var(--text-soft);
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.exec-arg-argv .shell-input {
+  min-width: 0;
+}
 .exec-arg-editor {
   cursor: pointer;
   width: 100%;

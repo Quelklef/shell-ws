@@ -1,4 +1,4 @@
-import type { MaterializedValue, Workspace, WorkspaceNode } from "./types";
+import type { ExecArg, MaterializedValue, Workspace, WorkspaceNode } from "./types";
 
 type LegacyMaterializedNode = WorkspaceNode & {
   materializedInputs?: Record<string, MaterializedValue> | null;
@@ -21,6 +21,34 @@ function isOutputKey(key: string) {
 
 function isInputKey(key: string) {
   return INPUT_PORT_KEYS.has(key) || /^argv-\d+$/.test(key);
+}
+
+function normalizeExecArgs(args: unknown): ExecArg[] | null | undefined {
+  if (args == null) {
+    return args as null | undefined;
+  }
+  if (!Array.isArray(args)) {
+    return [];
+  }
+  return args.map((arg) => {
+    if (typeof arg === "string") {
+      return { source: "literal", value: arg } satisfies ExecArg;
+    }
+    if (arg && typeof arg === "object" && "source" in arg) {
+      const candidate = arg as { source?: unknown; value?: unknown; slot?: unknown };
+      if (candidate.source === "argv") {
+        return {
+          source: "argv",
+          slot: Math.max(1, Number(candidate.slot) || 1),
+        } satisfies ExecArg;
+      }
+      return {
+        source: "literal",
+        value: typeof candidate.value === "string" ? candidate.value : "",
+      } satisfies ExecArg;
+    }
+    return { source: "literal", value: "" } satisfies ExecArg;
+  });
 }
 
 function migrateLegacyPreviews(previews?: Record<string, { dataBase64: string }> | null) {
@@ -69,6 +97,7 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
             : node.autoRun && node.autoRun.mode === ("pull" as never)
               ? { ...node.autoRun, mode: "pull_run" }
               : node.autoRun,
+        args: normalizeExecArgs(node.args),
         materializedValues,
         uiState: node.uiState
           ? {

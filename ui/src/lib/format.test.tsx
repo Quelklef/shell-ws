@@ -7,7 +7,17 @@ describe("renderDisplay", () => {
   it("pretty prints json", () => {
     const result = renderDisplay(new TextEncoder().encode('{"ok":true}'));
     render(result.content);
-    expect(screen.getByText(/"ok": true/)).toBeTruthy();
+    expect(result.label).toBe("json");
+    expect(screen.getByText(/"ok":/)).toBeTruthy();
+    expect(document.querySelectorAll(".display-token-key").length).toBeGreaterThan(0);
+  });
+
+  it("renders jsona as highlighted structured text", () => {
+    const result = renderDisplay(new TextEncoder().encode('{"ok":true}\n42\n'));
+    expect(result.label).toBe("jsona");
+    render(result.content);
+    expect(document.querySelectorAll(".display-token-key").length).toBeGreaterThan(0);
+    expect(screen.getByText("42")).toBeTruthy();
   });
 
   it("renders csv as a table", () => {
