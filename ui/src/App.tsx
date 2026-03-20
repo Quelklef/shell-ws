@@ -366,7 +366,6 @@ function WorkspaceCanvas() {
   const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
   const persistTimerRef = useRef<number | null>(null);
   const layoutPersistTimerRef = useRef<number | null>(null);
-  const pendingLayoutPersistRef = useRef<{ nodes: FlowNode[]; edges: FlowEdge[] } | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
@@ -463,20 +462,21 @@ function WorkspaceCanvas() {
   }, [buildWorkspace]);
 
   const persistLayoutSoon = useCallback((nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
-    pendingLayoutPersistRef.current = { nodes: nextNodes, edges: nextEdges };
+    nodesRef.current = nextNodes;
+    edgesRef.current = nextEdges;
     if (layoutPersistTimerRef.current !== null) {
       window.clearTimeout(layoutPersistTimerRef.current);
     }
     layoutPersistTimerRef.current = window.setTimeout(() => {
-      const pending = pendingLayoutPersistRef.current;
-      if (pending) {
-        const nextWorkspace = buildWorkspace(pending.nodes, pending.edges);
-        if (nextWorkspace) {
-          saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
-        }
+      // Layout updates can arrive from multiple places in quick succession:
+      // pane-height commits mutate `uiState.paneSizes`, while React Flow dimension
+      // updates mutate measured node size. Persist from the latest refs so one
+      // layout snapshot cannot clobber the other by racing as "last write wins".
+      const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current);
+      if (nextWorkspace) {
+        saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
       }
       layoutPersistTimerRef.current = null;
-      pendingLayoutPersistRef.current = null;
     }, 180);
   }, [buildWorkspace]);
 
