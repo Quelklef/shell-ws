@@ -63,8 +63,11 @@ export default function ResizablePane({
     };
 
     const observer = new ResizeObserver(() => {
-      const widthFromDom = Math.round(element.getBoundingClientRect().width);
-      const heightFromDom = Math.round(element.getBoundingClientRect().height);
+      // Native CSS resizing happens in the node's layout space, while React Flow zoom applies a
+      // transform afterward. Read offset sizes here so persisted pane/node dimensions stay in the
+      // same unscaled coordinate system as `node.size.width` and pane heights.
+      const widthFromDom = Math.round(element.offsetWidth);
+      const heightFromDom = Math.round(element.offsetHeight);
       observedHeightRef.current = heightFromDom;
       notifyLayout();
 
