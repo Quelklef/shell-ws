@@ -7,6 +7,7 @@ describe("node port affordances", () => {
     expect(nodePreviewTabs("text")).toEqual(["stdout"]);
     expect(nodePreviewTabs("file")).toEqual(["stdout", "stderr"]);
     expect(nodePreviewTabs("passthru")).toEqual(["stdin", "stdout"]);
+    expect(nodePreviewTabs("display")).toEqual(["stdin", "stdout"]);
     expect(nodePreviewTabs("html")).toEqual(["stdin"]);
     expect(nodePreviewTabs("script")).toEqual(["stdin", "stdout", "stderr"]);
   });
@@ -17,6 +18,7 @@ describe("node port affordances", () => {
     expect(nodeHasInputPort("script")).toBe(true);
     expect(nodeHasInputPort("ai_script")).toBe(true);
     expect(nodeHasInputPort("passthru")).toBe(true);
+    expect(nodeHasInputPort("display")).toBe(true);
     expect(nodeHasInputPort("html")).toBe(true);
   });
 
@@ -25,6 +27,7 @@ describe("node port affordances", () => {
     expect(nodeHasArgvPort("ai_script")).toBe(true);
     expect(nodeHasArgvPort("exec")).toBe(true);
     expect(nodeHasArgvPort("passthru")).toBe(false);
+    expect(nodeHasArgvPort("display")).toBe(false);
     expect(nodeHasArgvPort("file")).toBe(false);
   });
 

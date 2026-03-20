@@ -53,7 +53,7 @@ import type {
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
-import { missingConnectedInputs, missingOutputs, outputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
+import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
@@ -74,7 +74,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     title: "",
     comment: "",
     position: { x: 140 + count * 30, y: 140 + count * 24 },
-    size: { width: 320, height: (kind === "html" ? 300 : kind === "ai_script" ? 320 : kind === "formula" ? 280 : 230) + 156 },
+    size: { width: 320, height: ((kind === "html" || kind === "display") ? 300 : kind === "ai_script" ? 320 : kind === "formula" ? 280 : 230) + 156 },
     shell: "bash",
     script: kind === "script" ? "printf 'hello\n'" : kind === "ai_script" ? "" : null,
     description: kind === "ai_script" ? "" : null,
@@ -98,7 +98,7 @@ function paletteGroups(): {
       label: "sources",
       items: [
         { kind: "text", label: "text", icon: "T", help: "Emit literal text on stdout." },
-        { kind: "file", label: "file", icon: "F", help: "Read a file path and emit its bytes." },
+        { kind: "file", label: "file", icon: "🗎", help: "Read a file path and emit its bytes." },
       ],
     },
     {
@@ -107,13 +107,13 @@ function paletteGroups(): {
         {
           kind: "script",
           label: "script",
-          icon: "§",
+          icon: ">_",
           help: "Run a shell snippet with the selected shell.",
         },
         {
           kind: "ai_script",
           label: "ai script",
-          icon: "AI",
+          icon: ">_",
           help: "Generate and run a shell snippet with OpenAI.",
         },
         {
@@ -139,6 +139,12 @@ function paletteGroups(): {
     {
       label: "sinks",
       items: [
+        {
+          kind: "display",
+          label: "display",
+          icon: "⌕",
+          help: "Show stdin as a sink with a persistent stdout preview.",
+        },
         {
           kind: "html",
           label: "html",
@@ -744,7 +750,7 @@ function WorkspaceCanvas() {
               const previousLive = current[event.node_id]?.livePreviews ?? {};
               const nextLive = { ...previousLive };
               if (node) {
-                for (const port of outputPortsForKind(node.kind)) {
+                for (const port of previewOutputPortsForKind(node.kind)) {
                   nextLive[port] = { bytes: new Uint8Array(), completed: false };
                 }
               }
@@ -770,7 +776,7 @@ function WorkspaceCanvas() {
               const committed = { ...(previous.previews ?? {}) };
               const live = { ...(previous.livePreviews ?? {}) };
               if (node) {
-                for (const port of outputPortsForKind(node.kind)) {
+                for (const port of previewOutputPortsForKind(node.kind)) {
                   const candidate = live[port];
                   if (event.exit_code === 0 && candidate) {
                     committed[port] = { ...candidate, completed: true };
@@ -1262,7 +1268,7 @@ function WorkspaceCanvas() {
                     aria-label={`${choice.label}: ${choice.help}`}
                     onClick={() => addNode(choice.kind)}
                   >
-                    <span className="node-palette-icon" aria-hidden="true">{choice.icon}</span>
+                    <span className={`node-palette-icon node-palette-icon-${choice.kind}`} aria-hidden="true">{choice.icon}</span>
                     <span className="node-palette-text">{choice.label}</span>
                   </button>
                 ))}

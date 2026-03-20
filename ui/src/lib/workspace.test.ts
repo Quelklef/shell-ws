@@ -27,7 +27,7 @@ describe("sanitizeWorkspace", () => {
     expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("file");
   });
 
-  it("renames legacy display nodes to passthru nodes", () => {
+  it("keeps display nodes as display nodes", () => {
     const workspace = {
       id: "w",
       name: "w",
@@ -47,7 +47,31 @@ describe("sanitizeWorkspace", () => {
       edges: [],
     } as unknown as Workspace;
 
-    expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("passthru");
+    expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("display");
+  });
+
+
+  it("opens stdout previews by default for display nodes", () => {
+    const workspace = {
+      id: "w",
+      name: "w",
+      ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+      cwd: "",
+      openaiApiKey: "",
+      nodes: [
+        {
+          id: "display-1",
+          kind: "display",
+          title: "",
+          comment: "",
+          position: { x: 0, y: 0 },
+          size: { width: 300, height: 200 },
+        },
+      ],
+      edges: [],
+    } as unknown as Workspace;
+
+    expect(sanitizeWorkspace(workspace).nodes[0]?.uiState?.openPreviewTabs).toEqual(["stdout"]);
   });
 
   it("drops legacy unslotted argv edges", () => {

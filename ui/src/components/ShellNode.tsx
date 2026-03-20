@@ -9,6 +9,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { analyzeFormula, FORMULA_SYNTAX_OVERVIEW } from "../lib/formula";
 import { renderDisplay } from "../lib/format";
 import { ACTIONS } from "../lib/actionIcons";
+import { outputPortsForKind } from "../lib/materialized";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
 import type {
   AutoRunConfig,
@@ -118,7 +119,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const getVisiblePreview = (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port];
   const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
-  const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port));
+  // Display sinks always show their stdout preview even though stdout is not wireable.
+  const forcedOpenPreviewTabs = model.kind === "display" ? ["stdout"] : [];
+  const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port) || forcedOpenPreviewTabs.includes(port));
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
@@ -197,9 +200,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
             style={{ top: ARGV_FIRST_PORT_TOP + index * PORT_SPACING }}
           />
         ))}
-      {nodePreviewTabs(model.kind).includes("stdout") &&
+      {outputPortsForKind(model.kind).includes("stdout") &&
         outputHandle("stdout", STDOUT_PORT_TOP, "stdout", runtime.portActivity.stdout)}
-      {nodePreviewTabs(model.kind).includes("stderr") &&
+      {outputPortsForKind(model.kind).includes("stderr") &&
         outputHandle("stderr", STDERR_PORT_TOP, "stderr", runtime.portActivity.stderr)}
 
       <div className="node-comment-floating">

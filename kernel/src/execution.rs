@@ -33,18 +33,31 @@ fn node_label(node: &Node) -> &str {
     }
 }
 
-fn output_ports(kind: &NodeKind) -> &'static [PortKind] {
+// Some nodes materialize previewable outputs without exposing a source handle.
+// Keep wireable ports separate from persisted output previews so display sinks can
+// render stdout without participating in repush or downstream graph transport.
+fn source_output_ports(kind: &NodeKind) -> &'static [PortKind] {
     match kind {
         NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::File | NodeKind::Formula => {
             &[PortKind::Stdout, PortKind::Stderr]
         }
         NodeKind::Text | NodeKind::Passthru => &[PortKind::Stdout],
+        NodeKind::Display | NodeKind::Html => &[],
+    }
+}
+
+fn materialized_output_ports(kind: &NodeKind) -> &'static [PortKind] {
+    match kind {
+        NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::File | NodeKind::Formula => {
+            &[PortKind::Stdout, PortKind::Stderr]
+        }
+        NodeKind::Text | NodeKind::Passthru | NodeKind::Display => &[PortKind::Stdout],
         NodeKind::Html => &[],
     }
 }
 
 fn node_accepts_stdin(kind: &NodeKind) -> bool {
-    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Passthru | NodeKind::Html)
+    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Passthru | NodeKind::Display | NodeKind::Html)
 }
 
 fn node_accepts_argv(kind: &NodeKind) -> bool {
@@ -394,7 +407,7 @@ impl ExecutionContext {
 
     fn ensure_repushable(&self, node_id: &str) -> Result<(), String> {
         let node = self.nodes.get(node_id).expect("node");
-        let required = output_ports(&node.kind);
+        let required = source_output_ports(&node.kind);
         if required.is_empty() {
             return Err(format!("{} has no outputs to push.", node_label(node)));
         }
@@ -857,7 +870,7 @@ impl RunController {
         let outputs = self.live_outputs.remove(node_id).unwrap_or_default();
         let node = self.context.nodes.get(node_id).expect("node");
         let mut next = HashMap::new();
-        for port in output_ports(&node.kind) {
+        for port in materialized_output_ports(&node.kind) {
             let key = output_key(*port).to_string();
             next.insert(key.clone(), outputs.get(&key).cloned().unwrap_or_default());
         }
@@ -974,6 +987,7 @@ impl RunController {
         match node.kind {
             NodeKind::Text => self.run_text_node(node).await,
             NodeKind::File => self.run_file_node(node).await,
+            NodeKind::Display => self.run_display_root(node).await,
             NodeKind::Passthru => self.run_passthru_root(node).await,
             NodeKind::Html => self.run_html_root(node).await,
             NodeKind::Script | NodeKind::AiScript => {
@@ -1002,7 +1016,7 @@ impl RunController {
             .ok_or_else(|| format!("Unknown node {node_id}"))?;
         self.begin_node(&node.id);
         let outputs = self.context.node_materialized_outputs(&node.id);
-        for port in output_ports(&node.kind) {
+        for port in source_output_ports(&node.kind) {
             let bytes = outputs.get(output_key(*port)).cloned().unwrap_or_default();
             self.handle_output_chunk(&node.id, *port, bytes).await?;
         }
@@ -1026,7 +1040,7 @@ impl RunController {
         self.handle_node_exit(&node.id, Some(0)).await
     }
 
-    async fn run_passthru_root(&mut self, node: Node) -> Result<(), String> {
+    async fn run_display_root(&mut self, node: Node) -> Result<(), String> {
         self.begin_node(&node.id);
         let stdin = if self.context.has_connected_stdin(&node.id) {
             self.context
@@ -1038,6 +1052,10 @@ impl RunController {
         };
         self.handle_output_chunk(&node.id, PortKind::Stdout, stdin).await?;
         self.handle_node_exit(&node.id, Some(0)).await
+    }
+
+    async fn run_passthru_root(&mut self, node: Node) -> Result<(), String> {
+        self.run_display_root(node).await
     }
 
     async fn run_html_root(&mut self, node: Node) -> Result<(), String> {
@@ -1405,7 +1423,7 @@ impl RunController {
         }
 
         match target.kind {
-            NodeKind::Passthru => {
+            NodeKind::Display | NodeKind::Passthru => {
                 let started = if self.state_mut(&target.id).running {
                     false
                 } else {
@@ -2422,6 +2440,58 @@ mod tests {
 
         let exec_id = manager.run(workspace, "file-1".to_string(), ExecutionAction::Repush);
         assert_eq!(wait_for_finish(&mut rx, &exec_id, "file-1").await, Some(0));
+    }
+
+    #[tokio::test]
+    async fn display_pull_run_materializes_stdout_from_stdin() {
+        let (tx, _) = broadcast::channel(64);
+        let context = Arc::new(
+            ExecutionContext::new(
+                "display-pull-run".to_string(),
+                workspace(
+                    {
+                        let mut source = node(NodeKind::Text, "text-1");
+                        source.text = Some("watch me".to_string());
+                        let display = node(NodeKind::Display, "display-1");
+                        vec![source, display]
+                    },
+                    vec![edge("edge-1", "text-1", PortKind::Stdout, "display-1", PortKind::Stdin, None)],
+                ),
+                ExecutionAction::PullRun,
+                tx,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        );
+
+        context.clone().run("display-1".to_string()).await.expect("run");
+        assert_eq!(
+            context
+                .materialized_values
+                .lock()
+                .get("display-1")
+                .and_then(|ports| ports.get("stdout"))
+                .cloned(),
+            Some(b"watch me".to_vec())
+        );
+    }
+
+    #[tokio::test]
+    async fn display_repush_is_rejected_without_outputs() {
+        let (tx, _) = broadcast::channel(64);
+        let context = Arc::new(
+            ExecutionContext::new(
+                "display-repush".to_string(),
+                workspace(vec![node(NodeKind::Display, "display-1")], vec![]),
+                ExecutionAction::Repush,
+                tx,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        );
+
+        let error = context.clone().run("display-1".to_string()).await.expect_err("repush should fail");
+        assert!(error.contains("has no outputs to push"), "unexpected error: {error}");
     }
 
     #[tokio::test]

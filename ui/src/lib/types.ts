@@ -6,6 +6,7 @@ export type NodeKind =
   | "exec"
   | "file"
   | "passthru"
+  | "display"
   | "html"
   | "text"
   | "formula";

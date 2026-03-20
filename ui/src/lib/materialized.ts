@@ -71,8 +71,18 @@ export function outputPortsForKind(kind: NodeKind): PortKind[] {
     case "text":
     case "passthru":
       return ["stdout"];
+    case "display":
     case "html":
       return [];
+  }
+}
+
+export function previewOutputPortsForKind(kind: NodeKind): PortKind[] {
+  switch (kind) {
+    case "display":
+      return ["stdout"];
+    default:
+      return outputPortsForKind(kind);
   }
 }
 

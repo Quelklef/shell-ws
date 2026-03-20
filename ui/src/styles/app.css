@@ -251,6 +251,7 @@ textarea {
   justify-content: flex-start;
   gap: 10px;
   text-align: left;
+  text-transform: uppercase;
   padding: 8px 9px;
 }
 
@@ -271,6 +272,16 @@ textarea {
 
 .node-palette-text {
   flex: 1;
+}
+
+.node-palette-icon-text {
+  font-family: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.node-palette-icon-file {
+  font-size: 14px;
 }
 
 .canvas-shell {

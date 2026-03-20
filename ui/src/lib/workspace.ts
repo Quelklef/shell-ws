@@ -40,9 +40,7 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
       kind:
         node.kind === ("cat" as typeof node.kind)
           ? "file"
-          : node.kind === ("display" as typeof node.kind)
-            ? "passthru"
-            : node.kind,
+          : node.kind,
     }))
     .filter((node) => !REMOVED_NODE_KINDS.has(node.kind as string));
   const validNodeIds = new Set(nodes.map((node) => node.id));
@@ -75,11 +73,16 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
         uiState: node.uiState
           ? {
               ...node.uiState,
-              openPreviewTabs:
-                node.uiState.openPreviewTabs ??
-                (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []),
+              openPreviewTabs: (() => {
+                const tabs =
+                  node.uiState.openPreviewTabs ??
+                  (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []);
+                return node.kind === "display" && !tabs.includes("stdout") ? [...tabs, "stdout"] : tabs;
+              })(),
             }
-          : node.uiState,
+          : node.kind === "display"
+            ? { openPreviewTabs: ["stdout"] }
+            : node.uiState,
       };
     }),
     edges: workspace.edges.filter(

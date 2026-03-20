@@ -139,7 +139,7 @@ pub enum NodeKind {
     Exec,
     #[serde(alias = "cat")]
     File,
-    #[serde(alias = "display")]
+    Display,
     Passthru,
     Html,
     Text,
@@ -467,9 +467,9 @@ mod tests {
     }
 
     #[test]
-    fn legacy_display_kind_deserializes_as_passthru() {
-        let kind: super::NodeKind = serde_json::from_str("\"display\"").expect("deserialize legacy display kind");
-        assert_eq!(kind, super::NodeKind::Passthru);
+    fn display_kind_deserializes_as_display() {
+        let kind: super::NodeKind = serde_json::from_str("\"display\"").expect("deserialize display kind");
+        assert_eq!(kind, super::NodeKind::Display);
     }
 
     #[test]
