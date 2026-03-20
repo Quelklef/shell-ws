@@ -318,7 +318,7 @@ textarea {
 .shell-node {
   position: relative;
   width: 100%;
-  height: 100%;
+  height: auto;
   overflow: visible;
 }
 
@@ -396,7 +396,7 @@ textarea {
   position: relative;
   z-index: 2;
   width: 100%;
-  height: 100%;
+  height: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -438,11 +438,11 @@ textarea {
 }
 
 .script-editor {
-  min-height: 112px;
+  min-height: 0;
 }
 
 .ai-description-editor {
-  min-height: 72px;
+  min-height: 0;
 }
 
 .ai-generate-shell {
@@ -517,8 +517,8 @@ textarea {
 }
 
 .formula-editor-codemirror {
-  min-height: 96px;
-  height: 96px;
+  min-height: 0;
+  height: auto;
 }
 
 .formula-editor-codemirror.is-invalid {
@@ -545,17 +545,15 @@ textarea {
 }
 
 .script-editor-codemirror {
-  min-height: 132px;
-  height: 132px;
-  border: 1px solid rgba(244, 236, 223, 0.12);
-  background: rgba(9, 11, 13, 0.54);
-  border-radius: 7px;
-  overflow: auto;
+  min-height: 0;
+  height: auto;
+  overflow: hidden;
 }
 
 .script-editor-codemirror .cm-editor {
-  cursor: pointer;
+  cursor: text;
   height: 100%;
+  min-height: 0;
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
   font-size: 12px;
   background: transparent;
@@ -563,6 +561,7 @@ textarea {
 
 .script-editor-codemirror .cm-scroller {
   height: 100%;
+  min-height: 0;
   font-family: inherit;
 }
 
@@ -711,6 +710,61 @@ textarea {
   overflow: hidden;
 }
 
+.resizable-pane {
+  width: 100%;
+  resize: both;
+  overflow: auto;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  border-radius: 7px;
+  background: rgba(9, 11, 13, 0.54);
+}
+
+.resizable-pane:focus-within {
+  border-color: rgba(242, 192, 120, 0.55);
+  box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.22);
+}
+
+.resizable-pane::-webkit-resizer {
+  background: rgba(242, 192, 120, 0.72);
+}
+
+.resizable-pane.input-pane {
+  padding: 0;
+}
+
+.resizable-pane.codemirror-pane {
+  padding: 0;
+  overflow: hidden;
+}
+
+/* CodeMirror only stays visually in sync with a resizable wrapper if every layer in the
+   chain is allowed to fill height and shrink inside flex containers. */
+.resizable-pane.codemirror-pane .cm-editor,
+.resizable-pane.codemirror-pane .cm-scroller,
+.resizable-pane.codemirror-pane .cm-content,
+.resizable-pane.codemirror-pane .cm-lineWrapping {
+  height: 100%;
+  min-height: 0;
+}
+
+.resizable-input {
+  width: 100%;
+  height: 100%;
+  min-height: 100%;
+  resize: none;
+  border: none;
+  outline: none;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text);
+  padding: 8px 10px;
+  display: block;
+}
+
+.resizable-input:focus {
+  outline: none;
+}
+
 .display-label {
   margin-bottom: 0;
   text-transform: uppercase;
@@ -801,7 +855,6 @@ textarea {
   background: rgba(var(--handle-rgb, 242, 192, 120), 0.2);
   opacity: 0;
   pointer-events: auto;
-  transition: opacity 120ms ease;
 }
 
 .shell-handle:hover::before {
@@ -829,14 +882,6 @@ textarea {
   border: 1px solid var(--line) !important;
 }
 
-.node-resizer-line {
-  border-color: rgba(242, 192, 120, 0.55) !important;
-}
-
-.node-resizer-handle {
-  background: var(--accent) !important;
-  border: none !important;
-}
 
 .react-flow__controls {
   background: rgba(12, 13, 15, 0.92);
@@ -1110,12 +1155,18 @@ textarea {
 
 .port-preview-pane {
   min-height: 112px;
-  max-height: 190px;
-  overflow: auto;
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
   padding: 10px;
   border-radius: 7px;
-  background: rgba(9, 11, 13, 0.46);
-  border: 1px solid rgba(244, 236, 223, 0.08);
+}
+
+.port-preview-body {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
 }
 
 .file-input-row {
@@ -1184,14 +1235,11 @@ textarea {
   gap: 8px;
   min-height: 160px;
   padding: 10px;
-  border-radius: 7px;
-  border: 1px solid rgba(244, 236, 223, 0.08);
-  background: rgba(9, 11, 13, 0.42);
 }
 
 .html-frame {
   width: 100%;
-  min-height: 180px;
+  min-height: 0;
   flex: 1;
   border: 0;
   border-radius: 8px;

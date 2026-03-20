@@ -234,3 +234,36 @@ it("normalizes legacy exec arg strings into literal arg objects", () => {
     { source: "literal", value: "value" },
   ]);
 });
+
+it("preserves persisted pane sizes", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    openaiApiKey: "",
+    nodes: [
+      {
+        id: "x",
+        kind: "script",
+        title: "",
+        comment: "",
+        position: { x: 0, y: 0 },
+        size: { width: 10, height: 10 },
+        uiState: {
+          paneSizes: {
+            script: { height: 180 },
+            "preview-stdout": { height: 144 },
+          },
+        },
+      },
+    ],
+    edges: [],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitized.nodes[0]?.uiState?.paneSizes).toEqual({
+    script: { height: 180 },
+    "preview-stdout": { height: 144 },
+  });
+});

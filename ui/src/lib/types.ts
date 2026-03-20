@@ -33,11 +33,16 @@ export interface LegacyPersistedDisplayState {
   completed?: boolean;
 }
 
+export interface PaneSizeState {
+  height?: number;
+}
+
 export interface NodeUiState {
   activePreviewTab?: string | null;
   openPreviewTabs?: string[];
   showAutoControls?: boolean;
   previews?: Record<string, LegacyPersistedDisplayState>;
+  paneSizes?: Record<string, PaneSizeState>;
 }
 
 export interface Workspace {
@@ -208,6 +213,8 @@ export interface ShellNodeData extends Record<string, unknown> {
   onGenerate: (nodeId: string) => Promise<void>;
   onClearMaterialized: (nodeId: string) => void;
   onConvertKind: (nodeId: string, kind: Extract<NodeKind, "display" | "passthru">) => void;
+  onResizeWidth: (nodeId: string, width: number) => void;
+  onResizePaneHeight: (nodeId: string, paneId: string, height: number) => void;
 }
 
 export interface FlowEdgeData extends Record<string, unknown> {

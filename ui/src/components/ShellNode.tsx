@@ -3,14 +3,17 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import katex from "katex";
-import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Handle, Position, type NodeProps, useUpdateNodeInternals } from "@xyflow/react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+
+import ResizablePane from "./ResizablePane";
 
 import { analyzeFormula, FORMULA_SYNTAX_OVERVIEW } from "../lib/formula";
 import { renderDisplay } from "../lib/format";
 import { ACTIONS } from "../lib/actionIcons";
 import { outputPortsForKind } from "../lib/materialized";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
+import { paneHeight, previewPaneId } from "../lib/paneLayout";
 import type {
   AutoRunConfig,
   ExecutionAction,
@@ -19,7 +22,6 @@ import type {
 } from "../lib/types";
 import { clamp } from "../lib/utils";
 
-const PREVIEW_HEIGHT_DELTA = 156;
 const PORT_SPACING = 30;
 const PORT_STACK_TOP = 84;
 
@@ -97,9 +99,10 @@ function outputHandle(
   );
 }
 
-export default function ShellNode({ data, selected }: NodeProps) {
+export default function ShellNode({ data }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
+  const refreshNodeInternals = useUpdateNodeInternals();
   const shellExtensions = useMemo(() => [StreamLanguage.define(shell)], []);
   const autoRun = model.autoRun ?? {
     enabled: false,
@@ -117,11 +120,36 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
   const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port));
+  const openPreviewSignature = orderedOpenPreviewTabs.join("|");
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
   const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
   const execArgs = model.args ?? [];
+  const paneSizeSignature = useMemo(() => JSON.stringify(model.uiState?.paneSizes ?? {}), [model.uiState?.paneSizes]);
+  const handlePaneWidthChange = useCallback((width: number) => {
+    typedData.onResizeWidth(model.id, width);
+  }, [model.id, typedData]);
+  const handlePaneHeightChange = useCallback((paneId: string, height: number) => {
+    typedData.onResizePaneHeight(model.id, paneId, height);
+  }, [model.id, typedData]);
+  const handleLayoutChange = useCallback(() => {
+    refreshNodeInternals(model.id);
+  }, [model.id, refreshNodeInternals]);
+  const renderResizablePane = useCallback((paneId: string, className: string, children: ReactNode, minHeight?: number) => (
+    <ResizablePane
+      paneId={paneId}
+      width={model.size.width}
+      height={paneHeight(model.uiState, paneId)}
+      minHeight={minHeight}
+      className={className}
+      onWidthChange={handlePaneWidthChange}
+      onHeightChange={handlePaneHeightChange}
+      onLayoutChange={handleLayoutChange}
+    >
+      {children}
+    </ResizablePane>
+  ), [handleLayoutChange, handlePaneHeightChange, handlePaneWidthChange, model.size.width, model.uiState]);
   const leftPorts = useMemo(() => {
     const ports: Array<{ key: string; port: PortKind; slot?: number; activeAt?: number }> = [];
     if (nodeHasInputPort(model.kind)) {
@@ -175,15 +203,24 @@ export default function ShellNode({ data, selected }: NodeProps) {
     element.setSelectionRange(length, length);
   }, [isEditingComment]);
 
+  useEffect(() => {
+    const handle = window.requestAnimationFrame(() => {
+      refreshNodeInternals(model.id);
+    });
+    return () => window.cancelAnimationFrame(handle);
+  }, [
+    isEditingComment,
+    model.id,
+    model.kind,
+    model.size.width,
+    openPreviewSignature,
+    paneSizeSignature,
+    refreshNodeInternals,
+    showFormulaHelp,
+  ]);
+
   return (
     <div className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""}`}>
-      <NodeResizer
-        minWidth={260}
-        minHeight={160}
-        isVisible={selected}
-        lineClassName="node-resizer-line"
-        handleClassName="node-resizer-handle"
-      />
       {leftPorts.map(({ key, port, activeAt }, index) => {
         const active = activeAt ? Date.now() - activeAt < 800 : false;
         return (
@@ -287,13 +324,16 @@ export default function ShellNode({ data, selected }: NodeProps) {
             />
             {model.kind === "ai_script" && (
               <>
-                <textarea
-                  className="script-editor ai-description-editor nodrag nopan"
-                  value={model.description ?? ""}
-                  placeholder="describe the script you want generated"
-                  onWheelCapture={(event) => event.stopPropagation()}
-                  onChange={(event) => typedData.onUpdate(model.id, { description: event.target.value })}
-                />
+                {renderResizablePane(
+                  "ai-prompt",
+                  "resizable-pane input-pane nodrag nopan",
+                  <textarea
+                    className="resizable-input script-editor ai-description-editor"
+                    value={model.description ?? ""}
+                    placeholder="describe the script you want generated"
+                    onChange={(event) => typedData.onUpdate(model.id, { description: event.target.value })}
+                  />,
+                )}
                 <div className="ai-generate-shell">
                   <button
                     type="button"
@@ -321,10 +361,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 </div>
               </>
             )}
-            <div
-              className="script-editor-codemirror nodrag nopan"
-              onWheelCapture={(event) => event.stopPropagation()}
-            >
+            {renderResizablePane(
+              "script",
+              "resizable-pane codemirror-pane script-editor-codemirror nodrag nopan",
               <CodeMirror
                 value={model.script ?? ""}
                 height="100%"
@@ -337,8 +376,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
                   highlightActiveLineGutter: false,
                 }}
                 onChange={(value) => typedData.onUpdate(model.id, { script: value })}
-              />
-            </div>
+              />,
+              112,
+            )}
           </>
         )}
 
@@ -442,13 +482,17 @@ export default function ShellNode({ data, selected }: NodeProps) {
         )}
 
         {model.kind === "text" && (
-          <textarea
-            className="script-editor nodrag nopan"
-            value={model.text ?? ""}
-            placeholder="text output"
-            onWheelCapture={(event) => event.stopPropagation()}
-            onChange={(event) => typedData.onUpdate(model.id, { text: event.target.value })}
-          />
+          renderResizablePane(
+            "text",
+            "resizable-pane input-pane nodrag nopan",
+            <textarea
+              className="resizable-input script-editor"
+              value={model.text ?? ""}
+              placeholder="text output"
+              onChange={(event) => typedData.onUpdate(model.id, { text: event.target.value })}
+            />,
+            96,
+          )
         )}
 
         {model.kind === "formula" && (
@@ -469,10 +513,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 <pre>{FORMULA_SYNTAX_OVERVIEW}</pre>
               </div>
             )}
-            <div
-              className={`script-editor-codemirror formula-editor-codemirror nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`}
-              onWheelCapture={(event) => event.stopPropagation()}
-            >
+            {renderResizablePane(
+              "formula",
+              `resizable-pane codemirror-pane formula-editor-codemirror nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`,
               <CodeMirror
                 value={model.formula ?? ""}
                 height="100%"
@@ -484,8 +527,9 @@ export default function ShellNode({ data, selected }: NodeProps) {
                   highlightActiveLineGutter: false,
                 }}
                 onChange={(value) => typedData.onUpdate(model.id, { formula: value })}
-              />
-            </div>
+              />,
+              84,
+            )}
             {formulaAnalysis.ok ? (
               <div className="formula-preview nodrag nopan" dangerouslySetInnerHTML={{ __html: formulaHtml ?? "" }} />
             ) : (
@@ -495,15 +539,20 @@ export default function ShellNode({ data, selected }: NodeProps) {
         )}
 
         {model.kind === "html" && (
-          <div className="html-pane nodrag nopan">
-            <div className="display-label">html</div>
-            <iframe
-              className="html-frame"
-              sandbox="allow-scripts allow-forms"
-              srcDoc={htmlContent}
-              title={`html-${model.id}`}
-            />
-          </div>
+          renderResizablePane(
+            "html",
+            "resizable-pane html-pane nodrag nopan",
+            <>
+              <div className="display-label">html</div>
+              <iframe
+                className="html-frame"
+                sandbox="allow-scripts allow-forms"
+                srcDoc={htmlContent}
+                title={`html-${model.id}`}
+              />
+            </>,
+            120,
+          )
         )}
 
         <div className="node-toolbar node-action-toolbar">
@@ -575,20 +624,12 @@ export default function ShellNode({ data, selected }: NodeProps) {
                     const nextTabs = isOpen
                       ? openPreviewTabs.filter((entry) => entry !== port)
                       : [...openPreviewTabs, port];
-                    const openedCountDelta = nextTabs.length - openPreviewTabs.length;
                     typedData.onUpdate(model.id, {
                       uiState: {
                         ...(model.uiState ?? {}),
                         activePreviewTab: null,
                         openPreviewTabs: nextTabs,
                       },
-                      size:
-                        openedCountDelta !== 0
-                          ? {
-                              ...model.size,
-                              height: Math.max(160, model.size.height + PREVIEW_HEIGHT_DELTA * openedCountDelta),
-                            }
-                          : model.size,
                     });
                   }}
                 >
@@ -607,10 +648,16 @@ export default function ShellNode({ data, selected }: NodeProps) {
                   content: <div className="display-empty">no materialized {port}</div>,
                 };
             return (
-              <div
+              <ResizablePane
                 key={port}
-                className="port-preview-pane nodrag nopan"
-                onWheelCapture={(event) => event.stopPropagation()}
+                paneId={previewPaneId(port)}
+                width={model.size.width}
+                height={paneHeight(model.uiState, previewPaneId(port))}
+                minHeight={96}
+                className="resizable-pane port-preview-pane nodrag nopan"
+                onWidthChange={handlePaneWidthChange}
+                onHeightChange={handlePaneHeightChange}
+                onLayoutChange={handleLayoutChange}
               >
                 <div className="port-preview-header">
                   <div className="display-label">
@@ -629,8 +676,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
                     copy
                   </button>
                 </div>
-                {renderedPreview.content}
-              </div>
+                <div className="port-preview-body">{renderedPreview.content}</div>
+              </ResizablePane>
             );
           })}
         </div>

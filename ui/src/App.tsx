@@ -55,6 +55,7 @@ import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
+import { nextPaneSizes } from "./lib/paneLayout";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -210,6 +211,8 @@ function syncNodeData(
       onGenerate: handlers.onGenerate,
       onClearMaterialized: handlers.onClearMaterialized,
       onConvertKind: handlers.onConvertKind,
+      onResizeWidth: handlers.onResizeWidth,
+      onResizePaneHeight: handlers.onResizePaneHeight,
     },
   }));
 }
@@ -220,7 +223,7 @@ function toFlowNode(
   generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind"
+    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight"
   >,
   edges: FlowEdge[],
 ): FlowNode {
@@ -243,16 +246,17 @@ function toFlowNode(
       onGenerate: handlers.onGenerate,
       onClearMaterialized: handlers.onClearMaterialized,
       onConvertKind: handlers.onConvertKind,
+      onResizeWidth: handlers.onResizeWidth,
+      onResizePaneHeight: handlers.onResizePaneHeight,
     },
+    // Width stays explicit so the important panes can share one horizontal source of truth.
+    // Height is DOM-owned and persisted later from React Flow's measured snapshot.
     width: node.size.width,
-    height: node.size.height,
     initialWidth: node.size.width,
-    initialHeight: node.size.height,
     draggable: true,
     selectable: true,
     style: {
       width: node.size.width,
-      height: node.size.height,
     },
   };
 }
@@ -280,6 +284,8 @@ function flowNodeToWorkspaceNode(node: FlowNode): WorkspaceNode {
   return {
     ...model,
     position: node.position,
+    // Persist the measured height as a snapshot for layout/save compatibility, but do not
+    // feed it back into the rendered node. The browser owns live vertical layout now.
     size: {
       width: node.measured?.width ?? node.width ?? model.size.width,
       height: node.measured?.height ?? node.height ?? model.size.height,
@@ -313,6 +319,8 @@ type ShellNodeActions = {
   onGenerate: (nodeId: string) => Promise<void>;
   onClearMaterialized: (nodeId: string) => void;
   onConvertKind: (nodeId: string, kind: Extract<NodeKind, "display" | "passthru">) => void;
+  onResizeWidth: (nodeId: string, width: number) => void;
+  onResizePaneHeight: (nodeId: string, paneId: string, height: number) => void;
 };
 
 type AutorunHandle = {
@@ -357,6 +365,8 @@ function WorkspaceCanvas() {
   const autorunRef = useRef<Map<string, AutorunHandle>>(new Map());
   const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
   const persistTimerRef = useRef<number | null>(null);
+  const layoutPersistTimerRef = useRef<number | null>(null);
+  const pendingLayoutPersistRef = useRef<{ nodes: FlowNode[]; edges: FlowEdge[] } | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
@@ -385,6 +395,15 @@ function WorkspaceCanvas() {
   useEffect(() => {
     generationRef.current = generation;
   }, [generation]);
+
+  useEffect(() => () => {
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+    }
+    if (layoutPersistTimerRef.current !== null) {
+      window.clearTimeout(layoutPersistTimerRef.current);
+    }
+  }, []);
 
   const buildWorkspace = useCallback(
     (
@@ -441,6 +460,24 @@ function WorkspaceCanvas() {
       }
       persistTimerRef.current = null;
     }, 150);
+  }, [buildWorkspace]);
+
+  const persistLayoutSoon = useCallback((nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
+    pendingLayoutPersistRef.current = { nodes: nextNodes, edges: nextEdges };
+    if (layoutPersistTimerRef.current !== null) {
+      window.clearTimeout(layoutPersistTimerRef.current);
+    }
+    layoutPersistTimerRef.current = window.setTimeout(() => {
+      const pending = pendingLayoutPersistRef.current;
+      if (pending) {
+        const nextWorkspace = buildWorkspace(pending.nodes, pending.edges);
+        if (nextWorkspace) {
+          saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+        }
+      }
+      layoutPersistTimerRef.current = null;
+      pendingLayoutPersistRef.current = null;
+    }, 180);
   }, [buildWorkspace]);
 
   const updateWorkspaceApiKey = useCallback(
@@ -587,11 +624,9 @@ function WorkspaceCanvas() {
                     },
                   },
                   width: patch.size?.width ?? node.width,
-                  height: patch.size?.height ?? node.height,
                   style: {
                     ...node.style,
                     width: patch.size?.width ?? node.data.model.size.width,
-                    height: patch.size?.height ?? node.data.model.size.height,
                   },
                 }
               : node,
@@ -696,6 +731,54 @@ function WorkspaceCanvas() {
           return next;
         });
       },
+      onResizeWidth: (nodeId, width) => {
+        setNodes((current) => {
+          const next = current.map((node) =>
+            node.id === nodeId
+              ? {
+                  ...node,
+                  width,
+                  style: {
+                    ...node.style,
+                    width,
+                  },
+                  data: {
+                    ...node.data,
+                    model: {
+                      ...node.data.model,
+                      size: {
+                        ...node.data.model.size,
+                        width,
+                      },
+                    },
+                  },
+                }
+              : node,
+          );
+          persistLayoutSoon(next, edgesRef.current);
+          return next;
+        });
+      },
+      onResizePaneHeight: (nodeId, paneId, height) => {
+        setNodes((current) => {
+          const next = current.map((node) =>
+            node.id === nodeId
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    model: {
+                      ...node.data.model,
+                      uiState: nextPaneSizes(node.data.model.uiState, paneId, height),
+                    },
+                  },
+                }
+              : node,
+          );
+          persistLayoutSoon(next, edgesRef.current);
+          return next;
+        });
+      },
       onGenerate: async (nodeId) => {
         const workspace = buildWorkspace();
         const node = nodesRef.current.find((item) => item.id === nodeId)?.data.model;
@@ -748,7 +831,7 @@ function WorkspaceCanvas() {
         }
       },
     }),
-    [getActionReason, persistSoon, sendRunRequest, setNodes],
+    [getActionReason, persistLayoutSoon, persistSoon, sendRunRequest, setNodes],
   );
 
   useEffect(() => {
@@ -1068,22 +1151,25 @@ function WorkspaceCanvas() {
     (changes: NodeChange<FlowNode>[]) => {
       setNodes((current) => {
         const next = applyNodeChanges(changes, current);
-        const shouldPersist = changes.some((change) => {
+        const shouldPersistImmediately = changes.some((change) => {
           if (change.type === "position") {
             return !change.dragging;
           }
-          if (change.type === "dimensions") {
-            return !change.resizing;
-          }
-          return change.type !== "select";
+          return change.type !== "select" && change.type !== "dimensions";
         });
-        if (shouldPersist) {
+        const shouldPersistLayout = changes.some(
+          (change) => change.type === "dimensions" && !change.resizing,
+        );
+        if (shouldPersistImmediately) {
           persistSoon(next, edgesRef.current);
+        }
+        if (shouldPersistLayout) {
+          persistLayoutSoon(next, edgesRef.current);
         }
         return next;
       });
     },
-    [persistSoon, setNodes],
+    [persistLayoutSoon, persistSoon, setNodes],
   );
 
   const onEdgesChange = useCallback(
