@@ -73,16 +73,11 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
         uiState: node.uiState
           ? {
               ...node.uiState,
-              openPreviewTabs: (() => {
-                const tabs =
-                  node.uiState.openPreviewTabs ??
-                  (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []);
-                return node.kind === "display" && !tabs.includes("stdout") ? [...tabs, "stdout"] : tabs;
-              })(),
+              openPreviewTabs:
+                node.uiState.openPreviewTabs ??
+                (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []),
             }
-          : node.kind === "display"
-            ? { openPreviewTabs: ["stdout"] }
-            : node.uiState,
+          : node.uiState,
       };
     }),
     edges: workspace.edges.filter(
