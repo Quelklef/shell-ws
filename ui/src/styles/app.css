@@ -738,14 +738,24 @@ textarea {
   overflow: hidden;
 }
 
-/* CodeMirror only stays visually in sync with a resizable wrapper if every layer in the
-   chain is allowed to fill height and shrink inside flex containers. */
-.resizable-pane.codemirror-pane .cm-editor,
-.resizable-pane.codemirror-pane .cm-scroller,
-.resizable-pane.codemirror-pane .cm-content,
-.resizable-pane.codemirror-pane .cm-lineWrapping {
+/* CodeMirror only stays visually in sync with a resizable wrapper if the third-party host
+   element and the internal editor/scroller chain all inherit the pane's explicit height. */
+.resizable-pane.codemirror-pane > .codemirror-host {
   height: 100%;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.resizable-pane.codemirror-pane > .codemirror-host .cm-editor,
+.resizable-pane.codemirror-pane > .codemirror-host .cm-scroller {
+  height: 100%;
+  min-height: 0;
+}
+
+.resizable-pane.codemirror-pane > .codemirror-host .cm-content,
+.resizable-pane.codemirror-pane > .codemirror-host .cm-lineWrapping {
+  min-height: 100%;
 }
 
 .resizable-input {

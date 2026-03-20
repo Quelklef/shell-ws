@@ -365,6 +365,7 @@ export default function ShellNode({ data }: NodeProps) {
               "script",
               "resizable-pane codemirror-pane script-editor-codemirror nodrag nopan",
               <CodeMirror
+                className="codemirror-host"
                 value={model.script ?? ""}
                 height="100%"
                 theme={oneDark}
@@ -517,6 +518,7 @@ export default function ShellNode({ data }: NodeProps) {
               "formula",
               `resizable-pane codemirror-pane formula-editor-codemirror nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`,
               <CodeMirror
+                className="codemirror-host"
                 value={model.formula ?? ""}
                 height="100%"
                 theme={oneDark}
