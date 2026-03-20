@@ -36,6 +36,7 @@ import {
 import { collectAiScriptSamples } from "./lib/aiScript";
 import { layoutSelectedNodes } from "./lib/layout";
 import { chooseNodePosition } from "./lib/nodePlacement";
+import { selectionRectToFlowRect } from "./lib/selectionRect";
 import { nodeArgvSlots, nodeHasArgvPort, nodePreviewTabs, nodePreviewTabsForNode } from "./lib/nodePorts";
 import type {
   AiGenerationState,
@@ -375,7 +376,11 @@ function WorkspaceCanvas() {
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
-  const userSelectionRect = useStore((store) => store.userSelectionRect);
+  const userSelectionState = useStore((store) => ({
+    rect: store.userSelectionRect,
+    active: store.userSelectionActive,
+    transform: store.transform,
+  }));
 
   const [nodes, setNodes] = useNodesState<FlowNode>([]);
   const [edges, setEdges] = useEdgesState<FlowEdge>([]);
@@ -397,8 +402,16 @@ function WorkspaceCanvas() {
   }, [runtime]);
 
   useEffect(() => {
-    const previewIds = userSelectionRect
-      ? new Set(flow.getIntersectingNodes(userSelectionRect, true, nodesRef.current).map((node) => node.id))
+    const previewIds = userSelectionState.active && userSelectionState.rect
+      ? new Set(
+          flow
+            .getIntersectingNodes(
+              selectionRectToFlowRect(userSelectionState.rect, userSelectionState.transform),
+              true,
+              nodesRef.current,
+            )
+            .map((node) => node.id),
+        )
       : new Set<string>();
     setNodes((current) => {
       let changed = false;
@@ -418,7 +431,7 @@ function WorkspaceCanvas() {
       });
       return changed ? next : current;
     });
-  }, [flow, setNodes, userSelectionRect]);
+  }, [flow, setNodes, userSelectionState]);
 
   useEffect(() => {
     generationRef.current = generation;
