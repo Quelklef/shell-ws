@@ -66,6 +66,7 @@ export function outputPortsForKind(kind: NodeKind): PortKind[] {
     case "ai_script":
     case "exec":
     case "file":
+    case "formula":
       return ["stdout", "stderr"];
     case "text":
     case "passthru":

@@ -2,11 +2,11 @@ import type { NodeKind, PortKind } from "./types";
 import { outputPortsForKind } from "./materialized";
 
 export function nodeHasInputPort(kind: NodeKind) {
-  return kind !== "text" && kind !== "file";
+  return kind !== "text" && kind !== "file" && kind !== "formula";
 }
 
 export function nodeHasArgvPort(kind: NodeKind) {
-  return kind === "script" || kind === "ai_script" || kind === "exec";
+  return kind === "script" || kind === "ai_script" || kind === "exec" || kind === "formula";
 }
 
 export function nodePreviewTabs(kind: NodeKind): PortKind[] {

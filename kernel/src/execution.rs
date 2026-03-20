@@ -34,7 +34,7 @@ fn node_label(node: &Node) -> &str {
 
 fn output_ports(kind: &NodeKind) -> &'static [PortKind] {
     match kind {
-        NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::File => {
+        NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::File | NodeKind::Formula => {
             &[PortKind::Stdout, PortKind::Stderr]
         }
         NodeKind::Text | NodeKind::Passthru => &[PortKind::Stdout],
@@ -43,7 +43,7 @@ fn output_ports(kind: &NodeKind) -> &'static [PortKind] {
 }
 
 fn node_accepts_argv(kind: &NodeKind) -> bool {
-    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec)
+    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Formula)
 }
 
 fn output_key(port: PortKind) -> &'static str {
@@ -971,6 +971,7 @@ impl RunController {
                 self.spawn_command_node(node, stdin, close_after_start, argv, true)
                     .await
             }
+            NodeKind::Formula => Err("formula execution not implemented yet".to_string()),
             NodeKind::Exec => {
                 let (stdin, close_after_start, argv) = self.take_streaming_command_inputs(&node.id);
                 self.spawn_command_node(node, stdin, close_after_start, argv, false)
@@ -1438,6 +1439,7 @@ impl RunController {
                 }
                 _ => {}
             },
+            NodeKind::Formula => {}
             NodeKind::Text | NodeKind::File => {}
         }
 
@@ -1584,6 +1586,7 @@ mod tests {
             path: None,
             args: None,
             text: None,
+            formula: None,
             materialized_values: HashMap::new(),
             auto_run: Some(AutoRunConfig {
                 enabled: false,

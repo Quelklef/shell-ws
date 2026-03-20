@@ -271,6 +271,7 @@ mod tests {
             path: None,
             args: None,
             text: None,
+            formula: None,
             materialized_values: Default::default(),
             auto_run: None,
             ui_state: Default::default(),

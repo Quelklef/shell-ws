@@ -7,7 +7,8 @@ export type NodeKind =
   | "file"
   | "passthru"
   | "html"
-  | "text";
+  | "text"
+  | "formula";
 
 export type PortKind = "stdin" | "argv" | "stdout" | "stderr";
 export type BufferingMode = "unbuffered" | "line_or_1024" | "on_complete";
@@ -31,7 +32,7 @@ export interface NodeUiState {
   activePreviewTab?: string | null;
   openPreviewTabs?: string[];
   showAutoControls?: boolean;
-  editorHeights?: Partial<Record<"script" | "args" | "text" | "description", number>>;
+  editorHeights?: Partial<Record<"script" | "args" | "text" | "description" | "formula", number>>;
   previews?: Record<string, LegacyPersistedDisplayState>;
 }
 
@@ -63,6 +64,7 @@ export interface WorkspaceNode {
   path?: string | null;
   args?: string[] | null;
   text?: string | null;
+  formula?: string | null;
   materializedValues?: Record<string, MaterializedValue> | null;
   autoRun?: AutoRunConfig | null;
   uiState?: NodeUiState | null;

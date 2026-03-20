@@ -43,6 +43,7 @@ impl Workspace {
                     path: None,
                     args: None,
                     text: Some(String::new()),
+                    formula: None,
                     materialized_values: HashMap::new(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
@@ -64,6 +65,7 @@ impl Workspace {
                     path: None,
                     args: None,
                     text: None,
+                    formula: None,
                     materialized_values: HashMap::new(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
@@ -113,6 +115,8 @@ pub struct Node {
     #[serde(default)]
     pub text: Option<String>,
     #[serde(default)]
+    pub formula: Option<String>,
+    #[serde(default)]
     pub materialized_values: HashMap<String, MaterializedValue>,
     #[serde(default, alias = "auto_run")]
     pub auto_run: Option<AutoRunConfig>,
@@ -139,6 +143,7 @@ pub enum NodeKind {
     Passthru,
     Html,
     Text,
+    Formula,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
