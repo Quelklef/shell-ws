@@ -17,6 +17,7 @@ import {
   useEdgesState,
   useNodesState,
   useReactFlow,
+  useStore,
 } from "@xyflow/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
@@ -34,6 +35,7 @@ import {
 } from "./lib/api";
 import { collectAiScriptSamples } from "./lib/aiScript";
 import { layoutSelectedNodes } from "./lib/layout";
+import { chooseNodePosition } from "./lib/nodePlacement";
 import { nodeArgvSlots, nodeHasArgvPort, nodePreviewTabs, nodePreviewTabsForNode } from "./lib/nodePorts";
 import type {
   AiGenerationState,
@@ -200,6 +202,7 @@ function syncNodeData(
       model: node.data.model,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
       generation: generation[node.id],
+      selectionPreview: false,
       argvSlots: computeArgvSlots(node.id, node.data.model.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.data.model.kind, edges),
       onUpdate: handlers.onUpdate,
@@ -235,6 +238,7 @@ function toFlowNode(
       model: node,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
       generation: generation[node.id],
+      selectionPreview: false,
       argvSlots: computeArgvSlots(node.id, node.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.kind, edges),
       onUpdate: handlers.onUpdate,
@@ -371,6 +375,7 @@ function WorkspaceCanvas() {
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
+  const userSelectionRect = useStore((store) => store.userSelectionRect);
 
   const [nodes, setNodes] = useNodesState<FlowNode>([]);
   const [edges, setEdges] = useEdgesState<FlowEdge>([]);
@@ -390,6 +395,30 @@ function WorkspaceCanvas() {
   useEffect(() => {
     runtimeRef.current = runtime;
   }, [runtime]);
+
+  useEffect(() => {
+    const previewIds = userSelectionRect
+      ? new Set(flow.getIntersectingNodes(userSelectionRect, true, nodesRef.current).map((node) => node.id))
+      : new Set<string>();
+    setNodes((current) => {
+      let changed = false;
+      const next = current.map((node) => {
+        const selectionPreview = previewIds.has(node.id);
+        if (node.data.selectionPreview === selectionPreview) {
+          return node;
+        }
+        changed = true;
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            selectionPreview,
+          },
+        };
+      });
+      return changed ? next : current;
+    });
+  }, [flow, setNodes, userSelectionRect]);
 
   useEffect(() => {
     generationRef.current = generation;
@@ -1328,9 +1357,18 @@ function WorkspaceCanvas() {
         : null;
       setNodes((current) => {
         const nextNodeModel = makeNode(kind, current.length + 1);
-        if (centeredPosition) {
-          nextNodeModel.position = centeredPosition;
-        }
+        const desiredPosition = centeredPosition ?? nextNodeModel.position;
+        nextNodeModel.position = chooseNodePosition(
+          desiredPosition,
+          nextNodeModel.size,
+          current.map((node) => ({
+            position: node.position,
+            size: {
+              width: node.width ?? node.data.model.size.width,
+              height: node.measured?.height ?? node.height ?? node.data.model.size.height,
+            },
+          })),
+        );
         const nextNode = toFlowNode(
           nextNodeModel,
           runtime,

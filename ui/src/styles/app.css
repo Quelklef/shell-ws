@@ -327,6 +327,11 @@ textarea {
   box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.18), var(--shadow);
 }
 
+.shell-node.is-selection-preview .node-card {
+  border-color: rgba(143, 207, 158, 0.48);
+  box-shadow: 0 0 0 1px rgba(143, 207, 158, 0.22), var(--shadow);
+}
+
 .node-toolbar {
   display: flex;
   align-items: center;
@@ -417,7 +422,7 @@ textarea {
 .script-editor,
 .display-code {
   font-family: "IBM Plex Mono", "SFMono-Regular", monospace;
-  cursor: pointer;
+  cursor: text;
 }
 
 .shell-input,
@@ -477,25 +482,6 @@ textarea {
   gap: 8px;
 }
 
-.formula-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.formula-help-bubble {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  padding: 0 !important;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  line-height: 1;
-}
-
 .formula-help-panel {
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.54);
@@ -550,7 +536,7 @@ textarea {
   overflow: hidden;
 }
 
-.script-editor-codemirror .cm-editor {
+.codemirror-host .cm-editor {
   cursor: text;
   height: 100%;
   min-height: 0;
@@ -559,19 +545,21 @@ textarea {
   background: transparent;
 }
 
-.script-editor-codemirror .cm-scroller {
+.codemirror-host .cm-scroller {
   height: 100%;
   min-height: 0;
   font-family: inherit;
+  background: transparent;
 }
 
-.script-editor-codemirror .cm-content,
-.script-editor-codemirror .cm-lineWrapping {
+.codemirror-host .cm-content,
+.codemirror-host .cm-lineWrapping {
   min-height: 100%;
 }
 
-.script-editor-codemirror .cm-gutters {
+.codemirror-host .cm-gutters {
   display: none;
+  background: transparent;
 }
 
 .node-comment-floating {
@@ -774,6 +762,17 @@ textarea {
 
 .resizable-input:focus {
   outline: none;
+}
+
+.shell-input,
+.exec-arg-editor,
+.display-pane,
+.display-pane *,
+.port-preview-body,
+.port-preview-body *,
+.codemirror-host,
+.codemirror-host * {
+  cursor: text;
 }
 
 .display-label {
@@ -1048,9 +1047,9 @@ textarea {
   background: rgba(46, 18, 18, 0.95);
 }
 
-.node-kind-convert {
-  width: 20px;
-  height: 20px;
+.node-kind-icon-button {
+  width: 25px;
+  height: 25px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1061,15 +1060,16 @@ textarea {
   cursor: pointer;
 }
 
-.node-kind-convert:hover {
+.node-kind-icon-button:hover,
+.node-kind-icon-button.is-open {
   border-color: rgba(242, 192, 120, 0.45);
   color: var(--text);
   background: rgba(56, 41, 16, 0.7);
 }
 
-.node-kind-convert svg {
-  width: 12px;
-  height: 12px;
+.node-kind-icon-button svg {
+  width: 15px;
+  height: 15px;
   fill: none;
   stroke: currentColor;
   stroke-width: 1.6;

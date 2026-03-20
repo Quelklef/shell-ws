@@ -204,6 +204,7 @@ export interface ShellNodeData extends Record<string, unknown> {
   argvSlots?: number[];
   previewTabs?: string[];
   generation?: AiGenerationState;
+  selectionPreview?: boolean;
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, action: ExecutionAction) => void;
   getActionReason: (nodeId: string, action: ExecutionAction) => string | null;

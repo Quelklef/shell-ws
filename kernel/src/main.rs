@@ -22,7 +22,7 @@ use model::{ClientEvent, ServerEvent, Workspace};
 use openai::{generate_script, GenerateScriptRequest, GenerateScriptResponse};
 use tokio::sync::broadcast;
 use tower_http::{cors::CorsLayer, services::ServeDir};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use uuid::Uuid;
 use workspace_store::WorkspaceStore;
 
@@ -203,6 +203,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
         while let Ok(event) = rx.recv().await {
             match serde_json::to_string(&event) {
                 Ok(message) => {
+                    debug_ws_line("<-", summarize_server_event(&event));
                     if ws_tx.send(Message::Text(message.into())).await.is_err() {
                         break;
                     }
@@ -229,6 +230,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                 if let Message::Text(text) = message {
                     match serde_json::from_str::<ClientEvent>(&text) {
                         Ok(event) => {
+                            debug_ws_line("->", summarize_client_event(&event));
                             if let Err(error) = handle_client_event(event, state.clone()).await {
                                 let _ = state.broadcaster.send(ServerEvent::Error {
                                     message: error.to_string(),
@@ -283,6 +285,41 @@ impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()).into_response()
     }
+}
+
+fn summarize_client_event(event: &ClientEvent) -> String {
+    match event {
+        ClientEvent::RunNode { node_id, action, .. } => format!("run {:?} {}", action, node_id),
+        ClientEvent::StopExecution { exec_id, node_id } => {
+            format!("stop exec={} node={}", exec_id.as_deref().unwrap_or("-"), node_id.as_deref().unwrap_or("-"))
+        }
+    }
+}
+
+fn summarize_server_event(event: &ServerEvent) -> String {
+    match event {
+        ServerEvent::ExecStarted { exec_id, node_id, .. } => format!("start {} {}", node_id, exec_id),
+        ServerEvent::ExecFinished { exec_id, node_id, exit_code, .. } => {
+            format!("finish {} {} code={}", node_id, exec_id, exit_code.map(|code| code.to_string()).unwrap_or_else(|| "null".to_string()))
+        }
+        ServerEvent::PortActivity { node_id, port, bytes, .. } => format!("port {}.{:?} bytes={}", node_id, port, bytes),
+        ServerEvent::NodeOutput { node_id, port, data_base64, .. } => {
+            format!("out {}.{:?} b64={}", node_id, port, data_base64.len())
+        }
+        ServerEvent::StreamChunk { from_node_id, to_node_id, port, data_base64, .. } => {
+            format!("chunk {}->{}.{:?} b64={}", from_node_id, to_node_id, port, data_base64.len())
+        }
+        ServerEvent::DisplayUpdate { node_id, data_base64, completed, .. } => {
+            format!("display {} b64={} done={}", node_id, data_base64.len(), completed)
+        }
+        ServerEvent::ExecutionStopped { exec_id, .. } => format!("stopped {}", exec_id),
+        ServerEvent::Error { message, .. } => format!("error {}", message),
+    }
+}
+
+fn debug_ws_line(direction: &str, summary: String) {
+    let line = format!("ws{} {}", direction, summary);
+    debug!("{}", line.chars().take(100).collect::<String>());
 }
 
 fn current_ms() -> u64 {

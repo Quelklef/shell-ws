@@ -220,7 +220,7 @@ export default function ShellNode({ data }: NodeProps) {
   ]);
 
   return (
-    <div className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""}`}>
+    <div className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""}`}>
       {leftPorts.map(({ key, port, activeAt }, index) => {
         const active = activeAt ? Date.now() - activeAt < 800 : false;
         return (
@@ -292,10 +292,21 @@ export default function ShellNode({ data }: NodeProps) {
         </button>
         <div className="node-meta">
           <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
+          {model.kind === "formula" && (
+            <button
+              type="button"
+              className={`node-kind-icon-button nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
+              title="formula syntax help"
+              aria-label="formula syntax help"
+              onClick={() => setShowFormulaHelp((current) => !current)}
+            >
+              ?
+            </button>
+          )}
           {(model.kind === "display" || model.kind === "passthru") && (
             <button
               type="button"
-              className="node-kind-convert nodrag nopan"
+              className="node-kind-icon-button nodrag nopan"
               title={model.kind === "display" ? "convert to passthru" : "convert to display"}
               aria-label={model.kind === "display" ? "convert to passthru" : "convert to display"}
               onClick={() => typedData.onConvertKind(model.id, model.kind === "display" ? "passthru" : "display")}
@@ -498,17 +509,6 @@ export default function ShellNode({ data }: NodeProps) {
 
         {model.kind === "formula" && (
           <div className="formula-shell">
-            <div className="formula-header">
-              <button
-                type="button"
-                className={`formula-help-bubble nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
-                onClick={() => setShowFormulaHelp((current) => !current)}
-                title="formula syntax help"
-                aria-label="formula syntax help"
-              >
-                ?
-              </button>
-            </div>
             {showFormulaHelp && (
               <div className="formula-help-panel nodrag nopan">
                 <pre>{FORMULA_SYNTAX_OVERVIEW}</pre>
