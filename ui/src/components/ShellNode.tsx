@@ -2,9 +2,11 @@ import CodeMirror from "@uiw/react-codemirror";
 import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
+import katex from "katex";
 import { Handle, NodeResizer, Position, type NodeProps } from "@xyflow/react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { analyzeFormula, FORMULA_SYNTAX_OVERVIEW } from "../lib/formula";
 import { renderDisplay } from "../lib/format";
 import { ACTIONS } from "../lib/actionIcons";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
@@ -110,8 +112,10 @@ export default function ShellNode({ data, selected }: NodeProps) {
     model.uiState?.openPreviewTabs ??
     (model.uiState?.activePreviewTab ? [model.uiState.activePreviewTab] : []);
   const scriptEditorRef = useRef<HTMLDivElement | null>(null);
+  const formulaEditorRef = useRef<HTMLTextAreaElement | null>(null);
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditingComment, setIsEditingComment] = useState(false);
+  const [showFormulaHelp, setShowFormulaHelp] = useState(false);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const getVisiblePreview = (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port];
   const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
@@ -119,8 +123,10 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port));
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
+  const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
+  const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
 
-  const syncEditorHeight = (key: "script" | "args" | "text" | "description", height: number) => {
+  const syncEditorHeight = (key: "script" | "args" | "text" | "description" | "formula", height: number) => {
     const currentHeight = model.uiState?.editorHeights?.[key];
     if (currentHeight && Math.abs(currentHeight - height) < 1) {
       return;
@@ -143,6 +149,18 @@ export default function ShellNode({ data, selected }: NodeProps) {
     }
     const observer = new ResizeObserver(() => {
       syncEditorHeight("script", element.getBoundingClientRect().height);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
+
+  useEffect(() => {
+    const element = formulaEditorRef.current;
+    if (!element) {
+      return;
+    }
+    const observer = new ResizeObserver(() => {
+      syncEditorHeight("formula", element.getBoundingClientRect().height);
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -429,6 +447,42 @@ export default function ShellNode({ data, selected }: NodeProps) {
             onWheelCapture={(event) => event.stopPropagation()}
             onChange={(event) => typedData.onUpdate(model.id, { text: event.target.value })}
           />
+        )}
+
+        {model.kind === "formula" && (
+          <div className="formula-shell">
+            <div className="formula-header">
+              <div className="display-label">formula</div>
+              <button
+                type="button"
+                className={`formula-help-bubble nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
+                onClick={() => setShowFormulaHelp((current) => !current)}
+                title="formula syntax help"
+                aria-label="formula syntax help"
+              >
+                ?
+              </button>
+            </div>
+            {showFormulaHelp && (
+              <div className="formula-help-panel nodrag nopan">
+                <pre>{FORMULA_SYNTAX_OVERVIEW}</pre>
+              </div>
+            )}
+            <textarea
+              ref={formulaEditorRef}
+              className={`script-editor formula-editor nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`}
+              style={{ height: model.uiState?.editorHeights?.formula ?? 84 }}
+              value={model.formula ?? ""}
+              placeholder="$1 + 1"
+              onWheelCapture={(event) => event.stopPropagation()}
+              onChange={(event) => typedData.onUpdate(model.id, { formula: event.target.value })}
+            />
+            {formulaAnalysis.ok ? (
+              <div className="formula-preview nodrag nopan" dangerouslySetInnerHTML={{ __html: formulaHtml ?? "" }} />
+            ) : (
+              <div className="node-inline-error">{formulaAnalysis.error}</div>
+            )}
+          </div>
         )}
 
         {model.kind === "html" && (

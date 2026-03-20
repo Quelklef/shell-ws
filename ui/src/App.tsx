@@ -74,7 +74,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     title: "",
     comment: "",
     position: { x: 140 + count * 30, y: 140 + count * 24 },
-    size: { width: 320, height: (kind === "html" ? 300 : kind === "ai_script" ? 320 : 230) + 156 },
+    size: { width: 320, height: (kind === "html" ? 300 : kind === "ai_script" ? 320 : kind === "formula" ? 280 : 230) + 156 },
     shell: "bash",
     script: kind === "script" ? "printf 'hello\n'" : kind === "ai_script" ? "" : null,
     description: kind === "ai_script" ? "" : null,
@@ -82,6 +82,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     path: kind === "exec" || kind === "file" ? "" : null,
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
+    formula: kind === "formula" ? "$1 + 1" : null,
     materializedValues: {},
     autoRun: null,
     uiState: { openPreviewTabs: previewOpenByDefault },
@@ -98,6 +99,7 @@ function paletteGroups(): {
       items: [
         { kind: "text", label: "text", help: "Emit literal text on stdout." },
         { kind: "file", label: "file", help: "Read a file path and emit its bytes." },
+        { kind: "formula", label: "formula", help: "Evaluate a math expression from argv inputs." },
       ],
     },
     {
