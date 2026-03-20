@@ -121,7 +121,8 @@ export default function ShellNode({ data, selected }: NodeProps) {
   const htmlContent = new TextDecoder().decode(htmlBytes);
   // Display sinks always show their stdout preview even though stdout is not wireable.
   const forcedOpenPreviewTabs = model.kind === "display" ? ["stdout"] : [];
-  const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port) || forcedOpenPreviewTabs.includes(port));
+  const isForcedPreviewTab = (port: string) => forcedOpenPreviewTabs.includes(port);
+  const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port) || isForcedPreviewTab(port));
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
@@ -546,7 +547,7 @@ export default function ShellNode({ data, selected }: NodeProps) {
                 onWheelCapture={(event) => event.stopPropagation()}
               >
                 <div className="display-label">
-                  {port} · {renderedPreview.label}
+                  {isForcedPreviewTab(port) ? renderedPreview.label : `${port} · ${renderedPreview.label}`}
                 </div>
                 {renderedPreview.content}
               </div>
