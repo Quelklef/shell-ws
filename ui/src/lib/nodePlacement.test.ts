@@ -7,14 +7,14 @@ function rect(x: number, y: number, width = 320, height = 220): PlacementRect {
 }
 
 describe("chooseNodePosition", () => {
-  it("keeps a centered placement when the area is free", () => {
+  it("keeps a centered placement when nearby edges are already clear", () => {
     expect(chooseNodePosition({ x: 100, y: 120 }, { width: 320, height: 220 }, [])).toEqual({
       x: 100,
       y: 120,
     });
   });
 
-  it("moves a new node away from an occupied placement", () => {
+  it("nudges only enough to clear parallel edges", () => {
     const next = chooseNodePosition(
       { x: 100, y: 120 },
       { width: 320, height: 220 },
@@ -22,9 +22,10 @@ describe("chooseNodePosition", () => {
     );
 
     expect(next).not.toEqual({ x: 100, y: 120 });
+    expect(Math.abs(next.x - 100) + Math.abs(next.y - 120)).toBe(40);
   });
 
-  it("avoids stacking repeated additions at the same desired position", () => {
+  it("keeps repeated additions distinct without large jumps", () => {
     const existing: PlacementRect[] = [];
     const seen = new Set<string>();
 
@@ -39,5 +40,8 @@ describe("chooseNodePosition", () => {
     }
 
     expect(seen.size).toBe(4);
+    for (const item of existing) {
+      expect(Math.abs(item.position.x - 100) + Math.abs(item.position.y - 120)).toBeLessThanOrEqual(80);
+    }
   });
 });

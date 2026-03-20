@@ -3,44 +3,90 @@ export type PlacementRect = {
   size: { width: number; height: number };
 };
 
-const PLACEMENT_GAP_X = 56;
-const PLACEMENT_GAP_Y = 40;
-const PLACEMENT_STEP_X = 52;
-const PLACEMENT_STEP_Y = 38;
-const MAX_PLACEMENT_RING = 8;
+const EDGE_CLEARANCE = 20;
+const OFFSET_STEP = 4;
+const MAX_OFFSET_RING = 20;
 
-function overlapsWithGap(candidate: PlacementRect, existing: PlacementRect) {
-  const candidateLeft = candidate.position.x;
-  const candidateTop = candidate.position.y;
-  const candidateRight = candidateLeft + candidate.size.width;
-  const candidateBottom = candidateTop + candidate.size.height;
-  const existingLeft = existing.position.x - PLACEMENT_GAP_X;
-  const existingTop = existing.position.y - PLACEMENT_GAP_Y;
-  const existingRight = existing.position.x + existing.size.width + PLACEMENT_GAP_X;
-  const existingBottom = existing.position.y + existing.size.height + PLACEMENT_GAP_Y;
+type Segment = {
+  start: number;
+  end: number;
+};
 
-  return !(
-    candidateRight <= existingLeft ||
-    candidateLeft >= existingRight ||
-    candidateBottom <= existingTop ||
-    candidateTop >= existingBottom
-  );
+function overlaps(a: Segment, b: Segment) {
+  return a.start < b.end && b.start < a.end;
+}
+
+function verticalEdges(rect: PlacementRect) {
+  const x = rect.position.x;
+  const y = rect.position.y;
+  return {
+    positions: [x, x + rect.size.width],
+    span: { start: y, end: y + rect.size.height },
+  };
+}
+
+function horizontalEdges(rect: PlacementRect) {
+  const x = rect.position.x;
+  const y = rect.position.y;
+  return {
+    positions: [y, y + rect.size.height],
+    span: { start: x, end: x + rect.size.width },
+  };
+}
+
+function hasParallelEdgeConflict(candidate: PlacementRect, existing: PlacementRect) {
+  const candidateVertical = verticalEdges(candidate);
+  const existingVertical = verticalEdges(existing);
+  if (overlaps(candidateVertical.span, existingVertical.span)) {
+    for (const candidateEdge of candidateVertical.positions) {
+      for (const existingEdge of existingVertical.positions) {
+        if (Math.abs(candidateEdge - existingEdge) < EDGE_CLEARANCE) {
+          return true;
+        }
+      }
+    }
+  }
+
+  const candidateHorizontal = horizontalEdges(candidate);
+  const existingHorizontal = horizontalEdges(existing);
+  if (overlaps(candidateHorizontal.span, existingHorizontal.span)) {
+    for (const candidateEdge of candidateHorizontal.positions) {
+      for (const existingEdge of existingHorizontal.positions) {
+        if (Math.abs(candidateEdge - existingEdge) < EDGE_CLEARANCE) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 function candidateOffsets() {
   const offsets = [{ x: 0, y: 0 }];
-  for (let ring = 1; ring <= MAX_PLACEMENT_RING; ring += 1) {
-    for (let gridY = -ring; gridY <= ring; gridY += 1) {
-      for (let gridX = -ring; gridX <= ring; gridX += 1) {
-        if (Math.max(Math.abs(gridX), Math.abs(gridY)) !== ring) {
+  for (let ring = 1; ring <= MAX_OFFSET_RING; ring += 1) {
+    const limit = ring * OFFSET_STEP;
+    const ringOffsets: Array<{ x: number; y: number }> = [];
+    for (let y = -limit; y <= limit; y += OFFSET_STEP) {
+      for (let x = -limit; x <= limit; x += OFFSET_STEP) {
+        if (Math.max(Math.abs(x), Math.abs(y)) !== limit) {
           continue;
         }
-        offsets.push({
-          x: gridX * PLACEMENT_STEP_X,
-          y: gridY * PLACEMENT_STEP_Y,
-        });
+        ringOffsets.push({ x, y });
       }
     }
+    ringOffsets.sort((left, right) => {
+      const distance = Math.abs(left.x) + Math.abs(left.y) - (Math.abs(right.x) + Math.abs(right.y));
+      if (distance !== 0) {
+        return distance;
+      }
+      const horizontalBias = Math.abs(left.y) - Math.abs(right.y);
+      if (horizontalBias !== 0) {
+        return horizontalBias;
+      }
+      return left.x - right.x || left.y - right.y;
+    });
+    offsets.push(...ringOffsets);
   }
   return offsets;
 }
@@ -60,7 +106,7 @@ export function chooseNodePosition(
       },
       size,
     };
-    if (!existing.some((item) => overlapsWithGap(candidate, item))) {
+    if (!existing.some((item) => hasParallelEdgeConflict(candidate, item))) {
       return candidate.position;
     }
   }
