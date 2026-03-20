@@ -15,6 +15,7 @@
   --accent-soft: #f2c078;
   --danger: #de5d5d;
   --success: #8fcf9e;
+  --selection: #8fcf9e;
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
   font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
 }
@@ -48,6 +49,12 @@ textarea {
   place-items: center;
   height: 100%;
   color: var(--text-soft);
+}
+
+
+.react-flow {
+  --xy-selection-background-color: color-mix(in srgb, var(--selection) 14%, transparent);
+  --xy-selection-border: 1px solid color-mix(in srgb, var(--selection) 82%, white 18%);
 }
 
 .app-shell {
@@ -328,8 +335,8 @@ textarea {
 }
 
 .shell-node.is-selection-preview .node-card {
-  border-color: rgba(143, 207, 158, 0.48);
-  box-shadow: 0 0 0 1px rgba(143, 207, 158, 0.22), var(--shadow);
+  border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
 }
 
 .node-toolbar {
@@ -915,7 +922,13 @@ textarea {
 }
 
 @media (max-width: 980px) {
-  .app-shell {
+  
+.react-flow {
+  --xy-selection-background-color: color-mix(in srgb, var(--selection) 14%, transparent);
+  --xy-selection-border: 1px solid color-mix(in srgb, var(--selection) 82%, white 18%);
+}
+
+.app-shell {
     grid-template-columns: 1fr;
     grid-template-rows: auto 1fr;
   }
