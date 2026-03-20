@@ -256,6 +256,14 @@ pub struct NodeUiState {
     pub editor_heights: HashMap<String, f64>,
     #[serde(default)]
     pub previews: HashMap<String, LegacyPersistedDisplayState>,
+    #[serde(default)]
+    pub pane_sizes: HashMap<String, PaneSizeState>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PaneSizeState {
+    pub height: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -567,6 +575,49 @@ mod tests {
         assert_eq!(workspace.nodes.len(), 1);
         assert_eq!(workspace.nodes[0].id, "text-1");
         assert!(workspace.edges.is_empty());
+    }
+
+    #[test]
+    fn node_ui_state_preserves_pane_sizes() {
+        let workspace: Workspace = serde_json::from_value(serde_json::json!({
+            "id": "w",
+            "name": "w",
+            "cwd": "/tmp",
+            "nodes": [
+                {
+                    "id": "text-1",
+                    "kind": "text",
+                    "title": "",
+                    "comment": "",
+                    "position": {"x": 0, "y": 0},
+                    "size": {"width": 1, "height": 1},
+                    "text": "",
+                    "uiState": {
+                        "paneSizes": {
+                            "text": {"height": 381.0}
+                        }
+                    }
+                }
+            ],
+            "edges": [],
+            "ui": {}
+        }))
+        .expect("deserialize workspace with pane sizes");
+
+        assert_eq!(
+            workspace.nodes[0]
+                .ui_state
+                .pane_sizes
+                .get("text")
+                .and_then(|value| value.height),
+            Some(381.0)
+        );
+
+        let serialized = serde_json::to_value(&workspace).expect("serialize workspace with pane sizes");
+        assert_eq!(
+            serialized["nodes"][0]["uiState"]["paneSizes"]["text"]["height"],
+            serde_json::json!(381.0)
+        );
     }
 
     #[test]
