@@ -32,7 +32,8 @@ export default function ResizablePane({
   const widthSettleTimerRef = useRef<number | null>(null);
   const layoutFrameRef = useRef<number | null>(null);
   const observedHeightRef = useRef(height);
-  const nodeChromeWidthRef = useRef(0);
+  const stableNodeWidthRef = useRef(width);
+  const stablePaneWidthRef = useRef(width);
 
   useLayoutEffect(() => {
     const element = elementRef.current;
@@ -76,13 +77,18 @@ export default function ResizablePane({
       notifyLayout();
 
       if (!element.style.width) {
-        nodeChromeWidthRef.current = Math.max(0, nodeWidthFromDom - widthFromDom);
+        stableNodeWidthRef.current = nodeWidthFromDom;
+        stablePaneWidthRef.current = widthFromDom;
       }
 
-      // The resizable pane lives inside the node card, so the persisted node width must include
-      // the surrounding non-pane chrome as well as the pane itself.
+      // Capture the width delta from the last stable, non-resizing layout and replay that delta
+      // during the native resize. Reading the live node width here would be wrong because the
+      // pane resizes immediately in the browser while the React-controlled node width still lags.
       if (element.style.width) {
-        const nextWidth = Math.max(MIN_NODE_WIDTH, widthFromDom + nodeChromeWidthRef.current);
+        const nextWidth = Math.max(
+          MIN_NODE_WIDTH,
+          stableNodeWidthRef.current + (widthFromDom - stablePaneWidthRef.current),
+        );
         if (Math.abs(nextWidth - width) >= 1) {
           onWidthChange(nextWidth);
         }
