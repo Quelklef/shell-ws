@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from "react";
 
-import { MIN_NODE_WIDTH } from "../lib/paneLayout";
+import { MIN_RESIZABLE_PANE_WIDTH } from "../lib/paneLayout";
 
 const MAX_OBSERVED_PANE_HEIGHT = 2000;
 
@@ -85,10 +85,9 @@ export default function ResizablePane({
       // during the native resize. Reading the live node width here would be wrong because the
       // pane resizes immediately in the browser while the React-controlled node width still lags.
       if (element.style.width) {
-        const nextWidth = Math.max(
-          MIN_NODE_WIDTH,
-          stableNodeWidthRef.current + (widthFromDom - stablePaneWidthRef.current),
-        );
+        const paneWidth = Math.max(MIN_RESIZABLE_PANE_WIDTH, widthFromDom);
+        const nextWidth =
+          stableNodeWidthRef.current + (paneWidth - stablePaneWidthRef.current);
         if (Math.abs(nextWidth - width) >= 1) {
           onWidthChange(nextWidth);
         }
@@ -147,7 +146,7 @@ export default function ResizablePane({
     <div
       ref={elementRef}
       className={className}
-      style={{ minHeight }}
+      style={{ minHeight, minWidth: MIN_RESIZABLE_PANE_WIDTH }}
       onWheelCapture={(event) => event.stopPropagation()}
     >
       {children}

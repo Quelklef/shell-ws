@@ -1,6 +1,6 @@
 import type { NodeUiState } from "./types";
 
-export const MIN_NODE_WIDTH = 260;
+export const MIN_RESIZABLE_PANE_WIDTH = 150;
 
 const DEFAULT_PANE_HEIGHTS: Record<string, number> = {
   "ai-prompt": 72,
