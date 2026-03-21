@@ -1964,7 +1964,12 @@ function WorkspaceCanvas() {
                   draggable={false}
                   value={item.name}
                   onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
-                  onClick={(event) => event.stopPropagation()}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    if (event.detail >= 3) {
+                      event.currentTarget.select();
+                    }
+                  }}
                   onPointerDown={(event) => event.stopPropagation()}
                   aria-label="tucked subgraph name"
                 />

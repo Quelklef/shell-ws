@@ -473,10 +473,23 @@ textarea {
 .tuckspace-name {
   width: 100%;
   border: 0;
+  outline: none;
   background: rgba(9, 11, 13, 0.54);
   color: var(--text);
   padding: 10px 12px;
   font-size: 12px;
+  cursor: text;
+  transition: background 140ms ease, box-shadow 140ms ease;
+}
+
+.tuckspace-name:active {
+  background: rgba(14, 17, 19, 0.7);
+}
+
+.tuckspace-name:focus,
+.tuckspace-name:focus-visible {
+  background: rgba(14, 17, 19, 0.78);
+  box-shadow: inset 0 0 0 1px rgba(242, 192, 120, 0.62);
 }
 
 .toast {
