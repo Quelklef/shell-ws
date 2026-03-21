@@ -2367,20 +2367,41 @@ function WorkspaceCanvas() {
                       >
                         <PencilIcon />
                       </button>
-                      <button
-                        type="button"
-                        className={`workspace-list-action workspace-list-delete${confirmingDelete ? " is-confirming" : ""}`}
-                        onClick={() =>
-                          confirmingDelete
-                            ? void confirmDeleteWorkspace(workspace.id)
-                            : requestWorkspaceDelete(workspace.id)
-                        }
-                        disabled={workspaceSwitching || activeExecutions.length > 0}
-                        title={confirmingDelete ? "confirm delete workspace" : "delete workspace"}
-                        aria-label={confirmingDelete ? "confirm delete workspace" : "delete workspace"}
-                      >
-                        <TrashIcon />
-                      </button>
+                      {confirmingDelete ? (
+                        <>
+                          <button
+                            type="button"
+                            className="workspace-list-confirm workspace-list-delete is-confirming"
+                            onClick={() => void confirmDeleteWorkspace(workspace.id)}
+                            disabled={workspaceSwitching || activeExecutions.length > 0}
+                            title="confirm delete workspace"
+                            aria-label="confirm delete workspace"
+                          >
+                            confirm delete
+                          </button>
+                          <button
+                            type="button"
+                            className="workspace-list-confirm-cancel"
+                            onClick={() => setWorkspaceDeleteConfirmingId(null)}
+                            disabled={workspaceSwitching}
+                            title="cancel workspace deletion"
+                            aria-label="cancel workspace deletion"
+                          >
+                            cancel
+                          </button>
+                        </>
+                      ) : (
+                        <button
+                          type="button"
+                          className="workspace-list-action workspace-list-delete"
+                          onClick={() => requestWorkspaceDelete(workspace.id)}
+                          disabled={workspaceSwitching || activeExecutions.length > 0}
+                          title="delete workspace"
+                          aria-label="delete workspace"
+                        >
+                          <TrashIcon />
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

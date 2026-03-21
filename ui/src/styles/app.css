@@ -416,6 +416,29 @@ textarea {
   color: #ffd2d2;
 }
 
+.workspace-list-confirm,
+.workspace-list-confirm-cancel {
+  border: 1px solid var(--line);
+  background: rgba(244, 236, 223, 0.04);
+  color: var(--text-soft);
+  border-radius: 6px;
+  min-height: 28px;
+  padding: 0 9px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.workspace-list-confirm {
+  border-color: rgba(222, 93, 93, 0.72);
+  background: rgba(79, 24, 24, 0.72);
+  color: #ffd2d2;
+}
+
 .workspace-picker-select:disabled,
 .workspace-picker-create:disabled,
 .workspace-picker-delete:disabled,
