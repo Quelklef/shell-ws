@@ -1,5 +1,6 @@
 mod execution;
 mod formula;
+mod id;
 mod model;
 mod openai;
 mod tuckspace_store;
@@ -18,6 +19,7 @@ use axum::{
     Json, Router,
 };
 use execution::ExecutionManager;
+use id::encode_workspace_id;
 use futures::{sink::SinkExt, stream::StreamExt};
 use model::{ClientEvent, ServerEvent, TuckedSubgraph, Workspace};
 use openai::{generate_script, GenerateScriptRequest, GenerateScriptResponse};
@@ -25,7 +27,6 @@ use tokio::sync::broadcast;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{debug, error, info};
 use tuckspace_store::TuckspaceStore;
-use uuid::Uuid;
 use workspace_store::WorkspaceStore;
 
 #[derive(Clone)]
@@ -112,11 +113,12 @@ async fn list_workspaces(
 
 async fn create_workspace(State(state): State<AppState>) -> Result<Json<Workspace>, AppError> {
     let mut workspace = Workspace::empty();
-    workspace.id = Uuid::new_v4().to_string();
-    workspace.name = format!("Workspace {}", &workspace.id[..8]);
+    workspace.id = encode_workspace_id();
+    let label = workspace.id.rsplit('-').next().unwrap_or(&workspace.id);
+    workspace.name = format!("Workspace {}", &label[..label.len().min(8)]);
     workspace.created_at = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
+        .map(|duration| duration.as_millis() as u64)
         .unwrap_or(0);
     workspace.sort_order = state.store.next_sort_order().await?;
     state.store.save(&workspace.id, &workspace).await?;

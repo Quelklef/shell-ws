@@ -17,7 +17,6 @@ use tokio::{
 };
 use tokio_util::sync::CancellationToken;
 use tracing::error;
-use uuid::Uuid;
 
 use crate::formula;
 use crate::model::{
@@ -119,7 +118,7 @@ impl ExecutionManager {
     }
 
     pub fn run(&self, workspace: Workspace, node_id: String, action: ExecutionAction) -> String {
-        let exec_id = Uuid::new_v4().to_string();
+        let exec_id = crate::id::encode_exec_id();
         let cancel = CancellationToken::new();
         let manager = self.clone();
         let node_for_handle = node_id.clone();

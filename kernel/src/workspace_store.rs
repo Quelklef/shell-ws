@@ -2,6 +2,7 @@ use std::path::{Path, PathBuf};
 
 use tokio::fs;
 
+use crate::id::normalize_workspace_ids;
 use crate::model::{sanitize_workspace_json_value, Workspace, WorkspaceSummary};
 
 #[derive(Clone)]
@@ -18,7 +19,37 @@ impl WorkspaceStore {
             let workspace = Workspace::example();
             store.save(&workspace.id, &workspace).await?;
         }
+        store.migrate_ids().await?;
         Ok(store)
+    }
+
+    async fn migrate_ids(&self) -> Result<(), std::io::Error> {
+        let mut entries = fs::read_dir(&self.base_dir).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let content = fs::read(&path).await?;
+            let mut value: serde_json::Value = serde_json::from_slice(&content).map_err(std::io::Error::other)?;
+            sanitize_workspace_json_value(&mut value);
+            let mut workspace: Workspace = serde_json::from_value(value).map_err(std::io::Error::other)?;
+            let original_id = workspace.id.clone();
+            let changed = normalize_workspace_ids(&mut workspace);
+            let file_id = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default().to_string();
+            if changed || workspace.id != file_id {
+                self.save(&workspace.id, &workspace).await?;
+                if file_id != workspace.id && fs::try_exists(&path).await? {
+                    fs::remove_file(&path).await?;
+                }
+            } else if original_id != file_id {
+                self.save(&workspace.id, &workspace).await?;
+                if fs::try_exists(&path).await? {
+                    fs::remove_file(&path).await?;
+                }
+            }
+        }
+        Ok(())
     }
 
     pub async fn list(&self) -> Result<Vec<WorkspaceSummary>, std::io::Error> {

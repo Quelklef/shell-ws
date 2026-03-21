@@ -1,5 +1,31 @@
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
 export function encodeId(prefix: string) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+  return `${prefix}-${encodeBase62(BigInt(Date.now()))}-${encodeBase62(randomU128())}`;
+}
+
+function randomU128() {
+  const bytes = new Uint8Array(16);
+  globalThis.crypto.getRandomValues(bytes);
+  let value = 0n;
+  for (const byte of bytes) {
+    value = (value << 8n) | BigInt(byte);
+  }
+  return value;
+}
+
+function encodeBase62(value: bigint) {
+  if (value === 0n) {
+    return "0";
+  }
+  let current = value;
+  let encoded = "";
+  while (current > 0n) {
+    const digit = Number(current % 62n);
+    encoded = BASE62[digit] + encoded;
+    current /= 62n;
+  }
+  return encoded;
 }
 
 export function toBase64(bytes: Uint8Array) {

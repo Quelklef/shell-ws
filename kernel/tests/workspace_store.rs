@@ -7,8 +7,8 @@ async fn workspace_store_bootstraps_default_workspace() {
     let store = WorkspaceStore::new(temp_dir.path()).await.expect("store");
     let workspaces = store.list().await.expect("list");
     assert_eq!(workspaces.len(), 1);
-    let workspace: Workspace = store.load("default").await.expect("workspace");
-    assert_eq!(workspace.id, "default");
+    let workspace: Workspace = store.load(&workspaces[0].id).await.expect("workspace");
+    assert!(workspace.id.starts_with("workspace-"));
 }
 
 
@@ -30,13 +30,14 @@ async fn workspace_store_lists_and_reorders_by_sort_order() {
     store.save(&beta.id, &beta).await.expect("save beta");
 
     let listed = store.list().await.expect("list before reorder");
-    assert_eq!(listed.iter().map(|workspace| workspace.id.as_str()).collect::<Vec<_>>(), vec!["default", "alpha", "beta"]);
+    let bootstrapped_id = listed[0].id.clone();
+    assert_eq!(listed.iter().map(|workspace| workspace.id.as_str()).collect::<Vec<_>>(), vec![bootstrapped_id.as_str(), "alpha", "beta"]);
 
     store
-        .reorder(&["beta".to_string(), "default".to_string(), "alpha".to_string()])
+        .reorder(&["beta".to_string(), bootstrapped_id.clone(), "alpha".to_string()])
         .await
         .expect("reorder workspaces");
 
     let reordered = store.list().await.expect("list after reorder");
-    assert_eq!(reordered.iter().map(|workspace| workspace.id.as_str()).collect::<Vec<_>>(), vec!["beta", "default", "alpha"]);
+    assert_eq!(reordered.iter().map(|workspace| workspace.id.as_str()).collect::<Vec<_>>(), vec!["beta", bootstrapped_id.as_str(), "alpha"]);
 }
