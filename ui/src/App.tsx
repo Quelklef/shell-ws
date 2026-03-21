@@ -1886,14 +1886,17 @@ function WorkspaceCanvas() {
               >
                 <button type="button" className="tuckspace-restore" onClick={() => untuckSubgraph(item.id)}>
                   <TuckspacePreview item={item} />
+                  <span className="tuckspace-divider" aria-hidden="true" />
+                  <input
+                    className="tuckspace-name"
+                    draggable={false}
+                    value={item.name}
+                    onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
+                    onClick={(event) => event.stopPropagation()}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    aria-label="tucked subgraph name"
+                  />
                 </button>
-                <input
-                  className="tuckspace-name"
-                  draggable={false}
-                  value={item.name}
-                  onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
-                  aria-label="tucked subgraph name"
-                />
               </article>
             ))
           )}
