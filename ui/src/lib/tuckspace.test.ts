@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTopologyPreview, defaultTuckedName, emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspace, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./tuckspace";
+import { buildTopologyPreview, defaultTuckedName, emptyTuckedSubgraph, isClosedSelection, isGeneratedTuckedName, isNamedTuckEntry, isTuckspaceShell, recenterTuckedNodes, reorderTuckspace, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./tuckspace";
 
 describe("tuckspace helpers", () => {
   it("detects closed selections", () => {
@@ -72,6 +72,13 @@ describe("tuckspace helpers", () => {
   it("only keeps named shells on restore", () => {
     expect(shouldKeepShellOnRestore({ id: "a", name: "A", userNamed: true, nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } })).toBe(true);
     expect(shouldKeepShellOnRestore({ id: "b", name: "Subgraph 1", userNamed: false, nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } })).toBe(false);
+  });
+
+  it("treats custom names as named even if the explicit flag is missing", () => {
+    expect(isGeneratedTuckedName("Subgraph 12")).toBe(true);
+    expect(isGeneratedTuckedName("Build cache")).toBe(false);
+    expect(isNamedTuckEntry({ id: "a", name: "Build cache", userNamed: false, nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } })).toBe(true);
+    expect(shouldKeepShellOnRestore({ id: "b", name: "Build cache", userNamed: false, nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } })).toBe(true);
   });
 
   it("normalizes topology preview coordinates", () => {
