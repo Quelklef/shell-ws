@@ -349,33 +349,60 @@ type AutorunHandle = {
 };
 
 function TuckspacePreview({ item }: { item: TuckedSubgraph }) {
-  const positions = new Map(item.topologyPreview.nodes.map((node) => [node.id, node]));
+  const layout = useMemo(() => {
+    if (item.nodes.length === 0) {
+      return { nodes: [], edges: [] };
+    }
+    const padding = 8;
+    const innerWidth = 84;
+    const innerHeight = 56;
+    const minX = Math.min(...item.nodes.map((node) => node.position.x));
+    const minY = Math.min(...item.nodes.map((node) => node.position.y));
+    const maxX = Math.max(...item.nodes.map((node) => node.position.x + node.size.width));
+    const maxY = Math.max(...item.nodes.map((node) => node.position.y + node.size.height));
+    const spanX = Math.max(1, maxX - minX);
+    const spanY = Math.max(1, maxY - minY);
+    const scale = Math.min(innerWidth / spanX, innerHeight / spanY);
+    const nodes = item.nodes.map((node) => ({
+      id: node.id,
+      x: padding + (node.position.x - minX) * scale,
+      y: padding + (node.position.y - minY) * scale,
+      width: Math.max(8, node.size.width * scale),
+      height: Math.max(8, node.size.height * scale),
+    }));
+    const nodeById = new Map(nodes.map((node) => [node.id, node]));
+    const edges = item.edges.flatMap((edge) => {
+      const from = nodeById.get(edge.from.nodeId);
+      const to = nodeById.get(edge.to.nodeId);
+      if (!from || !to) {
+        return [];
+      }
+      const sourceOnRight = from.x + from.width / 2 <= to.x + to.width / 2;
+      const startX = sourceOnRight ? from.x + from.width : from.x;
+      const endX = sourceOnRight ? to.x : to.x + to.width;
+      const startY = from.y + from.height / 2;
+      const endY = to.y + to.height / 2;
+      const midX = (startX + endX) / 2;
+      return [{ id: edge.id, d: `M ${startX} ${startY} L ${midX} ${startY} L ${midX} ${endY} L ${endX} ${endY}` }];
+    });
+    return { nodes, edges };
+  }, [item.edges, item.nodes]);
+
   return (
     <svg className="tuckspace-preview" viewBox="0 0 100 72" aria-hidden="true">
-      {item.topologyPreview.edges.map((edge) => {
-        const from = positions.get(edge.fromNodeId);
-        const to = positions.get(edge.toNodeId);
-        if (!from || !to) {
-          return null;
-        }
-        return (
-          <line
-            key={edge.id}
-            className="tuckspace-preview-edge"
-            x1={from.x}
-            y1={from.y}
-            x2={to.x}
-            y2={to.y}
-          />
-        );
-      })}
-      {item.topologyPreview.nodes.map((node) => (
-        <circle
+      {layout.edges.map((edge) => (
+        <path key={edge.id} className="tuckspace-preview-edge" d={edge.d} />
+      ))}
+      {layout.nodes.map((node) => (
+        <rect
           key={node.id}
-          className={`tuckspace-preview-node tuckspace-preview-node-${node.kind}`}
-          cx={node.x}
-          cy={node.y}
-          r="5"
+          className="tuckspace-preview-node"
+          x={node.x}
+          y={node.y}
+          width={node.width}
+          height={node.height}
+          rx="4"
+          ry="4"
         />
       ))}
     </svg>

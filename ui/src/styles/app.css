@@ -378,28 +378,17 @@ textarea {
 }
 
 .tuckspace-preview-edge {
-  stroke: rgba(244, 236, 223, 0.26);
+  fill: none;
+  stroke: rgba(244, 236, 223, 0.22);
   stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .tuckspace-preview-node {
-  fill: rgba(242, 192, 120, 0.84);
-  stroke: rgba(17, 19, 22, 0.92);
+  fill: rgba(29, 34, 38, 0.96);
+  stroke: rgba(244, 236, 223, 0.22);
   stroke-width: 1.5;
-}
-
-.tuckspace-preview-node-text,
-.tuckspace-preview-node-file {
-  fill: rgba(120, 184, 242, 0.88);
-}
-
-.tuckspace-preview-node-html,
-.tuckspace-preview-node-display {
-  fill: rgba(143, 207, 158, 0.88);
-}
-
-.tuckspace-preview-node-formula {
-  fill: rgba(240, 138, 93, 0.88);
 }
 
 .tuckspace-meta {
