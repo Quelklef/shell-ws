@@ -60,7 +60,7 @@ import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
-import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
+import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -1618,11 +1618,20 @@ function WorkspaceCanvas() {
       setToast('cannot restore subgraph: ids already exist in this workspace');
       return;
     }
+    const canvasBounds = canvasRef.current?.getBoundingClientRect();
+    const viewportCenter = canvasBounds
+      ? flow.screenToFlowPosition({
+          x: canvasBounds.left + canvasBounds.width / 2,
+          y: canvasBounds.top + canvasBounds.height / 2,
+        })
+      : null;
+    // Restored subgraphs should appear where the user is currently looking, not at their old absolute coordinates.
+    const restoredModels = viewportCenter ? recenterTuckedNodes(item.nodes, viewportCenter) : item.nodes;
     const nextTuckspace = shouldKeepShellOnRestore(item)
       ? tuckspaceRef.current.map((entry) => (entry.id === tuckId ? emptyTuckedSubgraph(entry) : entry))
       : tuckspaceRef.current.filter((entry) => entry.id !== tuckId);
     const restoredRuntime = Object.fromEntries(
-      item.nodes.map((node) => [
+      restoredModels.map((node) => [
         node.id,
         {
           running: false,
@@ -1638,7 +1647,7 @@ function WorkspaceCanvas() {
     const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering));
     const nextEdges = [...edgesRef.current, ...restoredEdges];
     const preservedNodes = nodesRef.current.map((node) => ({ ...node, selected: false }));
-    const restoredNodes = item.nodes.map((node) => ({
+    const restoredNodes = restoredModels.map((node) => ({
       ...toFlowNode(node, nextRuntime, generationRef.current, handlers, nextEdges),
       selected: true,
     }));
@@ -1648,7 +1657,7 @@ function WorkspaceCanvas() {
     setEdges(nextEdges);
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
-  }, [cycleEdgeBuffering, deleteEdge, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
+  }, [cycleEdgeBuffering, deleteEdge, flow, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
 
   const reorderTuckedSubgraphs = useCallback((draggedId: string, targetId: string, position: "before" | "after") => {
     const nextTuckspace = reorderTuckspaceWithPlacement(tuckspaceRef.current, draggedId, targetId, position);

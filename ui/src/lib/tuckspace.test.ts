@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTopologyPreview, defaultTuckedName, emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./tuckspace";
+import { buildTopologyPreview, defaultTuckedName, emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspace, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./tuckspace";
 
 describe("tuckspace helpers", () => {
   it("detects closed selections", () => {
@@ -55,6 +55,17 @@ describe("tuckspace helpers", () => {
     expect(next[0]?.name).toBe("Saved shell");
     expect(next[0]?.nodes).toHaveLength(1);
     expect(isTuckspaceShell(emptyTuckedSubgraph(next[0]!))).toBe(true);
+  });
+
+  it("recenters tucked nodes around a target point", () => {
+    const nodes = recenterTuckedNodes([
+      { id: "a", kind: "text", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 100, height: 50 } },
+      { id: "b", kind: "script", title: "", comment: "", position: { x: 300, y: 150 }, size: { width: 100, height: 50 } },
+    ] as never, { x: 500, y: 400 });
+    expect(nodes.map((node) => node.position)).toEqual([
+      { x: 300, y: 300 },
+      { x: 600, y: 450 },
+    ]);
   });
 
 

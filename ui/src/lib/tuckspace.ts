@@ -126,6 +126,30 @@ export function emptyTuckedSubgraph(item: TuckedSubgraph): TuckedSubgraph {
   };
 }
 
+export function recenterTuckedNodes(
+  nodes: readonly WorkspaceNode[],
+  center: { x: number; y: number },
+): WorkspaceNode[] {
+  if (nodes.length === 0) {
+    return [];
+  }
+  const minX = Math.min(...nodes.map((node) => node.position.x));
+  const minY = Math.min(...nodes.map((node) => node.position.y));
+  const maxX = Math.max(...nodes.map((node) => node.position.x + node.size.width));
+  const maxY = Math.max(...nodes.map((node) => node.position.y + node.size.height));
+  const currentCenterX = (minX + maxX) / 2;
+  const currentCenterY = (minY + maxY) / 2;
+  const dx = center.x - currentCenterX;
+  const dy = center.y - currentCenterY;
+  return nodes.map((node) => ({
+    ...node,
+    position: {
+      x: node.position.x + dx,
+      y: node.position.y + dy,
+    },
+  }));
+}
+
 
 export function reorderTuckspaceWithPlacement(
   items: readonly TuckedSubgraph[],
