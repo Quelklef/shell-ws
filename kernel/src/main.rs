@@ -6,7 +6,11 @@ mod openai;
 mod tuckspace_store;
 mod workspace_store;
 
-use std::{net::SocketAddr, process::Stdio};
+use std::{
+    net::SocketAddr,
+    path::{Path as FsPath, PathBuf},
+    process::Stdio,
+};
 
 use axum::{
     extract::{
@@ -19,11 +23,11 @@ use axum::{
     Json, Router,
 };
 use execution::ExecutionManager;
-use id::encode_workspace_id;
 use futures::{sink::SinkExt, stream::StreamExt};
+use id::encode_workspace_id;
 use model::{ClientEvent, ServerEvent, TuckedSubgraph, Workspace};
 use openai::{generate_script, GenerateScriptRequest, GenerateScriptResponse};
-use tokio::sync::broadcast;
+use tokio::{fs, sync::broadcast};
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{debug, error, info};
 use tuckspace_store::TuckspaceStore;
@@ -40,6 +44,82 @@ struct AppState {
     openai_client: reqwest::Client,
 }
 
+const APP_DATA_DIR: &str = "app-data";
+const APP_WORKSPACES_DIR: &str = "workspaces";
+const APP_TUCKSPACE_FILE: &str = "tuckspace.json";
+const LEGACY_DATA_DIR: &str = "workspace-data";
+
+fn app_data_dir(root: &FsPath) -> PathBuf {
+    root.join(APP_DATA_DIR)
+}
+
+fn app_workspaces_dir(root: &FsPath) -> PathBuf {
+    app_data_dir(root).join(APP_WORKSPACES_DIR)
+}
+
+fn app_tuckspace_path(root: &FsPath) -> PathBuf {
+    app_data_dir(root).join(APP_TUCKSPACE_FILE)
+}
+
+fn legacy_data_dir(root: &FsPath) -> PathBuf {
+    root.join(LEGACY_DATA_DIR)
+}
+
+async fn prepare_app_data_layout(root: &FsPath) -> Result<(PathBuf, PathBuf), std::io::Error> {
+    let workspaces_dir = app_workspaces_dir(root);
+    let tuckspace_path = app_tuckspace_path(root);
+    migrate_legacy_data(root, &workspaces_dir, &tuckspace_path).await?;
+    fs::create_dir_all(&workspaces_dir).await?;
+    Ok((workspaces_dir, tuckspace_path))
+}
+
+async fn migrate_legacy_data(
+    root: &FsPath,
+    workspaces_dir: &FsPath,
+    tuckspace_path: &FsPath,
+) -> Result<(), std::io::Error> {
+    let legacy_dir = legacy_data_dir(root);
+    if !fs::try_exists(&legacy_dir).await? {
+        return Ok(());
+    }
+    // Move legacy workspace-data files into the new app-data layout without
+    // overwriting any newer app-data files. Losing either side here would drop
+    // user data, so migration only fills missing destinations.
+    fs::create_dir_all(workspaces_dir).await?;
+    let parent_dir = tuckspace_path
+        .parent()
+        .ok_or_else(|| std::io::Error::other("tuckspace path missing parent"))?;
+    fs::create_dir_all(parent_dir).await?;
+    let mut entries = fs::read_dir(&legacy_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            continue;
+        }
+        let Some(file_name) = path.file_name() else {
+            continue;
+        };
+        let destination = if file_name == APP_TUCKSPACE_FILE {
+            tuckspace_path.to_path_buf()
+        } else {
+            workspaces_dir.join(file_name)
+        };
+        if fs::try_exists(&destination).await? {
+            continue;
+        }
+        fs::rename(&path, &destination).await?;
+    }
+    if fs::read_dir(&legacy_dir)
+        .await?
+        .next_entry()
+        .await?
+        .is_none()
+    {
+        fs::remove_dir(&legacy_dir).await?;
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() {
     tracing_subscriber::fmt()
@@ -49,10 +129,13 @@ async fn main() {
         )
         .init();
 
-    let store = WorkspaceStore::new("workspace-data")
+    let (workspaces_dir, tuckspace_path) = prepare_app_data_layout(FsPath::new("."))
+        .await
+        .expect("prepare app data");
+    let store = WorkspaceStore::new(&workspaces_dir)
         .await
         .expect("workspace store");
-    let tuckspace_store = TuckspaceStore::new("workspace-data/tuckspace.json", &store)
+    let tuckspace_store = TuckspaceStore::new(&tuckspace_path, &store)
         .await
         .expect("tuckspace store");
     let (broadcaster, _) = broadcast::channel(512);
@@ -155,8 +238,9 @@ async fn save_workspace(
     Ok(StatusCode::NO_CONTENT)
 }
 
-
-async fn get_tuckspace(State(state): State<AppState>) -> Result<Json<Vec<TuckedSubgraph>>, AppError> {
+async fn get_tuckspace(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<TuckedSubgraph>>, AppError> {
     Ok(Json(state.tuckspace_store.load().await?))
 }
 
@@ -175,7 +259,6 @@ async fn delete_workspace(
     state.store.delete(&id).await?;
     Ok(StatusCode::NO_CONTENT)
 }
-
 
 #[derive(serde::Serialize)]
 struct PickedPath {
@@ -201,7 +284,10 @@ async fn generate_script_handler(
 
 async fn pick_file_path() -> Result<String, AppError> {
     let pickers: [(&str, &[&str]); 3] = [
-        ("zenity", &["--file-selection", "--title=shell-ws file picker"]),
+        (
+            "zenity",
+            &["--file-selection", "--title=shell-ws file picker"],
+        ),
         ("kdialog", &["--getopenfilename"]),
         ("yad", &["--file-selection", "--title=shell-ws file picker"]),
     ];
@@ -334,28 +420,80 @@ impl IntoResponse for AppError {
 
 fn summarize_client_event(event: &ClientEvent) -> String {
     match event {
-        ClientEvent::RunNode { node_id, action, .. } => format!("run {:?} {}", action, node_id),
+        ClientEvent::RunNode {
+            node_id, action, ..
+        } => format!("run {:?} {}", action, node_id),
         ClientEvent::StopExecution { exec_id, node_id } => {
-            format!("stop exec={} node={}", exec_id.as_deref().unwrap_or("-"), node_id.as_deref().unwrap_or("-"))
+            format!(
+                "stop exec={} node={}",
+                exec_id.as_deref().unwrap_or("-"),
+                node_id.as_deref().unwrap_or("-")
+            )
         }
     }
 }
 
 fn summarize_server_event(event: &ServerEvent) -> String {
     match event {
-        ServerEvent::ExecStarted { exec_id, node_id, .. } => format!("start {} {}", node_id, exec_id),
-        ServerEvent::ExecFinished { exec_id, node_id, exit_code, .. } => {
-            format!("finish {} {} code={}", node_id, exec_id, exit_code.map(|code| code.to_string()).unwrap_or_else(|| "null".to_string()))
+        ServerEvent::ExecStarted {
+            exec_id, node_id, ..
+        } => format!("start {} {}", node_id, exec_id),
+        ServerEvent::ExecFinished {
+            exec_id,
+            node_id,
+            exit_code,
+            ..
+        } => {
+            format!(
+                "finish {} {} code={}",
+                node_id,
+                exec_id,
+                exit_code
+                    .map(|code| code.to_string())
+                    .unwrap_or_else(|| "null".to_string())
+            )
         }
-        ServerEvent::PortActivity { node_id, port, bytes, .. } => format!("port {}.{:?} bytes={}", node_id, port, bytes),
-        ServerEvent::NodeOutput { node_id, port, data_base64, .. } => {
+        ServerEvent::PortActivity {
+            node_id,
+            port,
+            bytes,
+            ..
+        } => format!("port {}.{:?} bytes={}", node_id, port, bytes),
+        ServerEvent::NodeOutput {
+            node_id,
+            port,
+            data_base64,
+            ..
+        } => {
             format!("out {}.{:?} b64={}", node_id, port, data_base64.len())
         }
-        ServerEvent::StreamChunk { from_node_id, to_node_id, port, data_base64, .. } => {
-            format!("chunk {}->{}.{:?} b64={}", from_node_id, to_node_id, port, data_base64.len())
+        ServerEvent::StreamChunk {
+            from_node_id,
+            to_node_id,
+            port,
+            data_base64,
+            ..
+        } => {
+            format!(
+                "chunk {}->{}.{:?} b64={}",
+                from_node_id,
+                to_node_id,
+                port,
+                data_base64.len()
+            )
         }
-        ServerEvent::DisplayUpdate { node_id, data_base64, completed, .. } => {
-            format!("display {} b64={} done={}", node_id, data_base64.len(), completed)
+        ServerEvent::DisplayUpdate {
+            node_id,
+            data_base64,
+            completed,
+            ..
+        } => {
+            format!(
+                "display {} b64={} done={}",
+                node_id,
+                data_base64.len(),
+                completed
+            )
         }
         ServerEvent::ExecutionStopped { exec_id, .. } => format!("stopped {}", exec_id),
         ServerEvent::Error { message, .. } => format!("error {}", message),
@@ -373,4 +511,36 @@ fn current_ms() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as u64
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn prepare_app_data_layout_moves_legacy_workspace_files() {
+        let temp_dir = tempfile::tempdir().expect("tempdir");
+        let legacy_dir = temp_dir.path().join(LEGACY_DATA_DIR);
+        fs::create_dir_all(&legacy_dir).await.expect("legacy dir");
+        fs::write(legacy_dir.join("alpha.json"), b"{}")
+            .await
+            .expect("workspace file");
+        fs::write(legacy_dir.join(APP_TUCKSPACE_FILE), b"[]")
+            .await
+            .expect("tuckspace file");
+
+        let (workspaces_dir, tuckspace_path) = prepare_app_data_layout(temp_dir.path())
+            .await
+            .expect("prepare app data");
+
+        assert!(fs::try_exists(workspaces_dir.join("alpha.json"))
+            .await
+            .expect("workspace exists"));
+        assert!(fs::try_exists(&tuckspace_path)
+            .await
+            .expect("tuckspace exists"));
+        assert!(!fs::try_exists(legacy_dir.join("alpha.json"))
+            .await
+            .expect("legacy workspace gone"));
+    }
 }

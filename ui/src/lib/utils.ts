@@ -1,11 +1,11 @@
 const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
 export function encodeId(prefix: string) {
-  return `${prefix}-${encodeBase62(BigInt(Date.now()))}-${encodeBase62(randomU128())}`;
+  return `${prefix}-${encodeBase62(BigInt(Math.floor(Date.now() / 1000)))}-${encodeBase62(randomU64())}`;
 }
 
-function randomU128() {
-  const bytes = new Uint8Array(16);
+function randomU64() {
+  const bytes = new Uint8Array(8);
   globalThis.crypto.getRandomValues(bytes);
   let value = 0n;
   for (const byte of bytes) {

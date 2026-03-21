@@ -16,6 +16,9 @@ impl TuckspaceStore {
         workspace_store: &crate::workspace_store::WorkspaceStore,
     ) -> Result<Self, std::io::Error> {
         let path = path.as_ref().to_path_buf();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
         let store = Self { path };
         store.ensure_initialized(workspace_store).await?;
         store.migrate_ids().await?;
@@ -34,6 +37,9 @@ impl TuckspaceStore {
     }
 
     pub async fn save(&self, tuckspace: &[TuckedSubgraph]) -> Result<(), std::io::Error> {
+        if let Some(parent) = self.path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
         let content = serde_json::to_vec_pretty(tuckspace).map_err(std::io::Error::other)?;
         fs::write(&self.path, content).await
     }

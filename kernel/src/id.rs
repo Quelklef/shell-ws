@@ -7,8 +7,8 @@ const BASE62: &[u8; 62] = b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop
 pub fn encode_compact_id(prefix: &str) -> String {
     format!(
         "{prefix}-{}-{}",
-        encode_u64_base62(now_millis()),
-        encode_u128_base62(uuid::Uuid::new_v4().as_u128())
+        encode_u64_base62(now_seconds()),
+        encode_u64_base62(uuid::Uuid::new_v4().as_u128() as u64)
     )
 }
 
@@ -59,7 +59,12 @@ pub fn normalize_tucked_subgraph_ids(item: &mut TuckedSubgraph) -> bool {
                 preview_node.id = next_id.clone();
             }
         }
-        for (preview_edge, edge) in item.topology_preview.edges.iter_mut().zip(item.edges.iter()) {
+        for (preview_edge, edge) in item
+            .topology_preview
+            .edges
+            .iter_mut()
+            .zip(item.edges.iter())
+        {
             preview_edge.id = edge.id.clone();
             preview_edge.from_node_id = edge.from.node_id.clone();
             preview_edge.to_node_id = edge.to.node_id.clone();
@@ -68,8 +73,13 @@ pub fn normalize_tucked_subgraph_ids(item: &mut TuckedSubgraph) -> bool {
     changed
 }
 
-fn normalize_graph_ids(nodes: &mut [Node], edges: &mut [Edge]) -> Option<std::collections::HashMap<String, String>> {
-    let needs_rewrite = nodes.iter().any(|node| !is_normalized_node_id(&node.id, &node.kind))
+fn normalize_graph_ids(
+    nodes: &mut [Node],
+    edges: &mut [Edge],
+) -> Option<std::collections::HashMap<String, String>> {
+    let needs_rewrite = nodes
+        .iter()
+        .any(|node| !is_normalized_node_id(&node.id, &node.kind))
         || edges.iter().any(|edge| !is_normalized_edge_id(&edge.id));
     if !needs_rewrite {
         return None;
@@ -130,21 +140,19 @@ fn is_normalized_id(id: &str, prefix_parts: &[&str]) -> bool {
     if parts[..prefix_parts.len()] != *prefix_parts {
         return false;
     }
-    parts[prefix_parts.len()..].iter().all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_alphanumeric()))
+    parts[prefix_parts.len()..]
+        .iter()
+        .all(|part| !part.is_empty() && part.chars().all(|ch| ch.is_ascii_alphanumeric()))
 }
 
-fn now_millis() -> u64 {
+fn now_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
+        .map(|duration| duration.as_secs())
         .unwrap_or(0)
 }
 
-fn encode_u64_base62(value: u64) -> String {
-    encode_u128_base62(value as u128)
-}
-
-fn encode_u128_base62(mut value: u128) -> String {
+fn encode_u64_base62(mut value: u64) -> String {
     if value == 0 {
         return "0".to_string();
     }
@@ -160,7 +168,10 @@ fn encode_u128_base62(mut value: u128) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{BufferingMode, Edge, Node, NodeKind, PortKind, PortRef, Position, Size, TopologyPreview, TuckedSubgraph, Workspace, WorkspaceUi};
+    use crate::model::{
+        BufferingMode, Edge, Node, NodeKind, PortKind, PortRef, Position, Size, TopologyPreview,
+        TuckedSubgraph, Workspace, WorkspaceUi,
+    };
     use std::collections::HashMap;
 
     fn node(kind: NodeKind, id: &str) -> Node {
@@ -170,7 +181,10 @@ mod tests {
             title: String::new(),
             comment: String::new(),
             position: Position { x: 0.0, y: 0.0 },
-            size: Size { width: 10.0, height: 10.0 },
+            size: Size {
+                width: 10.0,
+                height: 10.0,
+            },
             shell: Some("bash".to_string()),
             script: None,
             description: None,
@@ -207,8 +221,16 @@ mod tests {
             nodes: vec![node(NodeKind::Text, "text-1")],
             edges: vec![Edge {
                 id: "edge-1".to_string(),
-                from: PortRef { node_id: "text-1".to_string(), port: PortKind::Stdout, slot: None },
-                to: PortRef { node_id: "text-1".to_string(), port: PortKind::Stdin, slot: None },
+                from: PortRef {
+                    node_id: "text-1".to_string(),
+                    port: PortKind::Stdout,
+                    slot: None,
+                },
+                to: PortRef {
+                    node_id: "text-1".to_string(),
+                    port: PortKind::Stdin,
+                    slot: None,
+                },
                 buffering: BufferingMode::Unbuffered,
             }],
             tuckspace: vec![TuckedSubgraph {
@@ -226,6 +248,8 @@ mod tests {
         assert!(workspace.nodes[0].id.starts_with("node-text-"));
         assert_eq!(workspace.edges[0].from.node_id, workspace.nodes[0].id);
         assert!(workspace.tuckspace[0].id.starts_with("tuck-"));
-        assert!(workspace.tuckspace[0].nodes[0].id.starts_with("node-script-"));
+        assert!(workspace.tuckspace[0].nodes[0]
+            .id
+            .starts_with("node-script-"));
     }
 }
