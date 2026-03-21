@@ -60,7 +60,7 @@ import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
-import { emptyTuckedSubgraph, isClosedSelection, isNamedTuckEntry, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
+import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -1685,7 +1685,7 @@ function WorkspaceCanvas() {
       : 'selection must be closed before tucking';
 
   const tuckspaceShells = useMemo(
-    () => tuckspace.filter((item) => isTuckspaceShell(item) && isNamedTuckEntry(item)),
+    () => tuckspace.filter((item) => isTuckspaceShell(item) && item.userNamed),
     [tuckspace],
   );
 

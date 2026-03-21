@@ -81,18 +81,8 @@ export function isTuckspaceShell(item: TuckedSubgraph) {
   return item.nodes.length === 0 && item.edges.length === 0;
 }
 
-export function isGeneratedTuckedName(name: string) {
-  return /^Subgraph \d+$/.test(name);
-}
-
-export function isNamedTuckEntry(item: TuckedSubgraph) {
-  return Boolean(item.userNamed) || !isGeneratedTuckedName(item.name);
-}
-
 export function shouldKeepShellOnRestore(item: TuckedSubgraph) {
-  // Falling back to the visible name prevents accidental shell deletion if the explicit
-  // userNamed bit is ever missing or stale for a custom-named tucked entry.
-  return isNamedTuckEntry(item);
+  return Boolean(item.userNamed);
 }
 
 export function storeTuckedSubgraph(
