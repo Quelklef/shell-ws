@@ -238,6 +238,19 @@ textarea {
   color: var(--text-soft);
 }
 
+.sidebar-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sidebar-section-title {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-soft);
+}
+
 .sidebar-input {
   width: 100%;
   border: 1px solid rgba(244, 236, 223, 0.12);
@@ -318,10 +331,10 @@ textarea {
 }
 
 .workspace-list-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  align-items: center;
+  align-items: stretch;
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.44);
   color: var(--text);
@@ -360,6 +373,7 @@ textarea {
 
 .workspace-list-actions {
   display: flex;
+  justify-content: flex-end;
   gap: 4px;
 }
 
@@ -368,11 +382,20 @@ textarea {
   background: rgba(244, 236, 223, 0.04);
   color: var(--text-soft);
   border-radius: 6px;
-  padding: 5px 7px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
   cursor: pointer;
+}
+
+.workspace-list-action svg {
+  width: 14px;
+  height: 14px;
+  display: block;
 }
 
 .workspace-list-delete {

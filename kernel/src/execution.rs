@@ -1674,6 +1674,7 @@ mod tests {
         Workspace {
             id: "test".to_string(),
             name: "test".to_string(),
+            created_at: 0,
             cwd: default_cwd(),
             openai_api_key: Some(String::new()),
             nodes,

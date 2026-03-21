@@ -74,6 +74,7 @@ export interface TuckedSubgraph {
 export interface Workspace {
   id: string;
   name: string;
+  createdAt?: number;
   cwd: string;
   openaiApiKey: string;
   nodes: WorkspaceNode[];
@@ -123,6 +124,7 @@ export interface WorkspaceEdge {
 export interface WorkspaceSummary {
   id: string;
   name: string;
+  createdAt?: number;
 }
 
 export type ClientEvent =

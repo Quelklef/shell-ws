@@ -3,32 +3,32 @@ import { describe, expect, it } from "vitest";
 import { sortWorkspaceSummaries, upsertWorkspaceSummary } from "./workspaceList";
 
 describe("workspaceList", () => {
-  it("sorts workspaces by name", () => {
+  it("sorts workspaces by creation time before name", () => {
     expect(sortWorkspaceSummaries([
-      { id: "b", name: "Beta" },
-      { id: "a", name: "Alpha" },
+      { id: "b", name: "Beta", createdAt: 2 },
+      { id: "a", name: "Alpha", createdAt: 1 },
     ])).toEqual([
-      { id: "a", name: "Alpha" },
-      { id: "b", name: "Beta" },
+      { id: "a", name: "Alpha", createdAt: 1 },
+      { id: "b", name: "Beta", createdAt: 2 },
     ]);
   });
 
   it("upserts by id and keeps the list sorted", () => {
     expect(upsertWorkspaceSummary([
-      { id: "b", name: "Beta" },
-      { id: "a", name: "Alpha" },
-    ], { id: "c", name: "Able" })).toEqual([
-      { id: "c", name: "Able" },
-      { id: "a", name: "Alpha" },
-      { id: "b", name: "Beta" },
+      { id: "b", name: "Beta", createdAt: 2 },
+      { id: "a", name: "Alpha", createdAt: 1 },
+    ], { id: "c", name: "Able", createdAt: 3 })).toEqual([
+      { id: "a", name: "Alpha", createdAt: 1 },
+      { id: "b", name: "Beta", createdAt: 2 },
+      { id: "c", name: "Able", createdAt: 3 },
     ]);
 
     expect(upsertWorkspaceSummary([
-      { id: "b", name: "Beta" },
-      { id: "a", name: "Alpha" },
-    ], { id: "b", name: "Bravo" })).toEqual([
-      { id: "a", name: "Alpha" },
-      { id: "b", name: "Bravo" },
+      { id: "b", name: "Beta", createdAt: 2 },
+      { id: "a", name: "Alpha", createdAt: 1 },
+    ], { id: "b", name: "Bravo", createdAt: 2 })).toEqual([
+      { id: "a", name: "Alpha", createdAt: 1 },
+      { id: "b", name: "Bravo", createdAt: 2 },
     ]);
   });
 });

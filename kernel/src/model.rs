@@ -6,6 +6,8 @@ use std::collections::HashMap;
 pub struct Workspace {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub created_at: u64,
     #[serde(default = "default_cwd")]
     pub cwd: String,
     #[serde(default)]
@@ -21,10 +23,25 @@ pub struct Workspace {
 }
 
 impl Workspace {
+    pub fn empty() -> Self {
+        Self {
+            id: "default".to_string(),
+            name: "Workspace".to_string(),
+            created_at: 0,
+            cwd: default_cwd(),
+            openai_api_key: Some(String::new()),
+            nodes: Vec::new(),
+            edges: Vec::new(),
+            tuckspace: Vec::new(),
+            ui: WorkspaceUi::default(),
+        }
+    }
+
     pub fn example() -> Self {
         Self {
             id: "default".to_string(),
             name: "Shell WS".to_string(),
+            created_at: 0,
             cwd: default_cwd(),
             openai_api_key: Some(String::new()),
             nodes: vec![
@@ -461,9 +478,12 @@ pub enum ServerEvent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceSummary {
     pub id: String,
     pub name: String,
+    #[serde(default)]
+    pub created_at: u64,
 }
 
 pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {

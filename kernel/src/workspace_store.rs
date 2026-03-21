@@ -40,9 +40,10 @@ impl WorkspaceStore {
             workspaces.push(WorkspaceSummary {
                 id: workspace.id,
                 name: workspace.name,
+                created_at: workspace.created_at,
             });
         }
-        workspaces.sort_by(|left, right| left.name.cmp(&right.name));
+        workspaces.sort_by(|left, right| left.created_at.cmp(&right.created_at).then_with(|| left.name.cmp(&right.name)));
         Ok(workspaces)
     }
 

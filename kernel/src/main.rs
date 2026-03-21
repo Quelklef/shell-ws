@@ -110,9 +110,13 @@ async fn list_workspaces(
 }
 
 async fn create_workspace(State(state): State<AppState>) -> Result<Json<Workspace>, AppError> {
-    let mut workspace = Workspace::example();
+    let mut workspace = Workspace::empty();
     workspace.id = Uuid::new_v4().to_string();
     workspace.name = format!("Workspace {}", &workspace.id[..8]);
+    workspace.created_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0);
     state.store.save(&workspace.id, &workspace).await?;
     Ok(Json(workspace))
 }

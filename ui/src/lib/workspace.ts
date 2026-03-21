@@ -144,6 +144,7 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
   const sanitized = sanitizeNodesAndEdges(workspace.nodes ?? [], workspace.edges ?? []);
   return {
     ...workspace,
+    createdAt: workspace.createdAt ?? 0,
     cwd: workspace.cwd ?? "",
     openaiApiKey: workspace.openaiApiKey ?? "",
     ui: normalizeWorkspaceUi(workspace.ui),

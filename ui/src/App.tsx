@@ -488,6 +488,38 @@ function TuckspaceCardBody({
   );
 }
 
+function PencilIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M10.9 2.1a1.5 1.5 0 0 1 2.1 0l.9.9a1.5 1.5 0 0 1 0 2.1L6 13H3v-3l7.9-7.9Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="m9.8 3.2 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M3.5 4.5h9M6.2 2.5h3.6m-5 2 .5 8a1 1 0 0 0 1 .9h3.4a1 1 0 0 0 1-.9l.5-8"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path d="M6.7 6.4v4.2M9.3 6.4v4.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+    </svg>
+  );
+}
+
 function SidebarPanel({
   id,
   label,
@@ -536,7 +568,7 @@ function WorkspaceCanvas() {
   const [workspaceSummaries, setWorkspaceSummaries] = useState<WorkspaceSummary[]>([]);
   const [workspaceMeta, setWorkspaceMeta] = useState<Pick<
     Workspace,
-    "id" | "name" | "cwd" | "openaiApiKey" | "ui"
+    "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"
   > | null>(null);
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
   const [workspaceDeleteConfirmingId, setWorkspaceDeleteConfirmingId] = useState<string | null>(null);
@@ -572,7 +604,7 @@ function WorkspaceCanvas() {
     startY: 0,
     moved: false,
   });
-  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "cwd" | "openaiApiKey" | "ui"> | null>(
+  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"> | null>(
     null,
   );
   const nodesRef = useRef<FlowNode[]>([]);
@@ -667,7 +699,7 @@ function WorkspaceCanvas() {
       edgesArg: FlowEdge[] = edgesRef.current,
       metaArg: Pick<
         Workspace,
-        "id" | "name" | "cwd" | "openaiApiKey" | "ui"
+        "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"
       > | null = workspaceMetaRef.current,
       runtimeArg: Record<string, NodeRuntimeState> = runtimeRef.current,
     ): Workspace | null => {
@@ -677,6 +709,7 @@ function WorkspaceCanvas() {
       return {
         id: metaArg.id,
         name: metaArg.name,
+        createdAt: metaArg.createdAt,
         ui: metaArg.ui,
         cwd: metaArg.cwd,
         openaiApiKey: metaArg.openaiApiKey,
@@ -767,7 +800,7 @@ function WorkspaceCanvas() {
             saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
           }
           setWorkspaceSummaries((summaries) =>
-            upsertWorkspaceSummary(summaries, { id: next.id, name: next.name }),
+            upsertWorkspaceSummary(summaries, { id: next.id, name: next.name, createdAt: next.createdAt }),
           );
           return next;
         });
@@ -777,7 +810,7 @@ function WorkspaceCanvas() {
           const nextWorkspace = { ...workspace, name: trimmed };
           await saveWorkspace(nextWorkspace);
           setWorkspaceSummaries((summaries) =>
-            upsertWorkspaceSummary(summaries, { id: workspaceId, name: trimmed }),
+            upsertWorkspaceSummary(summaries, { id: workspaceId, name: trimmed, createdAt: workspace.createdAt }),
           );
         } catch (error) {
           setToast(String(error));
@@ -1560,6 +1593,7 @@ function WorkspaceCanvas() {
     const nextMeta = {
       id: loaded.id,
       name: loaded.name,
+      createdAt: loaded.createdAt,
       cwd: loaded.cwd,
       openaiApiKey: loaded.openaiApiKey,
       ui,
@@ -1598,7 +1632,7 @@ function WorkspaceCanvas() {
     runtimeRef.current = loadedRuntime;
 
     setWorkspaceSummaries((current) =>
-      upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name }),
+      upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name, createdAt: loaded.createdAt }),
     );
     setWorkspaceMeta(nextMeta);
     setGeneration({});
@@ -2243,146 +2277,160 @@ function WorkspaceCanvas() {
     >
       <SidebarPanel
         id="workspaces"
-        label="workspaces"
+        label="kernel, workspaces, settings"
         collapsed={workspaceMeta.ui.sidebars.workspaces.collapsed}
         side="left"
         onToggle={() => toggleSidebar("workspaces")}
         onResizeStart={(event) => startSidebarResize("workspaces", "left", event)}
       >
         <div className="sidebar-controls-group">
-          <div className="workspace-list">
-            {workspaceSummaries.map((workspace) => {
-              const renaming = workspaceRenamingId === workspace.id;
-              const confirmingDelete = workspaceDeleteConfirmingId === workspace.id;
-              return (
-                <div
-                  key={workspace.id}
-                  className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}`}
-                >
-                  {renaming ? (
-                    <input
-                      className="sidebar-input workspace-list-name-input"
-                      value={workspaceRenameDraft}
-                      autoFocus
-                      onChange={(event) => setWorkspaceRenameDraft(event.target.value)}
-                      onBlur={() => void renameWorkspace(workspace.id, workspaceRenameDraft)}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") {
-                          void renameWorkspace(workspace.id, workspaceRenameDraft);
-                        } else if (event.key === "Escape") {
-                          setWorkspaceRenamingId(null);
-                          setWorkspaceRenameDraft("");
-                        }
-                      }}
-                      title="workspace name"
-                    />
-                  ) : (
-                    <button
-                      type="button"
-                      className="workspace-list-select"
-                      onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
-                      disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
-                      title={workspace.name}
-                    >
-                      {workspace.name}
-                    </button>
-                  )}
-                  <div className="workspace-list-actions">
-                    <button
-                      type="button"
-                      className="workspace-list-action"
-                      onClick={() => beginWorkspaceRename(workspace.id, workspace.name)}
-                      disabled={workspaceSwitching}
-                      title="rename workspace"
-                    >
-                      ren
-                    </button>
-                    <button
-                      type="button"
-                      className={`workspace-list-action workspace-list-delete${confirmingDelete ? " is-confirming" : ""}`}
-                      onClick={() =>
-                        confirmingDelete
-                          ? void confirmDeleteWorkspace(workspace.id)
-                          : requestWorkspaceDelete(workspace.id)
-                      }
-                      disabled={workspaceSwitching || activeExecutions.length > 0}
-                      title={confirmingDelete ? "confirm delete workspace" : "delete workspace"}
-                    >
-                      {confirmingDelete ? "sure?" : "del"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="workspace-picker-row workspace-picker-row-single">
-            <button
-              type="button"
-              className="workspace-picker-create"
-              onClick={() => void createAndLoadWorkspace()}
-              disabled={sidebarActionsDisabled}
-              title="create a new workspace"
-            >
-              new
-            </button>
-          </div>
-          {workspaceSwitching ? (
-            <span className="workspace-picker-status">switching…</span>
-          ) : activeExecutions.length > 0 ? (
-            <span className="workspace-picker-status">stop runs to switch or delete</span>
-          ) : null}
-        </div>
-        <div className="sidebar-divider" />
-        <div className="sidebar-controls-group">
-          <span className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}>
-            {kernelConnected ? "kernel online" : "kernel offline"}
-          </span>
-          <label className="sidebar-field">
-            <span className="sidebar-label">pwd</span>
-            <input
-              className="sidebar-input"
-              value={workspaceMeta.cwd}
-              onChange={(event) => updateWorkspaceCwd(event.target.value)}
-              placeholder="/home/user"
-              title="working directory for kernel execution"
-              disabled={workspaceSwitching}
-            />
-          </label>
-          <label className="sidebar-field">
-            <span className="sidebar-label">openai api key</span>
-            <input
-              className="sidebar-input"
-              type="password"
-              autoComplete="off"
-              value={workspaceMeta.openaiApiKey}
-              onChange={(event) => updateWorkspaceApiKey(event.target.value)}
-              placeholder="sk-..."
-              title="workspace-level OpenAI API key for AI SCRIPT generation"
-              disabled={workspaceSwitching}
-            />
-          </label>
-          {activeExecutions.length > 0 && (
-            <section className="execution-panel">
-              <div className="node-palette-label">running</div>
-              <div className="execution-list">
-                {activeExecutions.map((execution) => {
-                  const node = nodes.find((item) => item.id === execution.nodeId);
-                  const label = node?.data.model.comment.trim() || node?.data.model.kind || execution.nodeId;
-                  return (
-                    <div key={execution.execId} className="execution-item">
-                      <div className="execution-text">
-                        <div className="execution-label">{label}</div>
-                        <div className="execution-id">{execution.execId.slice(0, 8)}</div>
+          <section className="sidebar-section">
+            <div className="sidebar-section-title">kernel</div>
+            <span className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}>
+              {kernelConnected ? "kernel online" : "kernel offline"}
+            </span>
+            {activeExecutions.length > 0 && (
+              <section className="execution-panel">
+                <div className="node-palette-label">running</div>
+                <div className="execution-list">
+                  {activeExecutions.map((execution) => {
+                    const node = nodes.find((item) => item.id === execution.nodeId);
+                    const label = node?.data.model.comment.trim() || node?.data.model.kind || execution.nodeId;
+                    return (
+                      <div key={execution.execId} className="execution-item">
+                        <div className="execution-text">
+                          <div className="execution-label">{label}</div>
+                          <div className="execution-id">{execution.execId.slice(0, 8)}</div>
+                        </div>
+                        <button type="button" onClick={() => stopExecution(execution.execId)}>
+                          stop
+                        </button>
                       </div>
-                      <button type="button" onClick={() => stopExecution(execution.execId)}>
-                        stop
+                    );
+                  })}
+                </div>
+              </section>
+            )}
+          </section>
+
+          <div className="sidebar-divider" />
+
+          <section className="sidebar-section">
+            <div className="sidebar-section-title">workspaces</div>
+            <div className="workspace-list">
+              {workspaceSummaries.map((workspace) => {
+                const renaming = workspaceRenamingId === workspace.id;
+                const confirmingDelete = workspaceDeleteConfirmingId === workspace.id;
+                return (
+                  <div
+                    key={workspace.id}
+                    className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}`}
+                  >
+                    {renaming ? (
+                      <input
+                        className="sidebar-input workspace-list-name-input"
+                        value={workspaceRenameDraft}
+                        autoFocus
+                        onChange={(event) => setWorkspaceRenameDraft(event.target.value)}
+                        onBlur={() => void renameWorkspace(workspace.id, workspaceRenameDraft)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            void renameWorkspace(workspace.id, workspaceRenameDraft);
+                          } else if (event.key === "Escape") {
+                            setWorkspaceRenamingId(null);
+                            setWorkspaceRenameDraft("");
+                          }
+                        }}
+                        title="workspace name"
+                      />
+                    ) : (
+                      <button
+                        type="button"
+                        className="workspace-list-select"
+                        onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
+                        disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
+                        title={workspace.name}
+                      >
+                        {workspace.name}
+                      </button>
+                    )}
+                    <div className="workspace-list-actions">
+                      <button
+                        type="button"
+                        className="workspace-list-action"
+                        onClick={() => beginWorkspaceRename(workspace.id, workspace.name)}
+                        disabled={workspaceSwitching}
+                        title="rename workspace"
+                        aria-label="rename workspace"
+                      >
+                        <PencilIcon />
+                      </button>
+                      <button
+                        type="button"
+                        className={`workspace-list-action workspace-list-delete${confirmingDelete ? " is-confirming" : ""}`}
+                        onClick={() =>
+                          confirmingDelete
+                            ? void confirmDeleteWorkspace(workspace.id)
+                            : requestWorkspaceDelete(workspace.id)
+                        }
+                        disabled={workspaceSwitching || activeExecutions.length > 0}
+                        title={confirmingDelete ? "confirm delete workspace" : "delete workspace"}
+                        aria-label={confirmingDelete ? "confirm delete workspace" : "delete workspace"}
+                      >
+                        <TrashIcon />
                       </button>
                     </div>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="workspace-picker-row workspace-picker-row-single">
+              <button
+                type="button"
+                className="workspace-picker-create"
+                onClick={() => void createAndLoadWorkspace()}
+                disabled={sidebarActionsDisabled}
+                title="create a new workspace"
+              >
+                new
+              </button>
+            </div>
+            {workspaceSwitching ? (
+              <span className="workspace-picker-status">switching…</span>
+            ) : activeExecutions.length > 0 ? (
+              <span className="workspace-picker-status">stop runs to switch or delete</span>
+            ) : null}
+          </section>
+
+          <div className="sidebar-divider" />
+
+          <section className="sidebar-section">
+            <div className="sidebar-section-title">settings</div>
+            <label className="sidebar-field">
+              <span className="sidebar-label">pwd</span>
+              <input
+                className="sidebar-input"
+                value={workspaceMeta.cwd}
+                onChange={(event) => updateWorkspaceCwd(event.target.value)}
+                placeholder="/home/user"
+                title="working directory for kernel execution"
+                disabled={workspaceSwitching}
+              />
+            </label>
+            <label className="sidebar-field">
+              <span className="sidebar-label">openai api key</span>
+              <input
+                className="sidebar-input"
+                type="password"
+                autoComplete="off"
+                value={workspaceMeta.openaiApiKey}
+                onChange={(event) => updateWorkspaceApiKey(event.target.value)}
+                placeholder="sk-..."
+                title="workspace-level OpenAI API key for AI SCRIPT generation"
+                disabled={workspaceSwitching}
+              />
+            </label>
+          </section>
         </div>
       </SidebarPanel>
 
