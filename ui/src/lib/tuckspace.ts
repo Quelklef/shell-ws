@@ -125,3 +125,28 @@ export function emptyTuckedSubgraph(item: TuckedSubgraph): TuckedSubgraph {
     topologyPreview: { nodes: [], edges: [] },
   };
 }
+
+
+export function reorderTuckspaceWithPlacement(
+  items: readonly TuckedSubgraph[],
+  draggedId: string,
+  targetId: string,
+  position: "before" | "after",
+) {
+  if (draggedId === targetId) {
+    return [...items];
+  }
+  const draggedIndex = items.findIndex((item) => item.id === draggedId);
+  if (draggedIndex === -1) {
+    return [...items];
+  }
+  const next = [...items];
+  const [dragged] = next.splice(draggedIndex, 1);
+  const targetIndex = next.findIndex((item) => item.id === targetId);
+  if (targetIndex === -1) {
+    return [...items];
+  }
+  const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
+  next.splice(insertIndex, 0, dragged);
+  return next;
+}

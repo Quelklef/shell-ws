@@ -60,7 +60,7 @@ import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
-import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
+import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -409,6 +409,99 @@ function TuckspacePreview({ item }: { item: TuckedSubgraph }) {
   );
 }
 
+
+function TuckspaceHandleDots() {
+  return (
+    <span className="tuckspace-drag-dots" aria-hidden="true">
+      {Array.from({ length: 5 }, (_, index) => (
+        <span key={index} className="tuckspace-drag-dot" />
+      ))}
+    </span>
+  );
+}
+
+function TuckspaceCardBody({
+  item,
+  canPopulate,
+  interactive,
+  onRestore,
+  onPopulate,
+  onDeleteShell,
+  onRename,
+  onStartDrag,
+}: {
+  item: TuckedSubgraph;
+  canPopulate: boolean;
+  interactive: boolean;
+  onRestore?: () => void;
+  onPopulate?: () => void;
+  onDeleteShell?: () => void;
+  onRename?: (value: string) => void;
+  onStartDrag?: (event: Parameters<NonNullable<JSX.IntrinsicElements["button"]["onPointerDown"]>>[0]) => void;
+}) {
+  const shell = isTuckspaceShell(item);
+  return (
+    <>
+      {shell ? (
+        <div className="tuckspace-shell-body">
+          <button
+            type="button"
+            className="tuckspace-shell-action"
+            onClick={onPopulate}
+            disabled={!interactive || !canPopulate}
+            title={canPopulate ? "Populate with subgraph" : "Select a closed subgraph first"}
+          >
+            →
+          </button>
+          <button
+            type="button"
+            className="tuckspace-shell-action tuckspace-shell-delete"
+            onClick={onDeleteShell}
+            disabled={!interactive}
+            title="Delete shell"
+          >
+            ×
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="tuckspace-restore"
+          onClick={onRestore}
+          title="Move to workspace"
+          disabled={!interactive}
+        >
+          <TuckspacePreview item={item} />
+        </button>
+      )}
+      <span className="tuckspace-divider" aria-hidden="true" />
+      <div className="tuckspace-footer">
+        {interactive ? (
+          <input
+            className="tuckspace-name"
+            value={item.name}
+            onChange={(event) => onRename?.(event.target.value)}
+            aria-label="tucked subgraph name"
+          />
+        ) : (
+          <div className="tuckspace-name tuckspace-name-static">{item.name}</div>
+        )}
+      </div>
+      <span className="tuckspace-divider" aria-hidden="true" />
+      <button
+        type="button"
+        className="tuckspace-drag-handle"
+        onPointerDown={onStartDrag}
+        disabled={!interactive}
+        aria-label="Reorder tucked subgraph"
+        title="Reorder"
+      >
+        <TuckspaceHandleDots />
+      </button>
+    </>
+  );
+}
+
 function WorkspaceCanvas() {
   const [workspaceMeta, setWorkspaceMeta] = useState<Pick<
     Workspace,
@@ -422,7 +515,8 @@ function WorkspaceCanvas() {
     { execId: string; nodeId: string }[]
   >([]);
   const [draggedTuckId, setDraggedTuckId] = useState<string | null>(null);
-  const [dropTuckId, setDropTuckId] = useState<string | null>(null);
+  const [tuckDropMarker, setTuckDropMarker] = useState<{ targetId: string; position: "before" | "after" } | null>(null);
+  const [tuckDragPreview, setTuckDragPreview] = useState<{ x: number; y: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
   const [tuckspaceQuery, setTuckspaceQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -453,6 +547,7 @@ function WorkspaceCanvas() {
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
   const tuckspaceRef = useRef<TuckedSubgraph[]>([]);
+  const tuckItemRefs = useRef(new Map<string, HTMLElement>());
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
@@ -1576,8 +1671,8 @@ function WorkspaceCanvas() {
     persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
   }, [cycleEdgeBuffering, deleteEdge, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
 
-  const reorderTuckedSubgraphs = useCallback((draggedId: string, targetId: string) => {
-    const nextTuckspace = reorderTuckspace(tuckspaceRef.current, draggedId, targetId);
+  const reorderTuckedSubgraphs = useCallback((draggedId: string, targetId: string, position: "before" | "after") => {
+    const nextTuckspace = reorderTuckspaceWithPlacement(tuckspaceRef.current, draggedId, targetId, position);
     if (nextTuckspace.every((item, index) => item.id === tuckspaceRef.current[index]?.id)) {
       return;
     }
@@ -1617,6 +1712,86 @@ function WorkspaceCanvas() {
     }
     return tuckspace.filter((item) => item.name.toLowerCase().includes(query));
   }, [tuckspace, tuckspaceQuery]);
+
+  const startTuckDrag = useCallback((tuckId: string, event: Parameters<NonNullable<JSX.IntrinsicElements["button"]["onPointerDown"]>>[0]) => {
+    const card = event.currentTarget.closest(".tuckspace-item");
+    if (!(card instanceof HTMLElement)) {
+      return;
+    }
+    event.preventDefault();
+    setDraggedTuckId(tuckId);
+    setTuckDragPreview({
+      x: card.getBoundingClientRect().left,
+      y: card.getBoundingClientRect().top,
+      width: card.getBoundingClientRect().width,
+      height: card.getBoundingClientRect().height,
+      offsetX: event.clientX - card.getBoundingClientRect().left,
+      offsetY: event.clientY - card.getBoundingClientRect().top,
+    });
+    setTuckDropMarker({ targetId: tuckId, position: "before" });
+  }, []);
+
+  useEffect(() => {
+    if (!draggedTuckId || !tuckDragPreview) {
+      return;
+    }
+    const updateMarker = (clientY: number) => {
+      const candidates = visibleTuckspace.filter((item) => item.id !== draggedTuckId);
+      if (candidates.length === 0) {
+        setTuckDropMarker(null);
+        return;
+      }
+      for (const item of candidates) {
+        const element = tuckItemRefs.current.get(item.id);
+        if (!element) {
+          continue;
+        }
+        const rect = element.getBoundingClientRect();
+        const midpoint = rect.top + rect.height / 2;
+        if (clientY < midpoint) {
+          setTuckDropMarker({ targetId: item.id, position: "before" });
+          return;
+        }
+      }
+      const last = candidates[candidates.length - 1];
+      if (last) {
+        setTuckDropMarker({ targetId: last.id, position: "after" });
+      }
+    };
+
+    const handleMove = (event: PointerEvent) => {
+      setTuckDragPreview((current) =>
+        current
+          ? {
+              ...current,
+              x: event.clientX - current.offsetX,
+              y: event.clientY - current.offsetY,
+            }
+          : current,
+      );
+      updateMarker(event.clientY);
+    };
+
+    const finish = () => {
+      if (draggedTuckId && tuckDropMarker && tuckDropMarker.targetId !== draggedTuckId) {
+        reorderTuckedSubgraphs(draggedTuckId, tuckDropMarker.targetId, tuckDropMarker.position);
+      }
+      setDraggedTuckId(null);
+      setTuckDropMarker(null);
+      setTuckDragPreview(null);
+    };
+
+    document.body.classList.add("is-tuck-dragging");
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+    return () => {
+      document.body.classList.remove("is-tuck-dragging");
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [draggedTuckId, reorderTuckedSubgraphs, tuckDragPreview, tuckDropMarker, visibleTuckspace]);
 
   const runLayout = useCallback(() => {
     const selectedNodeIds = nodesRef.current
@@ -1896,95 +2071,61 @@ function WorkspaceCanvas() {
           ) : visibleTuckspace.length === 0 ? (
             <div className="tuckspace-empty">No tucked subgraphs match that search.</div>
           ) : (
-            visibleTuckspace.map((item) => (
-              <article
-                key={item.id}
-                className={`tuckspace-item${draggedTuckId === item.id ? " is-dragging" : ""}${dropTuckId === item.id ? " is-drop-target" : ""}${isTuckspaceShell(item) ? " is-shell" : ""}`}
-                title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
-                onDragOver={(event) => {
-                  event.preventDefault();
-                  if (dropTuckId !== item.id) {
-                    setDropTuckId(item.id);
-                  }
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const draggedId = event.dataTransfer.getData("text/plain") || draggedTuckId;
-                  if (draggedId) {
-                    reorderTuckedSubgraphs(draggedId, item.id);
-                  }
-                  setDraggedTuckId(null);
-                  setDropTuckId(null);
-                }}
-              >
-                {isTuckspaceShell(item) ? (
-                  <div className="tuckspace-shell-body">
-                    <button
-                      type="button"
-                      className="tuckspace-shell-action"
-                      onClick={() => moveSelectionToTuckspace(item.id)}
-                      disabled={!canTuckSelection}
-                      title={canTuckSelection ? "Populate with subgraph" : "Select a closed subgraph first"}
-                    >
-                      →
-                    </button>
-                    <button
-                      type="button"
-                      className="tuckspace-shell-action tuckspace-shell-delete"
-                      onClick={() => deleteTuckShell(item.id)}
-                      title="Delete shell"
-                    >
-                      ×
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    type="button"
-                    className="tuckspace-restore"
-                    onClick={() => untuckSubgraph(item.id)}
-                    title="Move to workspace"
-                  >
-                    <TuckspacePreview item={item} />
-                  </button>
-                )}
-                <span className="tuckspace-divider" aria-hidden="true" />
-                <div className="tuckspace-footer">
-                  <input
-                    className="tuckspace-name"
-                    value={item.name}
-                    onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
-                    aria-label="tucked subgraph name"
+            visibleTuckspace.map((item) => {
+              const dropPosition = tuckDropMarker?.targetId === item.id ? tuckDropMarker.position : null;
+              return (
+                <article
+                  key={item.id}
+                  ref={(element) => {
+                    if (element) {
+                      tuckItemRefs.current.set(item.id, element);
+                    } else {
+                      tuckItemRefs.current.delete(item.id);
+                    }
+                  }}
+                  className={`tuckspace-item${draggedTuckId === item.id ? " is-drag-placeholder" : ""}${dropPosition ? ` is-drop-${dropPosition}` : ""}${isTuckspaceShell(item) ? " is-shell" : ""}`}
+                  title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
+                >
+                  <TuckspaceCardBody
+                    item={item}
+                    canPopulate={canTuckSelection}
+                    interactive={draggedTuckId !== item.id}
+                    onRestore={() => untuckSubgraph(item.id)}
+                    onPopulate={() => moveSelectionToTuckspace(item.id)}
+                    onDeleteShell={() => deleteTuckShell(item.id)}
+                    onRename={(value) => renameTuckedSubgraph(item.id, value)}
+                    onStartDrag={(event) => startTuckDrag(item.id, event)}
                   />
-                  <button
-                    type="button"
-                    className="tuckspace-drag-handle"
-                    draggable
-                    title="Reorder"
-                    aria-label="Reorder tucked subgraph"
-                    onClick={(event) => event.preventDefault()}
-                    onDragStart={(event) => {
-                      setDraggedTuckId(item.id);
-                      setDropTuckId(item.id);
-                      event.dataTransfer.effectAllowed = "move";
-                      event.dataTransfer.setData("text/plain", item.id);
-                      const card = event.currentTarget.closest(".tuckspace-item");
-                      if (card instanceof HTMLElement) {
-                        event.dataTransfer.setDragImage(card, card.clientWidth / 2, 18);
-                      }
-                    }}
-                    onDragEnd={() => {
-                      setDraggedTuckId(null);
-                      setDropTuckId(null);
-                    }}
-                  >
-                    <span aria-hidden="true">⋮⋮</span>
-                  </button>
-                </div>
-              </article>
-            ))
+                </article>
+              );
+            })
           )}
         </div>
       </aside>
+      {draggedTuckId && tuckDragPreview && (() => {
+        const draggedItem = tuckspace.find((item) => item.id === draggedTuckId);
+        if (!draggedItem) {
+          return null;
+        }
+        return (
+          <div
+            className="tuckspace-drag-preview"
+            style={{
+              left: tuckDragPreview.x,
+              top: tuckDragPreview.y,
+              width: tuckDragPreview.width,
+            }}
+          >
+            <article className={`tuckspace-item${isTuckspaceShell(draggedItem) ? " is-shell" : ""}`}>
+              <TuckspaceCardBody
+                item={draggedItem}
+                canPopulate={canTuckSelection}
+                interactive={false}
+              />
+            </article>
+          </div>
+        );
+      })()}
     </div>
   );
 }
