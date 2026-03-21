@@ -369,6 +369,7 @@ textarea {
   gap: 10px;
   background: rgba(17, 19, 22, 0.76);
   cursor: grab;
+  transition: box-shadow 140ms ease;
 }
 
 .tuckspace-shell-action {
@@ -426,6 +427,7 @@ textarea {
   bottom: -6px;
 }
 
+
 .tuckspace-restore {
   display: flex;
   flex-direction: column;
@@ -436,17 +438,13 @@ textarea {
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: transform 140ms ease, background 140ms ease;
+  transition: box-shadow 140ms ease;
 }
 
 .tuckspace-restore:disabled {
   cursor: default;
 }
 
-.tuckspace-item:not(.is-shell):hover .tuckspace-restore {
-  background: rgba(244, 236, 223, 0.04);
-  transform: translateY(-1px);
-}
 
 .is-tuck-dragging .tuckspace-shell-body,
 .is-tuck-dragging .tuckspace-restore {
@@ -458,13 +456,7 @@ textarea {
   box-shadow: inset 4px 0 0 rgba(242, 192, 120, 0.78);
 }
 
-.tuckspace-item:not(.is-shell):hover .tuckspace-divider {
-  background: rgba(244, 236, 223, 0.16);
-}
 
-.tuckspace-item.is-shell:hover .tuckspace-divider {
-  background: rgba(244, 236, 223, 0.12);
-}
 
 .tuckspace-preview {
   width: 100%;
