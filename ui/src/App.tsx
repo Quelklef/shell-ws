@@ -494,6 +494,7 @@ function WorkspaceCanvas() {
   const [activeExecutions, setActiveExecutions] = useState<
     { execId: string; nodeId: string }[]
   >([]);
+  const [pendingTuckDrag, setPendingTuckDrag] = useState<{ tuckId: string; startX: number; startY: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
   const [draggedTuckId, setDraggedTuckId] = useState<string | null>(null);
   const [tuckDropMarker, setTuckDropMarker] = useState<{ targetId: string; position: "before" | "after" } | null>(null);
   const [tuckDragPreview, setTuckDragPreview] = useState<{ x: number; y: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
@@ -1703,25 +1704,59 @@ function WorkspaceCanvas() {
   }, [tuckspace, tuckspaceQuery]);
 
   const startTuckDrag = useCallback((tuckId: string, event: React.PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) {
+      return;
+    }
     const card = event.currentTarget.closest(".tuckspace-item");
     if (!(card instanceof HTMLElement)) {
       return;
     }
     const rect = card.getBoundingClientRect();
-    const offsetX = event.clientX - rect.left;
-    const offsetY = event.clientY - rect.top;
-    event.preventDefault();
-    setDraggedTuckId(tuckId);
-    setTuckDragPreview({
-      x: event.clientX - offsetX * 0.5,
-      y: event.clientY - offsetY * 0.5,
+    setPendingTuckDrag({
+      tuckId,
+      startX: event.clientX,
+      startY: event.clientY,
       width: rect.width,
       height: rect.height,
-      offsetX,
-      offsetY,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
     });
-    setTuckDropMarker({ targetId: tuckId, position: "before" });
   }, []);
+
+  useEffect(() => {
+    if (!pendingTuckDrag || draggedTuckId) {
+      return;
+    }
+    const handleMove = (event: PointerEvent) => {
+      const dx = event.clientX - pendingTuckDrag.startX;
+      const dy = event.clientY - pendingTuckDrag.startY;
+      if (Math.hypot(dx, dy) < 6) {
+        return;
+      }
+      setDraggedTuckId(pendingTuckDrag.tuckId);
+      setTuckDragPreview({
+        x: event.clientX - pendingTuckDrag.offsetX * 0.5,
+        y: event.clientY - pendingTuckDrag.offsetY * 0.5,
+        width: pendingTuckDrag.width,
+        height: pendingTuckDrag.height,
+        offsetX: pendingTuckDrag.offsetX,
+        offsetY: pendingTuckDrag.offsetY,
+      });
+      setTuckDropMarker({ targetId: pendingTuckDrag.tuckId, position: "before" });
+      setPendingTuckDrag(null);
+    };
+    const finish = () => {
+      setPendingTuckDrag(null);
+    };
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [draggedTuckId, pendingTuckDrag]);
 
   useEffect(() => {
     if (!draggedTuckId || !tuckDragPreview) {
