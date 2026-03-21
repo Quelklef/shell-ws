@@ -2326,34 +2326,36 @@ function WorkspaceCanvas() {
                     key={workspace.id}
                     className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}`}
                   >
-                    {renaming ? (
-                      <input
-                        className="sidebar-input workspace-list-name-input"
-                        value={workspaceRenameDraft}
-                        autoFocus
-                        onChange={(event) => setWorkspaceRenameDraft(event.target.value)}
-                        onBlur={() => void renameWorkspace(workspace.id, workspaceRenameDraft)}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            void renameWorkspace(workspace.id, workspaceRenameDraft);
-                          } else if (event.key === "Escape") {
-                            setWorkspaceRenamingId(null);
-                            setWorkspaceRenameDraft("");
-                          }
-                        }}
-                        title="workspace name"
-                      />
-                    ) : (
-                      <button
-                        type="button"
-                        className="workspace-list-select"
-                        onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
-                        disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
-                        title={workspace.name}
-                      >
-                        {workspace.name}
-                      </button>
-                    )}
+                    <div className="workspace-list-main">
+                      {renaming ? (
+                        <input
+                          className="sidebar-input workspace-list-name-input"
+                          value={workspaceRenameDraft}
+                          autoFocus
+                          onChange={(event) => setWorkspaceRenameDraft(event.target.value)}
+                          onBlur={() => void renameWorkspace(workspace.id, workspaceRenameDraft)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              void renameWorkspace(workspace.id, workspaceRenameDraft);
+                            } else if (event.key === "Escape") {
+                              setWorkspaceRenamingId(null);
+                              setWorkspaceRenameDraft("");
+                            }
+                          }}
+                          title="workspace name"
+                        />
+                      ) : (
+                        <button
+                          type="button"
+                          className="workspace-list-select"
+                          onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
+                          disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
+                          title={workspace.name}
+                        >
+                          {workspace.name}
+                        </button>
+                      )}
+                    </div>
                     <div className="workspace-list-actions">
                       <button
                         type="button"

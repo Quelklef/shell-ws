@@ -333,18 +333,22 @@ textarea {
 .workspace-list-item {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 0;
   align-items: stretch;
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.44);
   color: var(--text);
   border-radius: 7px;
-  padding: 6px;
+  overflow: hidden;
 }
 
 .workspace-list-item.is-active {
   border-color: rgba(242, 192, 120, 0.48);
   background: rgba(240, 138, 93, 0.12);
+}
+
+.workspace-list-main {
+  padding: 6px;
 }
 
 .workspace-list-select,
@@ -375,6 +379,9 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
+  padding: 6px;
+  border-top: 1px solid rgba(244, 236, 223, 0.08);
+  background: rgba(244, 236, 223, 0.02);
 }
 
 .workspace-list-action {
