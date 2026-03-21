@@ -60,7 +60,7 @@ import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
-import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, storeTuckedSubgraph } from "./lib/tuckspace";
+import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -1494,7 +1494,7 @@ function WorkspaceCanvas() {
   );
 
   const renameTuckedSubgraph = useCallback((tuckId: string, name: string) => {
-    const nextTuckspace = tuckspaceRef.current.map((item) => (item.id === tuckId ? { ...item, name } : item));
+    const nextTuckspace = tuckspaceRef.current.map((item) => (item.id === tuckId ? { ...item, name, userNamed: true } : item));
     setTuckspace(nextTuckspace);
     persistWorkspaceSnapshot(nodesRef.current, edgesRef.current, nextTuckspace);
   }, [persistWorkspaceSnapshot]);
@@ -1544,7 +1544,9 @@ function WorkspaceCanvas() {
       setToast('cannot restore subgraph: ids already exist in this workspace');
       return;
     }
-    const nextTuckspace = tuckspaceRef.current.map((entry) => (entry.id === tuckId ? emptyTuckedSubgraph(entry) : entry));
+    const nextTuckspace = shouldKeepShellOnRestore(item)
+      ? tuckspaceRef.current.map((entry) => (entry.id === tuckId ? emptyTuckedSubgraph(entry) : entry))
+      : tuckspaceRef.current.filter((entry) => entry.id !== tuckId);
     const restoredRuntime = Object.fromEntries(
       item.nodes.map((node) => [
         node.id,
@@ -1598,9 +1600,15 @@ function WorkspaceCanvas() {
       : 'selection must be closed before tucking';
 
   const tuckspaceShells = useMemo(
-    () => tuckspace.filter(isTuckspaceShell),
+    () => tuckspace.filter((item) => isTuckspaceShell(item) && item.userNamed),
     [tuckspace],
   );
+
+  const deleteTuckShell = useCallback((tuckId: string) => {
+    const nextTuckspace = tuckspaceRef.current.filter((item) => item.id !== tuckId);
+    setTuckspace(nextTuckspace);
+    persistWorkspaceSnapshot(nodesRef.current, edgesRef.current, nextTuckspace);
+  }, [persistWorkspaceSnapshot]);
 
   const visibleTuckspace = useMemo(() => {
     const query = tuckspaceQuery.trim().toLowerCase();
@@ -1920,15 +1928,36 @@ function WorkspaceCanvas() {
                   setDropTuckId(null);
                 }}
               >
-                <button
-                  type="button"
-                  className="tuckspace-restore"
-                  onClick={() => untuckSubgraph(item.id)}
-                  title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
-                  disabled={isTuckspaceShell(item)}
-                >
-                  <TuckspacePreview item={item} />
-                </button>
+                {isTuckspaceShell(item) ? (
+                  <div className="tuckspace-shell-body">
+                    <button
+                      type="button"
+                      className="tuckspace-shell-action"
+                      onClick={() => moveSelectionToTuckspace(item.id)}
+                      disabled={!canTuckSelection}
+                      title={canTuckSelection ? "Populate with subgraph" : "Select a closed subgraph first"}
+                    >
+                      →
+                    </button>
+                    <button
+                      type="button"
+                      className="tuckspace-shell-action tuckspace-shell-delete"
+                      onClick={() => deleteTuckShell(item.id)}
+                      title="Delete shell"
+                    >
+                      ×
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="tuckspace-restore"
+                    onClick={() => untuckSubgraph(item.id)}
+                    title="Move to workspace"
+                  >
+                    <TuckspacePreview item={item} />
+                  </button>
+                )}
                 <span className="tuckspace-divider" aria-hidden="true" />
                 <input
                   className="tuckspace-name"

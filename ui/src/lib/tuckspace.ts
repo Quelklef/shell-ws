@@ -59,12 +59,6 @@ export function buildTopologyPreview(nodes: WorkspaceNode[], edges: WorkspaceEdg
   };
 }
 
-export function renameTuckedSubgraph(workspace: Workspace, tuckId: string, name: string): Workspace {
-  return {
-    ...workspace,
-    tuckspace: workspace.tuckspace.map((item) => (item.id === tuckId ? { ...item, name } : item)),
-  };
-}
 
 
 export function reorderTuckspace(items: readonly TuckedSubgraph[], draggedId: string, targetId: string) {
@@ -87,6 +81,10 @@ export function isTuckspaceShell(item: TuckedSubgraph) {
   return item.nodes.length === 0 && item.edges.length === 0;
 }
 
+export function shouldKeepShellOnRestore(item: TuckedSubgraph) {
+  return Boolean(item.userNamed);
+}
+
 export function storeTuckedSubgraph(
   items: readonly TuckedSubgraph[],
   nodes: WorkspaceNode[],
@@ -100,6 +98,7 @@ export function storeTuckedSubgraph(
       {
         id: encodeId("tuck"),
         name: defaultTuckedName(items),
+        userNamed: false,
         nodes,
         edges,
         topologyPreview,

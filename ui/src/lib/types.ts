@@ -61,6 +61,7 @@ export interface TopologyPreviewEdge {
 export interface TuckedSubgraph {
   id: string;
   name: string;
+  userNamed?: boolean;
   nodes: WorkspaceNode[];
   edges: WorkspaceEdge[];
   topologyPreview: {

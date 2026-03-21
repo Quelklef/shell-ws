@@ -361,6 +361,36 @@ textarea {
   border-style: dashed;
 }
 
+.tuckspace-shell-body {
+  height: 46px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(17, 19, 22, 0.76);
+}
+
+.tuckspace-shell-action {
+  min-width: 30px;
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(244, 236, 223, 0.04);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tuckspace-shell-action:disabled {
+  cursor: not-allowed;
+  color: var(--text-soft);
+  border-color: rgba(244, 236, 223, 0.08);
+}
+
+.tuckspace-shell-delete {
+  color: #f4c3c3;
+  border-color: rgba(222, 93, 93, 0.24);
+}
+
 .tuckspace-item.is-dragging {
   opacity: 0.52;
 }
@@ -394,6 +424,10 @@ textarea {
 
 .tuckspace-item:not(.is-shell):hover .tuckspace-divider {
   background: rgba(244, 236, 223, 0.16);
+}
+
+.tuckspace-item.is-shell:hover .tuckspace-divider {
+  background: rgba(244, 236, 223, 0.12);
 }
 
 .tuckspace-preview {

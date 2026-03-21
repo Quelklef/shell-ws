@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTopologyPreview, defaultTuckedName, emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, storeTuckedSubgraph } from "./tuckspace";
+import { buildTopologyPreview, defaultTuckedName, emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./tuckspace";
 
 describe("tuckspace helpers", () => {
   it("detects closed selections", () => {
@@ -44,6 +44,12 @@ describe("tuckspace helpers", () => {
     expect(next[0]?.name).toBe("Saved shell");
     expect(next[0]?.nodes).toHaveLength(1);
     expect(isTuckspaceShell(emptyTuckedSubgraph(next[0]!))).toBe(true);
+  });
+
+
+  it("only keeps named shells on restore", () => {
+    expect(shouldKeepShellOnRestore({ id: "a", name: "A", userNamed: true, nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } })).toBe(true);
+    expect(shouldKeepShellOnRestore({ id: "b", name: "Subgraph 1", userNamed: false, nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } })).toBe(false);
   });
 
   it("normalizes topology preview coordinates", () => {

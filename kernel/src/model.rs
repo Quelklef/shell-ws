@@ -99,6 +99,8 @@ pub struct TuckedSubgraph {
     pub id: String,
     pub name: String,
     #[serde(default)]
+    pub user_named: bool,
+    #[serde(default)]
     pub nodes: Vec<Node>,
     #[serde(default)]
     pub edges: Vec<Edge>,
@@ -687,6 +689,7 @@ mod tests {
                 {
                     "id": "t1",
                     "name": "Saved",
+                    "userNamed": true,
                     "nodes": [
                         {
                             "id": "text-1",
@@ -711,6 +714,7 @@ mod tests {
 
         assert_eq!(workspace.tuckspace.len(), 1);
         assert_eq!(workspace.tuckspace[0].name, "Saved");
+        assert!(workspace.tuckspace[0].user_named);
         let serialized = serde_json::to_value(&workspace).expect("serialize workspace with tuckspace");
         assert_eq!(serialized["tuckspace"][0]["name"], serde_json::json!("Saved"));
     }

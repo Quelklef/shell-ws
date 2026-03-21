@@ -129,6 +129,7 @@ function sanitizeTuckedSubgraph(item: TuckedSubgraph): TuckedSubgraph {
   return {
     ...item,
     name: item.name ?? "Untitled subgraph",
+    userNamed: item.userNamed ?? false,
     nodes: sanitized.nodes,
     edges: sanitized.edges,
     topologyPreview: {
