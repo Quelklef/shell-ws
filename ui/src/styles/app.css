@@ -354,7 +354,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: rgba(9, 11, 13, 0.44);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .tuckspace-item.is-shell {
