@@ -463,6 +463,12 @@ textarea {
   box-shadow: 14px 0 28px rgba(0, 0, 0, 0.22), -6px 0 12px rgba(0, 0, 0, 0.12);
 }
 
+.is-tuck-dragging .tuckspace-item:hover,
+.is-tuck-dragging .tuckspace-item:not(.is-shell):hover {
+  transform: none;
+  box-shadow: none;
+}
+
 
 
 .tuckspace-preview {
