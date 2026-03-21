@@ -17,6 +17,7 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - Initialize and use git in this repo. Create frequent, meaningful commits.
 - Commit messages must use a short summary headline, with `WHAT:`, `WHY:`, and `HOW:` sections in the commit body.
 - NEVER prompt the user with the interactive multiple-choice question feature. ALWAYS use the standard text chat instead. This allows for nuanced back-and-forth instead of shoehorning the user into making a final choice. You MAY present the user with a set of multiple-choice questions, formatted similar to how they would be if using the interactive feature, but you MUST NOT actually use the feature.
+- Communicate directly and efficiently. Do not repeat points the user already made or restate your earlier answer unless doing so is necessary to resolve ambiguity or support a new conclusion.
 
 ## Technical Pushback
 
