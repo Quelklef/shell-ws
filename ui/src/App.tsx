@@ -423,6 +423,7 @@ function WorkspaceCanvas() {
   >([]);
   const [draggedTuckId, setDraggedTuckId] = useState<string | null>(null);
   const [dropTuckId, setDropTuckId] = useState<string | null>(null);
+  const [tuckspaceQuery, setTuckspaceQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     x: number;
@@ -1599,6 +1600,14 @@ function WorkspaceCanvas() {
       ? null
       : 'selection must be closed before tucking';
 
+  const visibleTuckspace = useMemo(() => {
+    const query = tuckspaceQuery.trim().toLowerCase();
+    if (!query) {
+      return tuckspace;
+    }
+    return tuckspace.filter((item) => item.name.toLowerCase().includes(query));
+  }, [tuckspace, tuckspaceQuery]);
+
   const runLayout = useCallback(() => {
     const selectedNodeIds = nodesRef.current
       .filter((node) => node.selected)
@@ -1847,12 +1856,21 @@ function WorkspaceCanvas() {
       <aside className="tuckspace-drawer">
         <div className="tuckspace-header">
           <div className="node-palette-label">tuckspace</div>
+          <input
+            className="tuckspace-search"
+            value={tuckspaceQuery}
+            onChange={(event) => setTuckspaceQuery(event.target.value)}
+            placeholder="search"
+            aria-label="search tuckspace"
+          />
         </div>
         <div className="tuckspace-list">
           {tuckspace.length === 0 ? (
             <div className="tuckspace-empty">Closed subgraphs you tuck away will appear here.</div>
+          ) : visibleTuckspace.length === 0 ? (
+            <div className="tuckspace-empty">No tucked subgraphs match that search.</div>
           ) : (
-            tuckspace.map((item) => (
+            visibleTuckspace.map((item) => (
               <article
                 key={item.id}
                 className={`tuckspace-item${draggedTuckId === item.id ? " is-dragging" : ""}${dropTuckId === item.id ? " is-drop-target" : ""}`}

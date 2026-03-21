@@ -317,9 +317,19 @@ textarea {
 
 .tuckspace-header {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.tuckspace-search {
+  width: 100%;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.54);
+  color: var(--text);
+  border-radius: 7px;
+  padding: 8px 10px;
+  font-size: 12px;
 }
 
 .tuckspace-list {
