@@ -360,20 +360,19 @@ textarea {
   flex-direction: column;
   gap: 4px;
   align-items: stretch;
-  border: 1px solid rgba(244, 236, 223, 0.12);
-  background: rgba(9, 11, 13, 0.44);
   color: var(--text);
-  border-radius: 7px;
-  padding: 6px;
-}
-
-.workspace-list-item.is-active {
-  border-color: rgba(242, 192, 120, 0.48);
-  background: rgba(240, 138, 93, 0.12);
 }
 
 .workspace-list-main {
-  padding: 0;
+  padding: 6px;
+  border: 1px solid rgba(244, 236, 223, 0.12);
+  background: rgba(9, 11, 13, 0.44);
+  border-radius: 7px;
+}
+
+.workspace-list-item.is-active .workspace-list-main {
+  border-color: rgba(242, 192, 120, 0.48);
+  background: rgba(240, 138, 93, 0.12);
 }
 
 .workspace-list-select,
@@ -404,7 +403,7 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  padding: 0;
+  padding: 0 2px;
   background: transparent;
   border: 0;
 }
