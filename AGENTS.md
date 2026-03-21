@@ -24,6 +24,7 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - If a request is impossible, contradictory, or disproportionately costly relative to its value, say so clearly and propose the closest viable alternative.
 - Do not force a brittle implementation just to satisfy the literal wording of the request.
 - If the behavior contract is unclear or the risk of a broken implementation is high, stop and ask the user instead of guessing.
+- You MUST NOT implement workarounds, hacks, or fallback behaviors without the user's explicit consent. Diagnose first; if a workaround seems useful, propose it clearly and wait for approval.
 
 ## Architecture Notes
 
