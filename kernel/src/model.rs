@@ -426,7 +426,13 @@ pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
         return;
     };
     sanitize_graph_container(obj);
-    if let Some(tuckspace) = obj.get_mut("tuckspace").and_then(serde_json::Value::as_array_mut) {
+    if let Some(tuckspace) = obj.get_mut("tuckspace") {
+        sanitize_tuckspace_json_value(tuckspace);
+    }
+}
+
+pub fn sanitize_tuckspace_json_value(value: &mut serde_json::Value) {
+    if let Some(tuckspace) = value.as_array_mut() {
         for item in tuckspace.iter_mut() {
             if let Some(item_obj) = item.as_object_mut() {
                 sanitize_graph_container(item_obj);
@@ -717,6 +723,48 @@ mod tests {
         assert!(workspace.tuckspace[0].user_named);
         let serialized = serde_json::to_value(&workspace).expect("serialize workspace with tuckspace");
         assert_eq!(serialized["tuckspace"][0]["name"], serde_json::json!("Saved"));
+    }
+
+    #[test]
+    fn sanitize_tuckspace_json_sanitizes_tucked_graphs() {
+        let mut value = serde_json::json!([
+            {
+                "id": "saved-1",
+                "name": "Saved",
+                "nodes": [
+                    {
+                        "id": "cat-1",
+                        "kind": "cat",
+                        "title": "",
+                        "comment": "",
+                        "position": { "x": 0.0, "y": 0.0 },
+                        "size": { "width": 100.0, "height": 100.0 }
+                    },
+                    {
+                        "id": "tee-1",
+                        "kind": "tee",
+                        "title": "",
+                        "comment": "",
+                        "position": { "x": 0.0, "y": 0.0 },
+                        "size": { "width": 100.0, "height": 100.0 }
+                    }
+                ],
+                "edges": [
+                    {
+                        "id": "edge-1",
+                        "from": { "nodeId": "cat-1", "port": "stdout" },
+                        "to": { "nodeId": "tee-1", "port": "stdin" }
+                    }
+                ]
+            }
+        ]);
+
+        super::sanitize_tuckspace_json_value(&mut value);
+        let tuckspace: Vec<super::TuckedSubgraph> =
+            serde_json::from_value(value).expect("deserialize sanitized tuckspace");
+        assert_eq!(tuckspace[0].nodes.len(), 1);
+        assert_eq!(tuckspace[0].nodes[0].kind, super::NodeKind::File);
+        assert!(tuckspace[0].edges.is_empty());
     }
 
     #[test]

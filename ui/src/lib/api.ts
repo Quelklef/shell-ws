@@ -1,4 +1,4 @@
-import type { GenerateScriptRequest, GenerateScriptResponse, Workspace, WorkspaceSummary } from "./types";
+import type { GenerateScriptRequest, GenerateScriptResponse, TuckedSubgraph, Workspace, WorkspaceSummary } from "./types";
 
 function kernelOrigin() {
   if (typeof window === "undefined") {
@@ -59,5 +59,16 @@ export function generateScript(requestBody: GenerateScriptRequest) {
   return request<GenerateScriptResponse>(`${kernelOrigin()}/api/generate-script`, {
     method: "POST",
     body: JSON.stringify(requestBody),
+  });
+}
+
+export function getTuckspace() {
+  return request<TuckedSubgraph[]>(`${kernelOrigin()}/api/tuckspace`);
+}
+
+export function saveTuckspace(tuckspace: TuckedSubgraph[]) {
+  return request<void>(`${kernelOrigin()}/api/tuckspace`, {
+    method: "PUT",
+    body: JSON.stringify(tuckspace),
   });
 }

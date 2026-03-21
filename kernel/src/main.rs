@@ -2,6 +2,7 @@ mod execution;
 mod formula;
 mod model;
 mod openai;
+mod tuckspace_store;
 mod workspace_store;
 
 use std::{net::SocketAddr, process::Stdio};
@@ -18,17 +19,21 @@ use axum::{
 };
 use execution::ExecutionManager;
 use futures::{sink::SinkExt, stream::StreamExt};
-use model::{ClientEvent, ServerEvent, Workspace};
+use model::{ClientEvent, ServerEvent, TuckedSubgraph, Workspace};
 use openai::{generate_script, GenerateScriptRequest, GenerateScriptResponse};
 use tokio::sync::broadcast;
 use tower_http::{cors::CorsLayer, services::ServeDir};
 use tracing::{debug, error, info};
+use tuckspace_store::TuckspaceStore;
 use uuid::Uuid;
 use workspace_store::WorkspaceStore;
 
 #[derive(Clone)]
 struct AppState {
     store: WorkspaceStore,
+    tuckspace_store: TuckspaceStore,
+    // Persistence stays separate from execution. The execution manager consumes
+    // workspace snapshots, but save/load state must not be hidden inside it.
     execution: ExecutionManager,
     broadcaster: broadcast::Sender<ServerEvent>,
     openai_client: reqwest::Client,
@@ -46,6 +51,9 @@ async fn main() {
     let store = WorkspaceStore::new("workspace-data")
         .await
         .expect("workspace store");
+    let tuckspace_store = TuckspaceStore::new("workspace-data/tuckspace.json", &store)
+        .await
+        .expect("tuckspace store");
     let (broadcaster, _) = broadcast::channel(512);
     let execution = ExecutionManager::new(broadcaster.clone());
     let openai_client = reqwest::Client::builder()
@@ -53,6 +61,7 @@ async fn main() {
         .expect("openai http client");
     let state = AppState {
         store,
+        tuckspace_store,
         execution,
         broadcaster,
         openai_client,
@@ -70,6 +79,7 @@ async fn main() {
                 .put(save_workspace)
                 .delete(delete_workspace),
         )
+        .route("/api/tuckspace", get(get_tuckspace).put(save_tuckspace))
         .route("/api/pick-file", post(pick_file))
         .route("/api/generate-script", post(generate_script_handler))
         .route("/ws", get(ws_handler))
@@ -120,6 +130,19 @@ async fn save_workspace(
     Json(workspace): Json<Workspace>,
 ) -> Result<StatusCode, AppError> {
     state.store.save(&id, &workspace).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+
+async fn get_tuckspace(State(state): State<AppState>) -> Result<Json<Vec<TuckedSubgraph>>, AppError> {
+    Ok(Json(state.tuckspace_store.load().await?))
+}
+
+async fn save_tuckspace(
+    State(state): State<AppState>,
+    Json(tuckspace): Json<Vec<TuckedSubgraph>>,
+) -> Result<StatusCode, AppError> {
+    state.tuckspace_store.save(&tuckspace).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

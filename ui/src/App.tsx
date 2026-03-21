@@ -28,9 +28,11 @@ import WorkspaceEdgeView from "./components/WorkspaceEdge";
 import {
   createWorkspace,
   generateScript,
+  getTuckspace,
   getWorkspace,
   listWorkspaces,
   pickFilePath,
+  saveTuckspace,
   saveWorkspace,
 } from "./lib/api";
 import { collectAiScriptSamples } from "./lib/aiScript";
@@ -619,7 +621,6 @@ function WorkspaceCanvas() {
         "id" | "name" | "cwd" | "openaiApiKey" | "ui"
       > | null = workspaceMetaRef.current,
       runtimeArg: Record<string, NodeRuntimeState> = runtimeRef.current,
-      tuckspaceArg: TuckedSubgraph[] = tuckspaceRef.current,
     ): Workspace | null => {
       if (!metaArg) {
         return null;
@@ -632,7 +633,7 @@ function WorkspaceCanvas() {
         openaiApiKey: metaArg.openaiApiKey,
         nodes: nodesArg.map((node) => flowNodeToPersistedWorkspaceNode(node, runtimeArg)),
         edges: edgesArg.map(flowEdgeToWorkspaceEdge),
-        tuckspace: tuckspaceArg,
+        tuckspace: [],
       };
     },
     [],
@@ -728,12 +729,11 @@ function WorkspaceCanvas() {
     edgesRef.current = nextEdges;
     tuckspaceRef.current = nextTuckspace;
     runtimeRef.current = nextRuntime;
-    // Tucking is a move, not two unrelated saves. Persist the workspace graph and
-    // tuckspace together or a partial write can delete or duplicate user data.
-    const nextWorkspace = buildWorkspace(nextNodes, nextEdges, workspaceMetaRef.current, nextRuntime, nextTuckspace);
+    const nextWorkspace = buildWorkspace(nextNodes, nextEdges, workspaceMetaRef.current, nextRuntime);
     if (nextWorkspace) {
       saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
     }
+    saveTuckspace(nextTuckspace).catch((error) => setToast(String(error)));
   }, [buildWorkspace]);
 
   const updateWorkspaceCwd = useCallback(
@@ -1498,7 +1498,6 @@ function WorkspaceCanvas() {
     nodesRef.current = loadedNodes;
     edgesRef.current = loadedEdges;
     runtimeRef.current = loadedRuntime;
-    tuckspaceRef.current = loaded.tuckspace;
 
     setWorkspaceSummaries((current) =>
       upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name }),
@@ -1506,7 +1505,6 @@ function WorkspaceCanvas() {
     setWorkspaceMeta(nextMeta);
     setGeneration({});
     setRuntime(loadedRuntime);
-    setTuckspace(loaded.tuckspace);
     setActiveExecutions([]);
     setContextMenu(null);
     setPendingTuckDrag(null);
@@ -1571,14 +1569,16 @@ function WorkspaceCanvas() {
           return;
         }
         setWorkspaceSummaries(summaries);
-        const loaded = sanitizeWorkspace(
-          summaries.length > 0
-            ? await getWorkspace(summaries[0].id)
-            : await createWorkspace(),
-        );
+        const [sharedTuckspace, loadedWorkspace] = await Promise.all([
+          getTuckspace(),
+          summaries.length > 0 ? getWorkspace(summaries[0].id) : createWorkspace(),
+        ]);
+        const loaded = sanitizeWorkspace(loadedWorkspace);
         if (disposed) {
           return;
         }
+        setTuckspace(sharedTuckspace);
+        tuckspaceRef.current = sharedTuckspace;
         applyLoadedWorkspace(loaded);
       } catch (error) {
         if (!disposed) {

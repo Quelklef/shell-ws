@@ -46,6 +46,17 @@ impl WorkspaceStore {
         Ok(workspaces)
     }
 
+
+    pub async fn load_all(&self) -> Result<Vec<Workspace>, std::io::Error> {
+        let mut summaries = self.list().await?;
+        summaries.sort_by(|left, right| left.name.cmp(&right.name));
+        let mut workspaces = Vec::with_capacity(summaries.len());
+        for summary in summaries {
+            workspaces.push(self.load(&summary.id).await?);
+        }
+        Ok(workspaces)
+    }
+
     pub async fn load(&self, id: &str) -> Result<Workspace, std::io::Error> {
         let path = self.path_for(id);
         let content = fs::read(path).await?;
