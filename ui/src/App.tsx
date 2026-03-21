@@ -1697,15 +1697,18 @@ function WorkspaceCanvas() {
     if (!(card instanceof HTMLElement)) {
       return;
     }
+    const rect = card.getBoundingClientRect();
+    const offsetX = event.clientX - rect.left;
+    const offsetY = event.clientY - rect.top;
     event.preventDefault();
     setDraggedTuckId(tuckId);
     setTuckDragPreview({
-      x: card.getBoundingClientRect().left,
-      y: card.getBoundingClientRect().top,
-      width: card.getBoundingClientRect().width,
-      height: card.getBoundingClientRect().height,
-      offsetX: event.clientX - card.getBoundingClientRect().left,
-      offsetY: event.clientY - card.getBoundingClientRect().top,
+      x: event.clientX - offsetX * 0.5,
+      y: event.clientY - offsetY * 0.5,
+      width: rect.width,
+      height: rect.height,
+      offsetX,
+      offsetY,
     });
     setTuckDropMarker({ targetId: tuckId, position: "before" });
   }, []);
@@ -1743,8 +1746,8 @@ function WorkspaceCanvas() {
         current
           ? {
               ...current,
-              x: event.clientX - current.offsetX,
-              y: event.clientY - current.offsetY,
+              x: event.clientX - current.offsetX * 0.5,
+              y: event.clientY - current.offsetY * 0.5,
             }
           : current,
       );
@@ -2062,7 +2065,7 @@ function WorkspaceCanvas() {
                       tuckItemRefs.current.delete(item.id);
                     }
                   }}
-                  className={`tuckspace-item${draggedTuckId === item.id ? " is-drag-placeholder" : ""}${dropPosition ? ` is-drop-${dropPosition}` : ""}${isTuckspaceShell(item) ? " is-shell" : ""}`}
+                  className={`tuckspace-item${draggedTuckId === item.id ? " is-drag-placeholder" : ""}${dropPosition ? ` is-drop-${dropPosition}` : ""}${isTuckspaceShell(item) ? " is-shell" : ""}${draggedTuckId ? " is-drag-active" : ""}`}
                   title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
                 >
                   <TuckspaceCardBody
@@ -2093,6 +2096,9 @@ function WorkspaceCanvas() {
               left: tuckDragPreview.x,
               top: tuckDragPreview.y,
               width: tuckDragPreview.width,
+              height: tuckDragPreview.height,
+              transform: "scale(0.5)",
+              transformOrigin: "top left",
             }}
           >
             <article className={`tuckspace-item${isTuckspaceShell(draggedItem) ? " is-shell" : ""}`}>

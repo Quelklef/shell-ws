@@ -415,14 +415,15 @@ textarea {
   border-radius: 999px;
   background: rgba(242, 192, 120, 0.9);
   box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.18);
+  z-index: 2;
 }
 
 .tuckspace-item.is-drop-before::before {
-  top: -5px;
+  top: -6px;
 }
 
 .tuckspace-item.is-drop-after::after {
-  bottom: -5px;
+  bottom: -6px;
 }
 
 .tuckspace-restore {
