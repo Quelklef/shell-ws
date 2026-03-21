@@ -514,6 +514,22 @@ function PencilIcon() {
   );
 }
 
+function EyeIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+      <path
+        d="M1.5 8s2.3-4 6.5-4 6.5 4 6.5 4-2.3 4-6.5 4-6.5-4-6.5-4Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="8" cy="8" r="2.1" fill="none" stroke="currentColor" strokeWidth="1.4" />
+    </svg>
+  );
+}
+
 function TrashIcon() {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" focusable="false">
@@ -585,6 +601,7 @@ function WorkspaceCanvas() {
   const [workspaceDeleteConfirmingId, setWorkspaceDeleteConfirmingId] = useState<string | null>(null);
   const [workspaceRenamingId, setWorkspaceRenamingId] = useState<string | null>(null);
   const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState("");
+  const [showOpenaiApiKey, setShowOpenaiApiKey] = useState(false);
   const [kernelConnected, setKernelConnected] = useState(false);
   const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
@@ -2424,16 +2441,28 @@ function WorkspaceCanvas() {
             </label>
             <label className="sidebar-field">
               <span className="sidebar-label">openai api key</span>
-              <input
-                className="sidebar-input"
-                type="password"
-                autoComplete="off"
-                value={workspaceMeta.openaiApiKey}
-                onChange={(event) => updateWorkspaceApiKey(event.target.value)}
-                placeholder="sk-..."
-                title="workspace-level OpenAI API key for AI SCRIPT generation"
-                disabled={workspaceSwitching}
-              />
+              <div className="sidebar-input-shell">
+                <input
+                  className="sidebar-input"
+                  type={showOpenaiApiKey ? "text" : "password"}
+                  autoComplete="off"
+                  value={workspaceMeta.openaiApiKey}
+                  onChange={(event) => updateWorkspaceApiKey(event.target.value)}
+                  placeholder="sk-..."
+                  title="workspace-level OpenAI API key for AI SCRIPT generation"
+                  disabled={workspaceSwitching}
+                />
+                <button
+                  type="button"
+                  className="sidebar-input-toggle"
+                  onClick={() => setShowOpenaiApiKey((current) => !current)}
+                  title={showOpenaiApiKey ? "hide openai api key" : "show openai api key"}
+                  aria-label={showOpenaiApiKey ? "hide openai api key" : "show openai api key"}
+                  disabled={workspaceSwitching}
+                >
+                  <EyeIcon />
+                </button>
+              </div>
             </label>
           </section>
         </div>

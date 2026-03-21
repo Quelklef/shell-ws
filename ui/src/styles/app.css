@@ -251,6 +251,30 @@ textarea {
   color: var(--text-soft);
 }
 
+.sidebar-input-shell {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+}
+
+.sidebar-input-toggle {
+  border: 1px solid var(--line);
+  background: rgba(244, 236, 223, 0.04);
+  color: var(--text-soft);
+  border-radius: 7px;
+  width: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.sidebar-input-toggle svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+
 .sidebar-input {
   width: 100%;
   border: 1px solid rgba(244, 236, 223, 0.12);
