@@ -410,16 +410,6 @@ function TuckspacePreview({ item }: { item: TuckedSubgraph }) {
 }
 
 
-function TuckspaceHandleDots() {
-  return (
-    <span className="tuckspace-drag-dots" aria-hidden="true">
-      {Array.from({ length: 5 }, (_, index) => (
-        <span key={index} className="tuckspace-drag-dot" />
-      ))}
-    </span>
-  );
-}
-
 function TuckspaceCardBody({
   item,
   canPopulate,
@@ -437,13 +427,13 @@ function TuckspaceCardBody({
   onPopulate?: () => void;
   onDeleteShell?: () => void;
   onRename?: (value: string) => void;
-  onStartDrag?: (event: Parameters<NonNullable<JSX.IntrinsicElements["button"]["onPointerDown"]>>[0]) => void;
+  onStartDrag?: (event: Parameters<NonNullable<JSX.IntrinsicElements["div"]["onPointerDown"]>>[0]) => void;
 }) {
   const shell = isTuckspaceShell(item);
   return (
     <>
       {shell ? (
-        <div className="tuckspace-shell-body">
+        <div className="tuckspace-shell-body" onPointerDown={interactive ? onStartDrag : undefined}>
           <button
             type="button"
             className="tuckspace-shell-action"
@@ -487,17 +477,6 @@ function TuckspaceCardBody({
           <div className="tuckspace-name tuckspace-name-static">{item.name}</div>
         )}
       </div>
-      <span className="tuckspace-divider" aria-hidden="true" />
-      <button
-        type="button"
-        className="tuckspace-drag-handle"
-        onPointerDown={onStartDrag}
-        disabled={!interactive}
-        aria-label="Reorder tucked subgraph"
-        title="Reorder"
-      >
-        <TuckspaceHandleDots />
-      </button>
     </>
   );
 }
@@ -1713,7 +1692,7 @@ function WorkspaceCanvas() {
     return tuckspace.filter((item) => item.name.toLowerCase().includes(query));
   }, [tuckspace, tuckspaceQuery]);
 
-  const startTuckDrag = useCallback((tuckId: string, event: Parameters<NonNullable<JSX.IntrinsicElements["button"]["onPointerDown"]>>[0]) => {
+  const startTuckDrag = useCallback((tuckId: string, event: Parameters<NonNullable<JSX.IntrinsicElements["div"]["onPointerDown"]>>[0]) => {
     const card = event.currentTarget.closest(".tuckspace-item");
     if (!(card instanceof HTMLElement)) {
       return;
