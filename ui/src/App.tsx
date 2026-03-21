@@ -507,17 +507,17 @@ function SidebarPanel({
 }) {
   return (
     <aside className={`app-sidebar app-sidebar-${id}${collapsed ? " is-collapsed" : ""}`}>
-      <div className="app-sidebar-header">
+      <button
+        type="button"
+        className="app-sidebar-header"
+        onClick={onToggle}
+        title={collapsed ? `expand ${label}` : `collapse ${label}`}
+      >
         <span className="app-sidebar-title">{label}</span>
-        <button
-          type="button"
-          className="app-sidebar-toggle"
-          onClick={onToggle}
-          title={collapsed ? `expand ${label}` : `collapse ${label}`}
-        >
+        <span className="app-sidebar-toggle" aria-hidden="true">
           {collapsed ? (side === "left" ? "›" : "‹") : side === "left" ? "‹" : "›"}
-        </button>
-      </div>
+        </span>
+      </button>
       {!collapsed && <div className="app-sidebar-body">{children}</div>}
       {!collapsed && (
         <div
@@ -539,7 +539,9 @@ function WorkspaceCanvas() {
     "id" | "name" | "cwd" | "openaiApiKey" | "ui"
   > | null>(null);
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
-  const [workspaceDeleteConfirming, setWorkspaceDeleteConfirming] = useState(false);
+  const [workspaceDeleteConfirmingId, setWorkspaceDeleteConfirmingId] = useState<string | null>(null);
+  const [workspaceRenamingId, setWorkspaceRenamingId] = useState<string | null>(null);
+  const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState("");
   const [kernelConnected, setKernelConnected] = useState(false);
   const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
@@ -585,12 +587,6 @@ function WorkspaceCanvas() {
   const suppressTuckRestoreClickRef = useRef<{ tuckId: string; until: number } | null>(null);
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
-  const sidebarResizeRef = useRef<{
-    id: SidebarId;
-    side: "left" | "right";
-    startClientX: number;
-    startWidth: number;
-  } | null>(null);
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
   const userSelectionRect = useStore((store) => store.userSelectionRect);
@@ -752,22 +748,43 @@ function WorkspaceCanvas() {
   );
 
 
-  const updateWorkspaceName = useCallback(
-    (name: string) => {
-      setWorkspaceMeta((current) => {
-        if (!current) {
-          return current;
+  const renameWorkspace = useCallback(
+    async (workspaceId: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) {
+        setWorkspaceRenamingId(null);
+        setWorkspaceRenameDraft("");
+        return;
+      }
+      if (workspaceMetaRef.current?.id === workspaceId) {
+        setWorkspaceMeta((current) => {
+          if (!current) {
+            return current;
+          }
+          const next = { ...current, name: trimmed };
+          const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
+          if (nextWorkspace) {
+            saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+          }
+          setWorkspaceSummaries((summaries) =>
+            upsertWorkspaceSummary(summaries, { id: next.id, name: next.name }),
+          );
+          return next;
+        });
+      } else {
+        try {
+          const workspace = sanitizeWorkspace(await getWorkspace(workspaceId));
+          const nextWorkspace = { ...workspace, name: trimmed };
+          await saveWorkspace(nextWorkspace);
+          setWorkspaceSummaries((summaries) =>
+            upsertWorkspaceSummary(summaries, { id: workspaceId, name: trimmed }),
+          );
+        } catch (error) {
+          setToast(String(error));
         }
-        const next = { ...current, name };
-        const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
-        if (nextWorkspace) {
-          saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
-        }
-        setWorkspaceSummaries((summaries) =>
-          upsertWorkspaceSummary(summaries, { id: next.id, name: next.name }),
-        );
-        return next;
-      });
+      }
+      setWorkspaceRenamingId(null);
+      setWorkspaceRenameDraft("");
     },
     [buildWorkspace],
   );
@@ -1588,7 +1605,9 @@ function WorkspaceCanvas() {
     setRuntime(loadedRuntime);
     setActiveExecutions([]);
     setContextMenu(null);
-    setWorkspaceDeleteConfirming(false);
+    setWorkspaceDeleteConfirmingId(null);
+    setWorkspaceRenamingId(null);
+    setWorkspaceRenameDraft("");
     setPendingTuckDrag(null);
     setDraggedTuckId(null);
     setTuckDropMarker(null);
@@ -1641,21 +1660,26 @@ function WorkspaceCanvas() {
   }, [activeExecutions.length, applyLoadedWorkspace, flushPendingWorkspaceSave]);
 
 
-  const confirmDeleteWorkspace = useCallback(async () => {
-    const currentWorkspace = workspaceMetaRef.current;
-    if (!currentWorkspace) {
-      return;
-    }
+  const confirmDeleteWorkspace = useCallback(async (workspaceId: string) => {
     if (activeExecutions.length > 0) {
       setToast("stop active executions before deleting a workspace");
       return;
     }
     setWorkspaceSwitching(true);
-    setWorkspaceDeleteConfirming(false);
+    setWorkspaceDeleteConfirmingId(null);
+    setWorkspaceRenamingId(null);
+    setWorkspaceRenameDraft("");
     try {
-      cancelPendingWorkspaceSaves();
-      const remainingSummaries = workspaceSummaries.filter((workspace) => workspace.id !== currentWorkspace.id);
-      await deleteWorkspace(currentWorkspace.id);
+      const deletingActive = workspaceMetaRef.current?.id === workspaceId;
+      if (deletingActive) {
+        cancelPendingWorkspaceSaves();
+      }
+      const remainingSummaries = workspaceSummaries.filter((workspace) => workspace.id !== workspaceId);
+      await deleteWorkspace(workspaceId);
+      if (!deletingActive) {
+        setWorkspaceSummaries(remainingSummaries);
+        return;
+      }
       if (remainingSummaries.length === 0) {
         const created = sanitizeWorkspace(await createWorkspace());
         applyLoadedWorkspace(created);
@@ -1669,6 +1693,18 @@ function WorkspaceCanvas() {
       setWorkspaceSwitching(false);
     }
   }, [activeExecutions.length, applyLoadedWorkspace, cancelPendingWorkspaceSaves, workspaceSummaries]);
+
+  const beginWorkspaceRename = useCallback((workspaceId: string, currentName: string) => {
+    setWorkspaceDeleteConfirmingId(null);
+    setWorkspaceRenamingId(workspaceId);
+    setWorkspaceRenameDraft(currentName);
+  }, []);
+
+  const requestWorkspaceDelete = useCallback((workspaceId: string) => {
+    setWorkspaceRenamingId(null);
+    setWorkspaceRenameDraft("");
+    setWorkspaceDeleteConfirmingId((current) => (current === workspaceId ? null : workspaceId));
+  }, []);
 
   const toggleSidebar = useCallback((id: SidebarId) => {
     updateWorkspaceUi(
@@ -1686,42 +1722,44 @@ function WorkspaceCanvas() {
     );
   }, [updateWorkspaceUi]);
 
+  const persistSidebarWidth = useCallback((id: SidebarId, width: number) => {
+    updateWorkspaceUi(
+      (ui) => ({
+        ...ui,
+        sidebars: {
+          ...ui.sidebars,
+          [id]: {
+            ...ui.sidebars[id],
+            width,
+          },
+        },
+      }),
+      true,
+    );
+  }, [updateWorkspaceUi]);
+
   const startSidebarResize = useCallback((id: SidebarId, side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!workspaceMetaRef.current) {
+    const current = workspaceMetaRef.current;
+    if (!current) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
-    sidebarResizeRef.current = {
-      id,
-      side,
-      startClientX: event.clientX,
-      startWidth: workspaceMetaRef.current.ui.sidebars[id].width,
-    };
-  }, []);
+    const startClientX = event.clientX;
+    const startWidth = current.ui.sidebars[id].width;
 
-  useEffect(() => {
-    const resize = sidebarResizeRef.current;
-    if (!resize) {
-      return;
-    }
-
-    const handleMove = (event: PointerEvent) => {
-      const active = sidebarResizeRef.current;
-      if (!active) {
-        return;
-      }
-      const delta = event.clientX - active.startClientX;
+    const handleMove = (moveEvent: PointerEvent) => {
+      const delta = moveEvent.clientX - startClientX;
       const width = Math.max(
-        SIDEBAR_MIN_WIDTH[active.id],
-        Math.round(active.startWidth + (active.side === "left" ? delta : -delta)),
+        SIDEBAR_MIN_WIDTH[id],
+        Math.round(startWidth + (side === "left" ? delta : -delta)),
       );
       updateWorkspaceUi((ui) => ({
         ...ui,
         sidebars: {
           ...ui.sidebars,
-          [active.id]: {
-            ...ui.sidebars[active.id],
+          [id]: {
+            ...ui.sidebars[id],
             width,
           },
         },
@@ -1729,21 +1767,19 @@ function WorkspaceCanvas() {
     };
 
     const finish = () => {
-      if (sidebarResizeRef.current) {
-        updateWorkspaceUi((ui) => ui, true);
-      }
-      sidebarResizeRef.current = null;
-    };
-
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
-    return () => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
+      const finalWidth = workspaceMetaRef.current?.ui.sidebars[id].width;
+      if (typeof finalWidth === "number") {
+        persistSidebarWidth(id, finalWidth);
+      }
     };
-  }, [updateWorkspaceUi, workspaceMeta]);
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+  }, [persistSidebarWidth, updateWorkspaceUi]);
 
   useEffect(() => {
     let disposed = false;
@@ -1755,7 +1791,7 @@ function WorkspaceCanvas() {
         if (disposed) {
           return;
         }
-        setWorkspaceDeleteConfirming(false);
+        setWorkspaceDeleteConfirmingId(null);
         setWorkspaceSummaries(summaries);
         const [sharedTuckspace, loadedWorkspace] = await Promise.all([
           getTuckspace(),
@@ -2192,7 +2228,6 @@ function WorkspaceCanvas() {
   const sidebarActionsDisabled = workspaceSwitching || activeExecutions.length > 0;
   const sidebarWidths = {
     workspaces: workspaceMeta.ui.sidebars.workspaces.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.workspaces.width,
-    settings: workspaceMeta.ui.sidebars.settings.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.settings.width,
     nodes: workspaceMeta.ui.sidebars.nodes.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.nodes.width,
     tuckspace: workspaceMeta.ui.sidebars.tuckspace.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.tuckspace.width,
   };
@@ -2202,7 +2237,6 @@ function WorkspaceCanvas() {
       className="app-shell"
       style={{
         ["--sidebar-workspaces-width" as string]: `${sidebarWidths.workspaces}px`,
-        ["--sidebar-settings-width" as string]: `${sidebarWidths.settings}px`,
         ["--sidebar-nodes-width" as string]: `${sidebarWidths.nodes}px`,
         ["--sidebar-tuckspace-width" as string]: `${sidebarWidths.tuckspace}px`,
       }}
@@ -2217,20 +2251,71 @@ function WorkspaceCanvas() {
       >
         <div className="sidebar-controls-group">
           <div className="workspace-list">
-            {workspaceSummaries.map((workspace) => (
-              <button
-                key={workspace.id}
-                type="button"
-                className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}`}
-                onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
-                disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
-                title={workspace.name}
-              >
-                {workspace.name}
-              </button>
-            ))}
+            {workspaceSummaries.map((workspace) => {
+              const renaming = workspaceRenamingId === workspace.id;
+              const confirmingDelete = workspaceDeleteConfirmingId === workspace.id;
+              return (
+                <div
+                  key={workspace.id}
+                  className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}`}
+                >
+                  {renaming ? (
+                    <input
+                      className="sidebar-input workspace-list-name-input"
+                      value={workspaceRenameDraft}
+                      autoFocus
+                      onChange={(event) => setWorkspaceRenameDraft(event.target.value)}
+                      onBlur={() => void renameWorkspace(workspace.id, workspaceRenameDraft)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          void renameWorkspace(workspace.id, workspaceRenameDraft);
+                        } else if (event.key === "Escape") {
+                          setWorkspaceRenamingId(null);
+                          setWorkspaceRenameDraft("");
+                        }
+                      }}
+                      title="workspace name"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      className="workspace-list-select"
+                      onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
+                      disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
+                      title={workspace.name}
+                    >
+                      {workspace.name}
+                    </button>
+                  )}
+                  <div className="workspace-list-actions">
+                    <button
+                      type="button"
+                      className="workspace-list-action"
+                      onClick={() => beginWorkspaceRename(workspace.id, workspace.name)}
+                      disabled={workspaceSwitching}
+                      title="rename workspace"
+                    >
+                      ren
+                    </button>
+                    <button
+                      type="button"
+                      className={`workspace-list-action workspace-list-delete${confirmingDelete ? " is-confirming" : ""}`}
+                      onClick={() =>
+                        confirmingDelete
+                          ? void confirmDeleteWorkspace(workspace.id)
+                          : requestWorkspaceDelete(workspace.id)
+                      }
+                      disabled={workspaceSwitching || activeExecutions.length > 0}
+                      title={confirmingDelete ? "confirm delete workspace" : "delete workspace"}
+                    >
+                      {confirmingDelete ? "sure?" : "del"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <div className="workspace-picker-row">
+          <div className="workspace-picker-row workspace-picker-row-single">
             <button
               type="button"
               className="workspace-picker-create"
@@ -2240,65 +2325,14 @@ function WorkspaceCanvas() {
             >
               new
             </button>
-            <button
-              type="button"
-              className="workspace-picker-delete"
-              onClick={() => setWorkspaceDeleteConfirming(true)}
-              disabled={sidebarActionsDisabled}
-              title="delete this workspace"
-            >
-              del
-            </button>
           </div>
-          {workspaceDeleteConfirming && !workspaceSwitching ? (
-            <div className="workspace-picker-confirm">
-              <span className="workspace-picker-status">delete this workspace?</span>
-              <div className="workspace-picker-confirm-actions">
-                <button
-                  type="button"
-                  className="workspace-picker-delete workspace-picker-delete-confirm"
-                  onClick={() => void confirmDeleteWorkspace()}
-                  title="delete this workspace"
-                >
-                  delete
-                </button>
-                <button
-                  type="button"
-                  className="workspace-picker-cancel"
-                  onClick={() => setWorkspaceDeleteConfirming(false)}
-                  title="keep this workspace"
-                >
-                  cancel
-                </button>
-              </div>
-            </div>
-          ) : workspaceSwitching ? (
+          {workspaceSwitching ? (
             <span className="workspace-picker-status">switching…</span>
           ) : activeExecutions.length > 0 ? (
-            <span className="workspace-picker-status">stop runs to switch</span>
+            <span className="workspace-picker-status">stop runs to switch or delete</span>
           ) : null}
-          <label className="sidebar-field">
-            <span className="sidebar-label">workspace name</span>
-            <input
-              className="sidebar-input"
-              value={workspaceMeta.name}
-              onChange={(event) => updateWorkspaceName(event.target.value)}
-              placeholder="Workspace name"
-              title="workspace name"
-              disabled={workspaceSwitching}
-            />
-          </label>
         </div>
-      </SidebarPanel>
-
-      <SidebarPanel
-        id="settings"
-        label="settings"
-        collapsed={workspaceMeta.ui.sidebars.settings.collapsed}
-        side="left"
-        onToggle={() => toggleSidebar("settings")}
-        onResizeStart={(event) => startSidebarResize("settings", "left", event)}
-      >
+        <div className="sidebar-divider" />
         <div className="sidebar-controls-group">
           <span className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}>
             {kernelConnected ? "kernel online" : "kernel offline"}
