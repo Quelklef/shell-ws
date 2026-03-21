@@ -1884,7 +1884,7 @@ function WorkspaceCanvas() {
                   setDropTuckId(null);
                 }}
               >
-                <button type="button" className="tuckspace-restore" onClick={() => untuckSubgraph(item.id)}>
+                <button type="button" className="tuckspace-restore" onClick={() => untuckSubgraph(item.id)} title="Move to workspace">
                   <TuckspacePreview item={item} />
                   <span className="tuckspace-divider" aria-hidden="true" />
                   <input
