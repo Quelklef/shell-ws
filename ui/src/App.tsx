@@ -64,6 +64,7 @@ import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
 import { reorderItemsWithPlacement, useVerticalReorderDrag } from "./lib/reorderableList";
 import { sortWorkspaceSummaries, upsertWorkspaceSummary } from "./lib/workspaceList";
+import { chooseInitialWorkspaceId, loadGlobalActiveWorkspaceId, readWorkspaceIdFromUrl, saveGlobalActiveWorkspaceId, writeWorkspaceIdToUrl } from "./lib/activeWorkspace";
 import {
   COLLAPSED_SIDEBAR_WIDTH,
   SIDEBAR_MIN_WIDTH,
@@ -638,6 +639,14 @@ function WorkspaceCanvas() {
   useEffect(() => {
     workspaceMetaRef.current = workspaceMeta;
   }, [workspaceMeta]);
+
+  useEffect(() => {
+    if (!workspaceMeta?.id) {
+      return;
+    }
+    saveGlobalActiveWorkspaceId(workspaceMeta.id);
+    writeWorkspaceIdToUrl(workspaceMeta.id);
+  }, [workspaceMeta?.id]);
 
   useEffect(() => {
     sidebarUiRef.current = sidebarUi;
@@ -1848,9 +1857,14 @@ function WorkspaceCanvas() {
         }
         setWorkspaceDeleteConfirmingId(null);
         setWorkspaceSummaries(summaries);
+        const initialWorkspaceId = chooseInitialWorkspaceId(
+          summaries,
+          readWorkspaceIdFromUrl(),
+          loadGlobalActiveWorkspaceId(),
+        );
         const [sharedTuckspace, loadedWorkspace] = await Promise.all([
           getTuckspace(),
-          summaries.length > 0 ? getWorkspace(summaries[0].id) : createWorkspace(),
+          initialWorkspaceId ? getWorkspace(initialWorkspaceId) : createWorkspace(),
         ]);
         const loaded = sanitizeWorkspace(loadedWorkspace);
         if (disposed) {
