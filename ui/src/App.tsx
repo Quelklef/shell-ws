@@ -73,7 +73,8 @@ import {
   type SidebarId,
   type WorkspaceSidebars,
 } from "./lib/workspaceUi";
-import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
+import { missingConnectedInputs, missingOutputs, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
+import { outputPortsForKind, previewOutputPortsForKind } from "./lib/portSchema";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
 import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";

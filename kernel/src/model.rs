@@ -155,7 +155,6 @@ pub struct TopologyPreviewEdge {
     pub to_node_id: String,
 }
 
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Node {
@@ -513,9 +512,18 @@ pub fn sanitize_tuckspace_json_value(value: &mut serde_json::Value) {
 }
 
 fn sanitize_graph_container(obj: &mut serde_json::Map<String, serde_json::Value>) {
-    const REMOVED: &[&str] = &["tee", "merge_concat", "merge_line", "merge_byte", "merge_shell"];
+    const REMOVED: &[&str] = &[
+        "tee",
+        "merge_concat",
+        "merge_line",
+        "merge_byte",
+        "merge_shell",
+    ];
     let mut removed_ids = std::collections::HashSet::new();
-    if let Some(nodes) = obj.get_mut("nodes").and_then(serde_json::Value::as_array_mut) {
+    if let Some(nodes) = obj
+        .get_mut("nodes")
+        .and_then(serde_json::Value::as_array_mut)
+    {
         for node in nodes.iter_mut() {
             if let Some(node_obj) = node.as_object_mut() {
                 merge_legacy_materialized_values(node_obj);
@@ -534,7 +542,10 @@ fn sanitize_graph_container(obj: &mut serde_json::Map<String, serde_json::Value>
             true
         });
     }
-    if let Some(edges) = obj.get_mut("edges").and_then(serde_json::Value::as_array_mut) {
+    if let Some(edges) = obj
+        .get_mut("edges")
+        .and_then(serde_json::Value::as_array_mut)
+    {
         edges.retain(|edge| {
             let from = edge
                 .get("from")
@@ -573,18 +584,27 @@ fn merge_legacy_materialized_values(node: &mut serde_json::Map<String, serde_jso
         .unwrap_or_default();
 
     for legacy_key in ["materializedInputs", "materialized_inputs"] {
-        if let Some(values) = node.remove(legacy_key).and_then(|value| value.as_object().cloned()) {
+        if let Some(values) = node
+            .remove(legacy_key)
+            .and_then(|value| value.as_object().cloned())
+        {
             merged.extend(values);
         }
     }
     for legacy_key in ["materializedOutputs", "materialized_outputs"] {
-        if let Some(values) = node.remove(legacy_key).and_then(|value| value.as_object().cloned()) {
+        if let Some(values) = node
+            .remove(legacy_key)
+            .and_then(|value| value.as_object().cloned())
+        {
             merged.extend(values);
         }
     }
 
     if !merged.is_empty() {
-        node.insert("materializedValues".to_string(), serde_json::Value::Object(merged));
+        node.insert(
+            "materializedValues".to_string(),
+            serde_json::Value::Object(merged),
+        );
     }
 }
 
@@ -642,7 +662,8 @@ mod tests {
 
     #[test]
     fn buffering_mode_serializes_with_expected_underscore() {
-        let value = serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
+        let value =
+            serde_json::to_string(&super::BufferingMode::LineOr1024).expect("serialize mode");
         assert_eq!(value, "\"line_or_1024\"");
 
         let parsed: super::BufferingMode =
@@ -652,19 +673,22 @@ mod tests {
 
     #[test]
     fn legacy_process_kind_deserializes_as_script() {
-        let kind: super::NodeKind = serde_json::from_str("\"process\"").expect("deserialize legacy process kind");
+        let kind: super::NodeKind =
+            serde_json::from_str("\"process\"").expect("deserialize legacy process kind");
         assert_eq!(kind, super::NodeKind::Script);
     }
 
     #[test]
     fn legacy_cat_kind_deserializes_as_file() {
-        let kind: super::NodeKind = serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
+        let kind: super::NodeKind =
+            serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
         assert_eq!(kind, super::NodeKind::File);
     }
 
     #[test]
     fn display_kind_deserializes_as_display() {
-        let kind: super::NodeKind = serde_json::from_str("\"display\"").expect("deserialize display kind");
+        let kind: super::NodeKind =
+            serde_json::from_str("\"display\"").expect("deserialize display kind");
         assert_eq!(kind, super::NodeKind::Display);
     }
 
@@ -720,13 +744,20 @@ mod tests {
             "ui": {}
         });
         super::sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace = serde_json::from_value(value).expect("deserialize sanitized workspace");
+        let workspace: Workspace =
+            serde_json::from_value(value).expect("deserialize sanitized workspace");
         assert_eq!(
-            workspace.nodes[0].materialized_values.get("stdin").map(|value| value.data_base64.as_str()),
+            workspace.nodes[0]
+                .materialized_values
+                .get("stdin")
+                .map(|value| value.data_base64.as_str()),
             Some("aGVsbG8=")
         );
         assert_eq!(
-            workspace.nodes[0].materialized_values.get("stdout").map(|value| value.data_base64.as_str()),
+            workspace.nodes[0]
+                .materialized_values
+                .get("stdout")
+                .map(|value| value.data_base64.as_str()),
             Some("d29ybGQ=")
         );
     }
@@ -747,7 +778,8 @@ mod tests {
             "ui": {}
         });
         super::sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace = serde_json::from_value(value).expect("deserialize sanitized workspace");
+        let workspace: Workspace =
+            serde_json::from_value(value).expect("deserialize sanitized workspace");
         assert_eq!(workspace.nodes.len(), 1);
         assert_eq!(workspace.nodes[0].id, "text-1");
         assert!(workspace.edges.is_empty());
@@ -789,13 +821,13 @@ mod tests {
             Some(381.0)
         );
 
-        let serialized = serde_json::to_value(&workspace).expect("serialize workspace with pane sizes");
+        let serialized =
+            serde_json::to_value(&workspace).expect("serialize workspace with pane sizes");
         assert_eq!(
             serialized["nodes"][0]["uiState"]["paneSizes"]["text"]["height"],
             serde_json::json!(381.0)
         );
     }
-
 
     #[test]
     fn workspace_preserves_tuckspace_roundtrip() {
@@ -835,8 +867,12 @@ mod tests {
         assert_eq!(workspace.tuckspace.len(), 1);
         assert_eq!(workspace.tuckspace[0].name, "Saved");
         assert!(workspace.tuckspace[0].user_named);
-        let serialized = serde_json::to_value(&workspace).expect("serialize workspace with tuckspace");
-        assert_eq!(serialized["tuckspace"][0]["name"], serde_json::json!("Saved"));
+        let serialized =
+            serde_json::to_value(&workspace).expect("serialize workspace with tuckspace");
+        assert_eq!(
+            serialized["tuckspace"][0]["name"],
+            serde_json::json!("Saved")
+        );
     }
 
     #[test]
@@ -906,7 +942,8 @@ mod tests {
             "ui": {}
         });
         super::sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace = serde_json::from_value(value).expect("deserialize sanitized tuckspace workspace");
+        let workspace: Workspace =
+            serde_json::from_value(value).expect("deserialize sanitized tuckspace workspace");
         assert_eq!(workspace.tuckspace[0].nodes.len(), 1);
         assert_eq!(workspace.tuckspace[0].nodes[0].kind, super::NodeKind::File);
         assert!(workspace.tuckspace[0].edges.is_empty());
@@ -924,7 +961,11 @@ mod tests {
 
         let event: ClientEvent = serde_json::from_value(payload).expect("deserialize run event");
         match event {
-            ClientEvent::RunNode { workspace, node_id, action } => {
+            ClientEvent::RunNode {
+                workspace,
+                node_id,
+                action,
+            } => {
                 assert_eq!(workspace.id, "default");
                 assert_eq!(node_id, "text-1");
                 assert_eq!(action, ExecutionAction::RerunPush);

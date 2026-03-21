@@ -1,21 +1,7 @@
 import type { NodeKind, PortKind } from "./types";
-import { outputPortsForKind, previewOutputPortsForKind } from "./materialized";
+import { nodeHasArgvPort, nodeHasInputPort, previewOutputPortsForKind, nodePreviewTabs } from "./portSchema";
 
-export function nodeHasInputPort(kind: NodeKind) {
-  return kind !== "text" && kind !== "file" && kind !== "formula";
-}
-
-export function nodeHasArgvPort(kind: NodeKind) {
-  return kind === "script" || kind === "ai_script" || kind === "exec" || kind === "formula";
-}
-
-export function nodePreviewTabs(kind: NodeKind): PortKind[] {
-  const tabs: PortKind[] = [...previewOutputPortsForKind(kind)];
-  if (nodeHasInputPort(kind)) {
-    tabs.unshift("stdin");
-  }
-  return tabs;
-}
+export { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "./portSchema";
 
 export function nodeArgvSlots(
   nodeId: string,
@@ -48,7 +34,7 @@ export function nodePreviewTabsForNode(
   const inputs = edges
     .filter((edge) => edge.target === nodeId)
     .map((edge) => parseHandleId(edge.targetHandle));
-  if (inputs.some((entry) => entry.port === "stdin")) {
+  if (nodeHasInputPort(kind) && inputs.some((entry) => entry.port === "stdin")) {
     tabs.push("stdin");
   }
   if (nodeHasArgvPort(kind)) {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { nodeArgvSlots, nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs, nodePreviewTabsForNode } from "./nodePorts";
+import { nodeArgvSlots, nodePreviewTabsForNode } from "./nodePorts";
+import { nodeHasArgvPort, nodeHasInputPort, nodePortSchema, nodePreviewTabs, outputPortsForKind, previewOutputPortsForKind } from "./portSchema";
 
 describe("node port affordances", () => {
   it("matches previews to each node's actual input and output ports", () => {
@@ -54,5 +55,29 @@ describe("node port affordances", () => {
         },
       ),
     ).toEqual(["stdin", "argv-2", "stdout", "stderr"]);
+  });
+});
+
+
+describe("node port schema", () => {
+  it("centralizes port exposure per node kind", () => {
+    expect(nodePortSchema("display")).toEqual({
+      stdin: true,
+      argv: false,
+      sourceOutputs: [],
+      previewOutputs: ["stdout"],
+    });
+    expect(nodePortSchema("formula")).toEqual({
+      stdin: false,
+      argv: true,
+      sourceOutputs: ["stdout", "stderr"],
+      previewOutputs: ["stdout", "stderr"],
+    });
+  });
+
+  it("derives output and preview ports from the schema", () => {
+    expect(outputPortsForKind("display")).toEqual([]);
+    expect(previewOutputPortsForKind("display")).toEqual(["stdout"]);
+    expect(outputPortsForKind("script")).toEqual(["stdout", "stderr"]);
   });
 });

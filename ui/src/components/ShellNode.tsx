@@ -11,7 +11,7 @@ import ResizablePane from "./ResizablePane";
 import { analyzeFormula, FORMULA_SYNTAX_OVERVIEW } from "../lib/formula";
 import { renderDisplay } from "../lib/format";
 import { ACTIONS } from "../lib/actionIcons";
-import { outputPortsForKind } from "../lib/materialized";
+import { outputPortsForKind } from "../lib/portSchema";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
 import { paneHeight, previewPaneId } from "../lib/paneLayout";
 import type {

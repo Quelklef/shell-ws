@@ -7,6 +7,7 @@ import type {
   PortKind,
   WorkspaceNode,
 } from "./types";
+import { outputPortsForKind } from "./portSchema";
 
 export function isInputPreviewKey(key: string) {
   return key === "stdin" || /^argv-\d+$/.test(key);
@@ -58,32 +59,6 @@ export function materializedValuesFromRuntime(previews?: Record<string, DisplayS
     }
   }
   return materializedValues;
-}
-
-export function outputPortsForKind(kind: NodeKind): PortKind[] {
-  switch (kind) {
-    case "script":
-    case "ai_script":
-    case "exec":
-    case "file":
-    case "formula":
-      return ["stdout", "stderr"];
-    case "text":
-    case "passthru":
-      return ["stdout"];
-    case "display":
-    case "html":
-      return [];
-  }
-}
-
-export function previewOutputPortsForKind(kind: NodeKind): PortKind[] {
-  switch (kind) {
-    case "display":
-      return ["stdout"];
-    default:
-      return outputPortsForKind(kind);
-  }
 }
 
 export function connectedInputKeys(

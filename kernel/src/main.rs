@@ -3,6 +3,7 @@ mod formula;
 mod id;
 mod model;
 mod openai;
+mod port_schema;
 mod tuckspace_store;
 mod workspace_store;
 

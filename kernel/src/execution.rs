@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::error;
 
 use crate::formula;
+use crate::port_schema::node_port_schema;
 use crate::model::{
     default_cwd, BufferingMode, Edge, ExecutionAction, LegacyPersistedDisplayState, MaterializedValue,
     Node, NodeKind, PortKind, ServerEvent, Workspace,
@@ -32,35 +33,20 @@ fn node_label(node: &Node) -> &str {
     }
 }
 
-// Some nodes materialize previewable outputs without exposing a source handle.
-// Keep wireable ports separate from persisted output previews so display sinks can
-// render stdout without participating in repush or downstream graph transport.
 fn source_output_ports(kind: &NodeKind) -> &'static [PortKind] {
-    match kind {
-        NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::File | NodeKind::Formula => {
-            &[PortKind::Stdout, PortKind::Stderr]
-        }
-        NodeKind::Text | NodeKind::Passthru => &[PortKind::Stdout],
-        NodeKind::Display | NodeKind::Html => &[],
-    }
+    node_port_schema(kind).source_outputs
 }
 
 fn materialized_output_ports(kind: &NodeKind) -> &'static [PortKind] {
-    match kind {
-        NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::File | NodeKind::Formula => {
-            &[PortKind::Stdout, PortKind::Stderr]
-        }
-        NodeKind::Text | NodeKind::Passthru | NodeKind::Display => &[PortKind::Stdout],
-        NodeKind::Html => &[],
-    }
+    node_port_schema(kind).materialized_outputs
 }
 
 fn node_accepts_stdin(kind: &NodeKind) -> bool {
-    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Passthru | NodeKind::Display | NodeKind::Html)
+    node_port_schema(kind).stdin
 }
 
 fn node_accepts_argv(kind: &NodeKind) -> bool {
-    matches!(kind, NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Formula)
+    node_port_schema(kind).argv
 }
 
 fn output_key(port: PortKind) -> &'static str {
