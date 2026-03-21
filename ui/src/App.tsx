@@ -1847,7 +1847,6 @@ function WorkspaceCanvas() {
       <aside className="tuckspace-drawer">
         <div className="tuckspace-header">
           <div className="node-palette-label">tuckspace</div>
-          <div className="tuckspace-count">{tuckspace.length}</div>
         </div>
         <div className="tuckspace-list">
           {tuckspace.length === 0 ? (

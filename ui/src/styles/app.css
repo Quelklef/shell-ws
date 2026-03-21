@@ -322,16 +322,6 @@ textarea {
   gap: 12px;
 }
 
-.tuckspace-count {
-  min-width: 28px;
-  padding: 4px 8px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-soft);
-}
-
 .tuckspace-list {
   min-height: 0;
   display: flex;
