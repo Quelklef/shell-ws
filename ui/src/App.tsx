@@ -27,6 +27,7 @@ import ShellNode from "./components/ShellNode";
 import WorkspaceEdgeView from "./components/WorkspaceEdge";
 import {
   createWorkspace,
+  deleteWorkspace,
   generateScript,
   getTuckspace,
   getWorkspace,
@@ -493,6 +494,7 @@ function WorkspaceCanvas() {
     "id" | "name" | "cwd" | "openaiApiKey" | "ui"
   > | null>(null);
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
+  const [workspaceDeleteConfirming, setWorkspaceDeleteConfirming] = useState(false);
   const [kernelConnected, setKernelConnected] = useState(false);
   const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
@@ -1435,9 +1437,7 @@ function WorkspaceCanvas() {
     [handlers, persistSoon, setEdges, setNodes],
   );
 
-  // Workspace switches must flush any debounced saves first so delayed timers do not
-  // persist the old canvas into the newly selected workspace id.
-  const flushPendingWorkspaceSave = useCallback(async () => {
+  const cancelPendingWorkspaceSaves = useCallback(() => {
     if (persistTimerRef.current !== null) {
       window.clearTimeout(persistTimerRef.current);
       persistTimerRef.current = null;
@@ -1446,11 +1446,17 @@ function WorkspaceCanvas() {
       window.clearTimeout(layoutPersistTimerRef.current);
       layoutPersistTimerRef.current = null;
     }
+  }, []);
+
+  // Workspace switches must flush any debounced saves first so delayed timers do not
+  // persist the old canvas into the newly selected workspace id.
+  const flushPendingWorkspaceSave = useCallback(async () => {
+    cancelPendingWorkspaceSaves();
     const nextWorkspace = buildWorkspace();
     if (nextWorkspace) {
       await saveWorkspace(nextWorkspace);
     }
-  }, [buildWorkspace]);
+  }, [buildWorkspace, cancelPendingWorkspaceSaves]);
 
   const applyLoadedWorkspace = useCallback((loaded: Workspace) => {
     const ui =
@@ -1507,6 +1513,7 @@ function WorkspaceCanvas() {
     setRuntime(loadedRuntime);
     setActiveExecutions([]);
     setContextMenu(null);
+    setWorkspaceDeleteConfirming(false);
     setPendingTuckDrag(null);
     setDraggedTuckId(null);
     setTuckDropMarker(null);
@@ -1558,6 +1565,36 @@ function WorkspaceCanvas() {
     }
   }, [activeExecutions.length, applyLoadedWorkspace, flushPendingWorkspaceSave]);
 
+
+  const confirmDeleteWorkspace = useCallback(async () => {
+    const currentWorkspace = workspaceMetaRef.current;
+    if (!currentWorkspace) {
+      return;
+    }
+    if (activeExecutions.length > 0) {
+      setToast("stop active executions before deleting a workspace");
+      return;
+    }
+    setWorkspaceSwitching(true);
+    setWorkspaceDeleteConfirming(false);
+    try {
+      cancelPendingWorkspaceSaves();
+      const remainingSummaries = workspaceSummaries.filter((workspace) => workspace.id !== currentWorkspace.id);
+      await deleteWorkspace(currentWorkspace.id);
+      if (remainingSummaries.length === 0) {
+        const created = sanitizeWorkspace(await createWorkspace());
+        applyLoadedWorkspace(created);
+        return;
+      }
+      setWorkspaceSummaries(remainingSummaries);
+      applyLoadedWorkspace(sanitizeWorkspace(await getWorkspace(remainingSummaries[0].id)));
+    } catch (error) {
+      setToast(String(error));
+    } finally {
+      setWorkspaceSwitching(false);
+    }
+  }, [activeExecutions.length, applyLoadedWorkspace, cancelPendingWorkspaceSaves, workspaceSummaries]);
+
   useEffect(() => {
     let disposed = false;
 
@@ -1568,6 +1605,7 @@ function WorkspaceCanvas() {
         if (disposed) {
           return;
         }
+        setWorkspaceDeleteConfirming(false);
         setWorkspaceSummaries(summaries);
         const [sharedTuckspace, loadedWorkspace] = await Promise.all([
           getTuckspace(),
@@ -2030,8 +2068,39 @@ function WorkspaceCanvas() {
               >
                 new
               </button>
+              <button
+                type="button"
+                className="workspace-picker-delete"
+                onClick={() => setWorkspaceDeleteConfirming(true)}
+                disabled={workspaceSwitching || activeExecutions.length > 0}
+                title="delete this workspace"
+              >
+                del
+              </button>
             </div>
-            {workspaceSwitching ? (
+            {workspaceDeleteConfirming && !workspaceSwitching ? (
+              <div className="workspace-picker-confirm">
+                <span className="workspace-picker-status">delete this workspace?</span>
+                <div className="workspace-picker-confirm-actions">
+                  <button
+                    type="button"
+                    className="workspace-picker-delete workspace-picker-delete-confirm"
+                    onClick={() => void confirmDeleteWorkspace()}
+                    title="delete this workspace"
+                  >
+                    delete
+                  </button>
+                  <button
+                    type="button"
+                    className="workspace-picker-cancel"
+                    onClick={() => setWorkspaceDeleteConfirming(false)}
+                    title="keep this workspace"
+                  >
+                    cancel
+                  </button>
+                </div>
+              </div>
+            ) : workspaceSwitching ? (
               <span className="workspace-picker-status">switching…</span>
             ) : activeExecutions.length > 0 ? (
               <span className="workspace-picker-status">stop runs to switch</span>

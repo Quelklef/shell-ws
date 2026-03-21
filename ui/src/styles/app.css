@@ -144,7 +144,7 @@ textarea {
 
 .workspace-picker-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 6px;
 }
 
@@ -159,6 +159,38 @@ textarea {
   font-size: 10px;
 }
 
+
+.workspace-picker-delete,
+.workspace-picker-cancel {
+  padding: 8px 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+}
+
+.workspace-picker-delete {
+  border-color: rgba(222, 93, 93, 0.42);
+  color: #f1b0b0;
+  background: linear-gradient(180deg, rgba(79, 24, 24, 0.6), rgba(42, 16, 16, 0.88));
+}
+
+.workspace-picker-delete:hover,
+.workspace-picker-delete-confirm:hover {
+  border-color: rgba(222, 93, 93, 0.72);
+  background: linear-gradient(180deg, rgba(111, 32, 32, 0.68), rgba(56, 18, 18, 0.92));
+}
+
+.workspace-picker-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace-picker-confirm-actions {
+  display: flex;
+  gap: 6px;
+}
+
 .workspace-picker-status {
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -167,11 +199,15 @@ textarea {
 }
 
 .workspace-picker-select:disabled,
-.workspace-picker-create:disabled {
+.workspace-picker-create:disabled,
+.workspace-picker-delete:disabled,
+.workspace-picker-cancel:disabled {
   opacity: 0.58;
 }
 
-.workspace-picker-create:disabled:hover {
+.workspace-picker-create:disabled:hover,
+.workspace-picker-delete:disabled:hover,
+.workspace-picker-cancel:disabled:hover {
   transform: none;
   border-color: var(--line);
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
@@ -262,7 +298,9 @@ textarea {
 .ai-generate-shell button,
 .exec-arg-add,
 .exec-arg-delete,
-.workspace-picker-create {
+.workspace-picker-create,
+.workspace-picker-delete,
+.workspace-picker-cancel {
   border: 1px solid var(--line);
   color: var(--text);
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
@@ -283,7 +321,9 @@ textarea {
 .ai-generate-shell button:hover,
 .exec-arg-add:hover,
 .exec-arg-delete:hover,
-.workspace-picker-create:hover {
+.workspace-picker-create:hover,
+.workspace-picker-delete:hover,
+.workspace-picker-cancel:hover {
   transform: translateY(-1px);
   border-color: var(--line-strong);
   background: rgba(240, 138, 93, 0.12);

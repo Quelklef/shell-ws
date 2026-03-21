@@ -51,6 +51,10 @@ export function saveWorkspace(workspace: Workspace) {
   });
 }
 
+export function deleteWorkspace(id: string) {
+  return request<void>(`${kernelOrigin()}/api/workspaces/${id}`, { method: "DELETE" });
+}
+
 export function pickFilePath() {
   return request<{ path: string }>(`${kernelOrigin()}/api/pick-file`, { method: "POST" });
 }
