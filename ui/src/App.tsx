@@ -53,12 +53,14 @@ import type {
   Workspace,
   WorkspaceEdge,
   WorkspaceNode,
+  TuckedSubgraph,
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
+import { buildTuckedSubgraph, defaultTuckedName, isClosedSelection } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -313,6 +315,19 @@ function flowEdgeToWorkspaceEdge(edge: FlowEdge): WorkspaceEdge {
       (edge.data?.buffering as BufferingMode | undefined) ?? "unbuffered",
   };
 }
+function flowNodeToPersistedWorkspaceNode(
+  node: FlowNode,
+  runtime: Record<string, NodeRuntimeState>,
+): WorkspaceNode {
+  const model = flowNodeToWorkspaceNode(node);
+  const runtimeState = runtime[node.id];
+  const materializedValues = materializedValuesFromRuntime(runtimeState?.previews);
+  return {
+    ...model,
+    materializedValues: runtimeState?.previews ? materializedValues : model.materializedValues,
+  };
+}
+
 
 type ShellNodeActions = {
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
@@ -333,6 +348,40 @@ type AutorunHandle = {
   timerId: number;
 };
 
+function TuckspacePreview({ item }: { item: TuckedSubgraph }) {
+  const positions = new Map(item.topologyPreview.nodes.map((node) => [node.id, node]));
+  return (
+    <svg className="tuckspace-preview" viewBox="0 0 100 72" aria-hidden="true">
+      {item.topologyPreview.edges.map((edge) => {
+        const from = positions.get(edge.fromNodeId);
+        const to = positions.get(edge.toNodeId);
+        if (!from || !to) {
+          return null;
+        }
+        return (
+          <line
+            key={edge.id}
+            className="tuckspace-preview-edge"
+            x1={from.x}
+            y1={from.y}
+            x2={to.x}
+            y2={to.y}
+          />
+        );
+      })}
+      {item.topologyPreview.nodes.map((node) => (
+        <circle
+          key={node.id}
+          className={`tuckspace-preview-node tuckspace-preview-node-${node.kind}`}
+          cx={node.x}
+          cy={node.y}
+          r="5"
+        />
+      ))}
+    </svg>
+  );
+}
+
 function WorkspaceCanvas() {
   const [workspaceMeta, setWorkspaceMeta] = useState<Pick<
     Workspace,
@@ -341,6 +390,7 @@ function WorkspaceCanvas() {
   const [kernelConnected, setKernelConnected] = useState(false);
   const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
+  const [tuckspace, setTuckspace] = useState<TuckedSubgraph[]>([]);
   const [activeExecutions, setActiveExecutions] = useState<
     { execId: string; nodeId: string }[]
   >([]);
@@ -372,6 +422,7 @@ function WorkspaceCanvas() {
   const persistTimerRef = useRef<number | null>(null);
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
+  const tuckspaceRef = useRef<TuckedSubgraph[]>([]);
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
@@ -398,6 +449,10 @@ function WorkspaceCanvas() {
   useEffect(() => {
     runtimeRef.current = runtime;
   }, [runtime]);
+
+  useEffect(() => {
+    tuckspaceRef.current = tuckspace;
+  }, [tuckspace]);
 
   useEffect(() => {
     const previewIds = userSelectionActive && userSelectionRect
@@ -453,6 +508,7 @@ function WorkspaceCanvas() {
         "id" | "name" | "cwd" | "openaiApiKey" | "ui"
       > | null = workspaceMetaRef.current,
       runtimeArg: Record<string, NodeRuntimeState> = runtimeRef.current,
+      tuckspaceArg: TuckedSubgraph[] = tuckspaceRef.current,
     ): Workspace | null => {
       if (!metaArg) {
         return null;
@@ -463,16 +519,9 @@ function WorkspaceCanvas() {
         ui: metaArg.ui,
         cwd: metaArg.cwd,
         openaiApiKey: metaArg.openaiApiKey,
-        nodes: nodesArg.map((node) => {
-          const model = flowNodeToWorkspaceNode(node);
-          const runtimeState = runtimeArg[node.id];
-          const materializedValues = materializedValuesFromRuntime(runtimeState?.previews);
-          return {
-            ...model,
-            materializedValues: runtimeState?.previews ? materializedValues : model.materializedValues,
-          };
-        }),
+        nodes: nodesArg.map((node) => flowNodeToPersistedWorkspaceNode(node, runtimeArg)),
         edges: edgesArg.map(flowEdgeToWorkspaceEdge),
+        tuckspace: tuckspaceArg,
       };
     },
     [],
@@ -536,6 +585,24 @@ function WorkspaceCanvas() {
     },
     [buildWorkspace],
   );
+
+  const persistWorkspaceSnapshot = useCallback((
+    nextNodes: FlowNode[],
+    nextEdges: FlowEdge[],
+    nextTuckspace: TuckedSubgraph[],
+    nextRuntime: Record<string, NodeRuntimeState> = runtimeRef.current,
+  ) => {
+    nodesRef.current = nextNodes;
+    edgesRef.current = nextEdges;
+    tuckspaceRef.current = nextTuckspace;
+    runtimeRef.current = nextRuntime;
+    // Tucking is a move, not two unrelated saves. Persist the workspace graph and
+    // tuckspace together or a partial write can delete or duplicate user data.
+    const nextWorkspace = buildWorkspace(nextNodes, nextEdges, workspaceMetaRef.current, nextRuntime, nextTuckspace);
+    if (nextWorkspace) {
+      saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+    }
+  }, [buildWorkspace]);
 
   const updateWorkspaceCwd = useCallback(
     (cwd: string) => {
@@ -907,6 +974,7 @@ function WorkspaceCanvas() {
           toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
         );
         setRuntime(loadedRuntime);
+        setTuckspace(loaded.tuckspace);
         setNodes(
           loaded.nodes.map((node) =>
             toFlowNode(node, loadedRuntime, {}, handlers, loadedEdges),
@@ -1395,6 +1463,104 @@ function WorkspaceCanvas() {
     [flow, handlers, persistSoon, runtime, setNodes],
   );
 
+  const renameTuckedSubgraph = useCallback((tuckId: string, name: string) => {
+    const nextTuckspace = tuckspaceRef.current.map((item) => (item.id === tuckId ? { ...item, name } : item));
+    setTuckspace(nextTuckspace);
+    persistWorkspaceSnapshot(nodesRef.current, edgesRef.current, nextTuckspace);
+  }, [persistWorkspaceSnapshot]);
+
+  const tuckSelectedSubgraph = useCallback(() => {
+    const selectedIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
+    if (!isClosedSelection(selectedIds, edgesRef.current)) {
+      return;
+    }
+    const tuckedNodes = nodesRef.current
+      .filter((node) => selectedIds.has(node.id))
+      .map((node) => flowNodeToPersistedWorkspaceNode(node, runtimeRef.current));
+    const tuckedEdges = edgesRef.current
+      .filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
+      .map(flowEdgeToWorkspaceEdge);
+    const nextTuckspace = [
+      ...tuckspaceRef.current,
+      buildTuckedSubgraph(defaultTuckedName(tuckspaceRef.current), tuckedNodes, tuckedEdges),
+    ];
+    const nextNodes = nodesRef.current.filter((node) => !selectedIds.has(node.id));
+    const nextEdges = edgesRef.current.filter(
+      (edge) => !selectedIds.has(edge.source) && !selectedIds.has(edge.target),
+    );
+    const nextRuntime = Object.fromEntries(
+      Object.entries(runtimeRef.current).filter(([nodeId]) => !selectedIds.has(nodeId)),
+    );
+    for (const nodeId of selectedIds) {
+      clearRunningTimer(nodeId);
+    }
+    setGeneration((current) => Object.fromEntries(
+      Object.entries(current).filter(([nodeId]) => !selectedIds.has(nodeId)),
+    ));
+    setActiveExecutions((current) => current.filter((entry) => !selectedIds.has(entry.nodeId)));
+    setTuckspace(nextTuckspace);
+    setRuntime(nextRuntime);
+    setEdges(nextEdges);
+    setNodes(nextNodes);
+    persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
+    setContextMenu(null);
+  }, [clearRunningTimer, persistWorkspaceSnapshot, setEdges, setNodes]);
+
+  const untuckSubgraph = useCallback((tuckId: string) => {
+    const item = tuckspaceRef.current.find((entry) => entry.id === tuckId);
+    if (!item) {
+      return;
+    }
+    const existingNodeIds = new Set(nodesRef.current.map((node) => node.id));
+    const existingEdgeIds = new Set(edgesRef.current.map((edge) => edge.id));
+    if (item.nodes.some((node) => existingNodeIds.has(node.id)) || item.edges.some((edge) => existingEdgeIds.has(edge.id))) {
+      setToast('cannot restore subgraph: ids already exist in this workspace');
+      return;
+    }
+    const nextTuckspace = tuckspaceRef.current.filter((entry) => entry.id !== tuckId);
+    const restoredRuntime = Object.fromEntries(
+      item.nodes.map((node) => [
+        node.id,
+        {
+          running: false,
+          portActivity: {},
+          previews: runtimePreviewsFromNode(node),
+        },
+      ]),
+    );
+    const nextRuntime = {
+      ...runtimeRef.current,
+      ...restoredRuntime,
+    };
+    const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering));
+    const nextEdges = [...edgesRef.current, ...restoredEdges];
+    const preservedNodes = nodesRef.current.map((node) => ({ ...node, selected: false }));
+    const restoredNodes = item.nodes.map((node) => ({
+      ...toFlowNode(node, nextRuntime, generationRef.current, handlers, nextEdges),
+      selected: true,
+    }));
+    const nextNodes = [...preservedNodes, ...restoredNodes];
+    setTuckspace(nextTuckspace);
+    setRuntime(nextRuntime);
+    setEdges(nextEdges);
+    setNodes(nextNodes);
+    persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
+  }, [cycleEdgeBuffering, deleteEdge, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
+
+  const selectedNodeIds = useMemo(
+    () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
+    [nodes],
+  );
+  const canTuckSelection = useMemo(
+    () => isClosedSelection(selectedNodeIds, edges),
+    [edges, selectedNodeIds],
+  );
+  const tuckDisabledReason = selectedNodeIds.size === 0
+    ? 'select a subgraph first'
+    : canTuckSelection
+      ? null
+      : 'selection must be closed before tucking';
+
   const runLayout = useCallback(() => {
     const selectedNodeIds = nodesRef.current
       .filter((node) => node.selected)
@@ -1627,10 +1793,47 @@ function WorkspaceCanvas() {
             <button type="button" onClick={runLayout}>
               layout selected
             </button>
+            <button
+              type="button"
+              onClick={tuckSelectedSubgraph}
+              disabled={!canTuckSelection}
+              title={tuckDisabledReason ?? "Move the selected closed subgraph into tuckspace."}
+            >
+              add to tuckspace
+            </button>
           </div>
         )}
         {toast && <div className="toast">{toast}</div>}
       </main>
+
+      <aside className="tuckspace-drawer">
+        <div className="tuckspace-header">
+          <div className="node-palette-label">tuckspace</div>
+          <div className="tuckspace-count">{tuckspace.length}</div>
+        </div>
+        <div className="tuckspace-list">
+          {tuckspace.length === 0 ? (
+            <div className="tuckspace-empty">Closed subgraphs you tuck away will appear here.</div>
+          ) : (
+            tuckspace.map((item) => (
+              <article key={item.id} className="tuckspace-item">
+                <button type="button" className="tuckspace-restore" onClick={() => untuckSubgraph(item.id)}>
+                  <TuckspacePreview item={item} />
+                  <span className="tuckspace-meta">
+                    <span className="tuckspace-stats">{item.nodes.length} nodes · {item.edges.length} wires</span>
+                  </span>
+                </button>
+                <input
+                  className="tuckspace-name"
+                  value={item.name}
+                  onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
+                  aria-label="tucked subgraph name"
+                />
+              </article>
+            ))
+          )}
+        </div>
+      </aside>
     </div>
   );
 }

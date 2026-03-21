@@ -1,4 +1,4 @@
-import type { ExecArg, MaterializedValue, Workspace, WorkspaceNode } from "./types";
+import type { AutoRunConfig, ExecArg, MaterializedValue, TuckedSubgraph, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
 
 type LegacyMaterializedNode = WorkspaceNode & {
   materializedInputs?: Record<string, MaterializedValue> | null;
@@ -51,6 +51,20 @@ function normalizeExecArgs(args: unknown): ExecArg[] | null | undefined {
   });
 }
 
+
+function normalizeAutoRun(autoRun: WorkspaceNode["autoRun"]): AutoRunConfig | null | undefined {
+  if (!autoRun) {
+    return autoRun;
+  }
+  if (autoRun.mode === ("push" as never)) {
+    return { ...autoRun, mode: "rerun_push" };
+  }
+  if (autoRun.mode === ("pull" as never)) {
+    return { ...autoRun, mode: "pull_run" };
+  }
+  return autoRun;
+}
+
 function migrateLegacyPreviews(previews?: Record<string, { dataBase64: string }> | null) {
   const materializedValues: Record<string, MaterializedValue> = {};
   for (const [key, value] of Object.entries(previews ?? {})) {
@@ -61,8 +75,8 @@ function migrateLegacyPreviews(previews?: Record<string, { dataBase64: string }>
   return materializedValues;
 }
 
-export function sanitizeWorkspace(workspace: Workspace): Workspace {
-  const nodes = workspace.nodes
+function sanitizeNodesAndEdges(nodesInput: WorkspaceNode[], edgesInput: WorkspaceEdge[]) {
+  const nodes = nodesInput
     .map((node) => ({
       ...node,
       kind:
@@ -74,9 +88,6 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
   const validNodeIds = new Set(nodes.map((node) => node.id));
 
   return {
-    ...workspace,
-    cwd: workspace.cwd ?? "",
-    openaiApiKey: workspace.openaiApiKey ?? "",
     nodes: nodes.map((node) => {
       const migrated = migrateLegacyPreviews(node.uiState?.previews);
       // Older workspaces persisted materialized inputs and outputs separately.
@@ -91,12 +102,7 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
             };
       return {
         ...node,
-        autoRun:
-          node.autoRun && node.autoRun.mode === ("push" as never)
-            ? { ...node.autoRun, mode: "rerun_push" }
-            : node.autoRun && node.autoRun.mode === ("pull" as never)
-              ? { ...node.autoRun, mode: "pull_run" }
-              : node.autoRun,
+        autoRun: normalizeAutoRun(node.autoRun),
         args: normalizeExecArgs(node.args),
         materializedValues,
         uiState: node.uiState
@@ -109,11 +115,37 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
           : node.uiState,
       };
     }),
-    edges: workspace.edges.filter(
+    edges: edgesInput.filter(
       (edge) =>
         !(edge.to.port === "argv" && edge.to.slot == null) &&
         validNodeIds.has(edge.from.nodeId) &&
         validNodeIds.has(edge.to.nodeId),
     ),
+  };
+}
+
+function sanitizeTuckedSubgraph(item: TuckedSubgraph): TuckedSubgraph {
+  const sanitized = sanitizeNodesAndEdges(item.nodes ?? [], item.edges ?? []);
+  return {
+    ...item,
+    name: item.name ?? "Untitled subgraph",
+    nodes: sanitized.nodes,
+    edges: sanitized.edges,
+    topologyPreview: {
+      nodes: item.topologyPreview?.nodes ?? [],
+      edges: item.topologyPreview?.edges ?? [],
+    },
+  };
+}
+
+export function sanitizeWorkspace(workspace: Workspace): Workspace {
+  const sanitized = sanitizeNodesAndEdges(workspace.nodes ?? [], workspace.edges ?? []);
+  return {
+    ...workspace,
+    cwd: workspace.cwd ?? "",
+    openaiApiKey: workspace.openaiApiKey ?? "",
+    nodes: sanitized.nodes,
+    edges: sanitized.edges,
+    tuckspace: (workspace.tuckspace ?? []).map(sanitizeTuckedSubgraph),
   };
 }

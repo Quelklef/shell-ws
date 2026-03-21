@@ -22,6 +22,7 @@ describe("sanitizeWorkspace", () => {
         },
       ],
       edges: [],
+      tuckspace: [],
     } as unknown as Workspace;
 
     expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("file");
@@ -45,6 +46,7 @@ describe("sanitizeWorkspace", () => {
         },
       ],
       edges: [],
+      tuckspace: [],
     } as unknown as Workspace;
 
     expect(sanitizeWorkspace(workspace).nodes[0]?.kind).toBe("display");
@@ -83,6 +85,7 @@ describe("sanitizeWorkspace", () => {
           buffering: "line_or_1024",
         },
       ],
+      tuckspace: [],
     };
 
     expect(sanitizeWorkspace(workspace).edges.map((edge) => edge.id)).toEqual([
@@ -266,4 +269,32 @@ it("preserves persisted pane sizes", () => {
     script: { height: 180 },
     "preview-stdout": { height: 144 },
   });
+});
+
+
+it("defaults tuckspace to an empty list and sanitizes tucked subgraphs", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    openaiApiKey: "",
+    nodes: [],
+    edges: [],
+    tuckspace: [
+      {
+        id: "t1",
+        name: "Saved",
+        nodes: [
+          { id: "cat-1", kind: "cat", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } },
+        ],
+        edges: [],
+        topologyPreview: { nodes: [], edges: [] },
+      },
+    ],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitizeWorkspace({ ...workspace, tuckspace: undefined as never }).tuckspace).toEqual([]);
+  expect(sanitized.tuckspace[0]?.nodes[0]?.kind).toBe("file");
 });

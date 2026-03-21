@@ -15,6 +15,8 @@ pub struct Workspace {
     #[serde(default)]
     pub edges: Vec<Edge>,
     #[serde(default)]
+    pub tuckspace: Vec<TuckedSubgraph>,
+    #[serde(default)]
     pub ui: WorkspaceUi,
 }
 
@@ -85,10 +87,51 @@ impl Workspace {
                 },
                 buffering: BufferingMode::Unbuffered,
             }],
+            tuckspace: Vec::new(),
             ui: WorkspaceUi::default(),
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TuckedSubgraph {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub nodes: Vec<Node>,
+    #[serde(default)]
+    pub edges: Vec<Edge>,
+    #[serde(default)]
+    pub topology_preview: TopologyPreview,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyPreview {
+    #[serde(default)]
+    pub nodes: Vec<TopologyPreviewNode>,
+    #[serde(default)]
+    pub edges: Vec<TopologyPreviewEdge>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyPreviewNode {
+    pub id: String,
+    pub kind: NodeKind,
+    pub x: f64,
+    pub y: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopologyPreviewEdge {
+    pub id: String,
+    pub from_node_id: String,
+    pub to_node_id: String,
+}
+
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -377,10 +420,21 @@ pub struct WorkspaceSummary {
 }
 
 pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
-    const REMOVED: &[&str] = &["tee", "merge_concat", "merge_line", "merge_byte", "merge_shell"];
     let Some(obj) = value.as_object_mut() else {
         return;
     };
+    sanitize_graph_container(obj);
+    if let Some(tuckspace) = obj.get_mut("tuckspace").and_then(serde_json::Value::as_array_mut) {
+        for item in tuckspace.iter_mut() {
+            if let Some(item_obj) = item.as_object_mut() {
+                sanitize_graph_container(item_obj);
+            }
+        }
+    }
+}
+
+fn sanitize_graph_container(obj: &mut serde_json::Map<String, serde_json::Value>) {
+    const REMOVED: &[&str] = &["tee", "merge_concat", "merge_line", "merge_byte", "merge_shell"];
     let mut removed_ids = std::collections::HashSet::new();
     if let Some(nodes) = obj.get_mut("nodes").and_then(serde_json::Value::as_array_mut) {
         for node in nodes.iter_mut() {
@@ -618,6 +672,78 @@ mod tests {
             serialized["nodes"][0]["uiState"]["paneSizes"]["text"]["height"],
             serde_json::json!(381.0)
         );
+    }
+
+
+    #[test]
+    fn workspace_preserves_tuckspace_roundtrip() {
+        let workspace: Workspace = serde_json::from_value(serde_json::json!({
+            "id": "w",
+            "name": "w",
+            "cwd": "/tmp",
+            "nodes": [],
+            "edges": [],
+            "tuckspace": [
+                {
+                    "id": "t1",
+                    "name": "Saved",
+                    "nodes": [
+                        {
+                            "id": "text-1",
+                            "kind": "text",
+                            "title": "",
+                            "comment": "",
+                            "position": {"x": 0, "y": 0},
+                            "size": {"width": 1, "height": 1},
+                            "text": ""
+                        }
+                    ],
+                    "edges": [],
+                    "topologyPreview": {
+                        "nodes": [{"id": "text-1", "kind": "text", "x": 10.0, "y": 10.0}],
+                        "edges": []
+                    }
+                }
+            ],
+            "ui": {}
+        }))
+        .expect("deserialize workspace with tuckspace");
+
+        assert_eq!(workspace.tuckspace.len(), 1);
+        assert_eq!(workspace.tuckspace[0].name, "Saved");
+        let serialized = serde_json::to_value(&workspace).expect("serialize workspace with tuckspace");
+        assert_eq!(serialized["tuckspace"][0]["name"], serde_json::json!("Saved"));
+    }
+
+    #[test]
+    fn sanitize_workspace_json_sanitizes_tuckspace_graphs() {
+        let mut value = serde_json::json!({
+            "id": "w",
+            "name": "w",
+            "cwd": "/tmp",
+            "nodes": [],
+            "edges": [],
+            "tuckspace": [
+                {
+                    "id": "t1",
+                    "name": "Saved",
+                    "nodes": [
+                        { "id": "tee-1", "kind": "tee", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1} },
+                        { "id": "cat-1", "kind": "cat", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1}, "text": "" }
+                    ],
+                    "edges": [
+                        { "id": "e1", "from": {"nodeId": "cat-1", "port": "stdout"}, "to": {"nodeId": "tee-1", "port": "stdin"}, "buffering": "line_or_1024" }
+                    ],
+                    "topologyPreview": {"nodes": [], "edges": []}
+                }
+            ],
+            "ui": {}
+        });
+        super::sanitize_workspace_json_value(&mut value);
+        let workspace: Workspace = serde_json::from_value(value).expect("deserialize sanitized tuckspace workspace");
+        assert_eq!(workspace.tuckspace[0].nodes.len(), 1);
+        assert_eq!(workspace.tuckspace[0].nodes[0].kind, super::NodeKind::File);
+        assert!(workspace.tuckspace[0].edges.is_empty());
     }
 
     #[test]

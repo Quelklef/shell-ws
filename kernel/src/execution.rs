@@ -1678,6 +1678,7 @@ mod tests {
             openai_api_key: Some(String::new()),
             nodes,
             edges,
+            tuckspace: Vec::new(),
             ui: WorkspaceUi::default(),
         }
     }

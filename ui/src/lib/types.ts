@@ -45,6 +45,30 @@ export interface NodeUiState {
   paneSizes?: Record<string, PaneSizeState>;
 }
 
+export interface TopologyPreviewNode {
+  id: string;
+  kind: NodeKind;
+  x: number;
+  y: number;
+}
+
+export interface TopologyPreviewEdge {
+  id: string;
+  fromNodeId: string;
+  toNodeId: string;
+}
+
+export interface TuckedSubgraph {
+  id: string;
+  name: string;
+  nodes: WorkspaceNode[];
+  edges: WorkspaceEdge[];
+  topologyPreview: {
+    nodes: TopologyPreviewNode[];
+    edges: TopologyPreviewEdge[];
+  };
+}
+
 export interface Workspace {
   id: string;
   name: string;
@@ -52,6 +76,7 @@ export interface Workspace {
   openaiApiKey: string;
   nodes: WorkspaceNode[];
   edges: WorkspaceEdge[];
+  tuckspace: TuckedSubgraph[];
   ui: {
     viewportX: number;
     viewportY: number;
