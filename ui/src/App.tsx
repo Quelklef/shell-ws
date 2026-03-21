@@ -28,6 +28,7 @@ import WorkspaceEdgeView from "./components/WorkspaceEdge";
 import {
   createWorkspace,
   deleteWorkspace,
+  reorderWorkspaces,
   generateScript,
   getTuckspace,
   getWorkspace,
@@ -61,6 +62,7 @@ import type {
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
+import { reorderItemsWithPlacement, useVerticalReorderDrag } from "./lib/reorderableList";
 import { sortWorkspaceSummaries, upsertWorkspaceSummary } from "./lib/workspaceList";
 import {
   COLLAPSED_SIDEBAR_WIDTH,
@@ -575,7 +577,7 @@ function WorkspaceCanvas() {
   const [workspaceSummaries, setWorkspaceSummaries] = useState<WorkspaceSummary[]>([]);
   const [workspaceMeta, setWorkspaceMeta] = useState<Pick<
     Workspace,
-    "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"
+    "id" | "name" | "createdAt" | "sortOrder" | "cwd" | "openaiApiKey" | "ui"
   > | null>(null);
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
   const [sidebarUi, setSidebarUi] = useState<WorkspaceSidebars>(() => loadGlobalSidebarState());
@@ -589,10 +591,6 @@ function WorkspaceCanvas() {
   const [activeExecutions, setActiveExecutions] = useState<
     { execId: string; nodeId: string }[]
   >([]);
-  const [pendingTuckDrag, setPendingTuckDrag] = useState<{ tuckId: string; startX: number; startY: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
-  const [draggedTuckId, setDraggedTuckId] = useState<string | null>(null);
-  const [tuckDropMarker, setTuckDropMarker] = useState<{ targetId: string; position: "before" | "after" } | null>(null);
-  const [tuckDragPreview, setTuckDragPreview] = useState<{ x: number; y: number; width: number; height: number; offsetX: number; offsetY: number } | null>(null);
   const [tuckspaceQuery, setTuckspaceQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
@@ -612,7 +610,7 @@ function WorkspaceCanvas() {
     startY: 0,
     moved: false,
   });
-  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"> | null>(
+  const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "createdAt" | "sortOrder" | "cwd" | "openaiApiKey" | "ui"> | null>(
     null,
   );
   const sidebarUiRef = useRef<WorkspaceSidebars>(sidebarUi);
@@ -624,8 +622,8 @@ function WorkspaceCanvas() {
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
   const tuckspaceRef = useRef<TuckedSubgraph[]>([]);
+  const workspaceItemRefs = useRef(new Map<string, HTMLElement>());
   const tuckItemRefs = useRef(new Map<string, HTMLElement>());
-  const suppressTuckRestoreClickRef = useRef<{ tuckId: string; until: number } | null>(null);
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
@@ -712,7 +710,7 @@ function WorkspaceCanvas() {
       edgesArg: FlowEdge[] = edgesRef.current,
       metaArg: Pick<
         Workspace,
-        "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"
+        "id" | "name" | "createdAt" | "sortOrder" | "cwd" | "openaiApiKey" | "ui"
       > | null = workspaceMetaRef.current,
       runtimeArg: Record<string, NodeRuntimeState> = runtimeRef.current,
     ): Workspace | null => {
@@ -723,6 +721,7 @@ function WorkspaceCanvas() {
         id: metaArg.id,
         name: metaArg.name,
         createdAt: metaArg.createdAt,
+        sortOrder: metaArg.sortOrder,
         ui: metaArg.ui,
         cwd: metaArg.cwd,
         openaiApiKey: metaArg.openaiApiKey,
@@ -813,7 +812,7 @@ function WorkspaceCanvas() {
             saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
           }
           setWorkspaceSummaries((summaries) =>
-            upsertWorkspaceSummary(summaries, { id: next.id, name: next.name, createdAt: next.createdAt }),
+            upsertWorkspaceSummary(summaries, { id: next.id, name: next.name, createdAt: next.createdAt, sortOrder: next.sortOrder }),
           );
           return next;
         });
@@ -823,7 +822,7 @@ function WorkspaceCanvas() {
           const nextWorkspace = { ...workspace, name: trimmed };
           await saveWorkspace(nextWorkspace);
           setWorkspaceSummaries((summaries) =>
-            upsertWorkspaceSummary(summaries, { id: workspaceId, name: trimmed, createdAt: workspace.createdAt }),
+            upsertWorkspaceSummary(summaries, { id: workspaceId, name: trimmed, createdAt: workspace.createdAt, sortOrder: workspace.sortOrder }),
           );
         } catch (error) {
           setToast(String(error));
@@ -1642,6 +1641,7 @@ function WorkspaceCanvas() {
       id: loaded.id,
       name: loaded.name,
       createdAt: loaded.createdAt,
+      sortOrder: loaded.sortOrder,
       cwd: loaded.cwd,
       openaiApiKey: loaded.openaiApiKey,
       ui,
@@ -1672,7 +1672,6 @@ function WorkspaceCanvas() {
     }
     runningClearTimersRef.current.clear();
     runningStartedAtRef.current = {};
-    suppressTuckRestoreClickRef.current = null;
 
     workspaceMetaRef.current = nextMeta;
     nodesRef.current = loadedNodes;
@@ -1680,7 +1679,7 @@ function WorkspaceCanvas() {
     runtimeRef.current = loadedRuntime;
 
     setWorkspaceSummaries((current) =>
-      upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name, createdAt: loaded.createdAt }),
+      upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name, createdAt: loaded.createdAt, sortOrder: loaded.sortOrder }),
     );
     setWorkspaceMeta(nextMeta);
     setGeneration({});
@@ -1690,10 +1689,6 @@ function WorkspaceCanvas() {
     setWorkspaceDeleteConfirmingId(null);
     setWorkspaceRenamingId(null);
     setWorkspaceRenameDraft("");
-    setPendingTuckDrag(null);
-    setDraggedTuckId(null);
-    setTuckDropMarker(null);
-    setTuckDragPreview(null);
     setTuckspaceQuery("");
     setNodes(loadedNodes);
     setEdges(loadedEdges);
@@ -2086,15 +2081,6 @@ function WorkspaceCanvas() {
     persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
   }, [cycleEdgeBuffering, deleteEdge, flow, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
 
-  const maybeUntuckSubgraph = useCallback((tuckId: string) => {
-    const suppression = suppressTuckRestoreClickRef.current;
-    if (suppression && suppression.tuckId === tuckId && suppression.until > Date.now()) {
-      suppressTuckRestoreClickRef.current = null;
-      return;
-    }
-    untuckSubgraph(tuckId);
-  }, [untuckSubgraph]);
-
   const reorderTuckedSubgraphs = useCallback((draggedId: string, targetId: string, position: "before" | "after") => {
     const nextTuckspace = reorderTuckspaceWithPlacement(tuckspaceRef.current, draggedId, targetId, position);
     if (nextTuckspace.every((item, index) => item.id === tuckspaceRef.current[index]?.id)) {
@@ -2103,6 +2089,39 @@ function WorkspaceCanvas() {
     setTuckspace(nextTuckspace);
     persistWorkspaceSnapshot(nodesRef.current, edgesRef.current, nextTuckspace);
   }, [persistWorkspaceSnapshot]);
+
+  const reorderWorkspaceList = useCallback((draggedId: string, targetId: string, position: "before" | "after") => {
+    const nextSummaries = reorderItemsWithPlacement(workspaceSummaries, draggedId, targetId, position).map((workspace, index) => ({
+      ...workspace,
+      sortOrder: index,
+    }));
+    if (nextSummaries.every((item, index) => item.id === workspaceSummaries[index]?.id)) {
+      return;
+    }
+    setWorkspaceSummaries(nextSummaries);
+    setWorkspaceMeta((current) =>
+      current
+        ? {
+            ...current,
+            sortOrder: nextSummaries.find((workspace) => workspace.id === current.id)?.sortOrder ?? current.sortOrder,
+          }
+        : current,
+    );
+    if (workspaceMetaRef.current) {
+      workspaceMetaRef.current = {
+        ...workspaceMetaRef.current,
+        sortOrder: nextSummaries.find((workspace) => workspace.id === workspaceMetaRef.current?.id)?.sortOrder ?? workspaceMetaRef.current.sortOrder,
+      };
+    }
+    reorderWorkspaces(nextSummaries.map((workspace) => workspace.id)).catch(async (error) => {
+      setToast(String(error));
+      try {
+        setWorkspaceSummaries(sortWorkspaceSummaries(await listWorkspaces()));
+      } catch (refreshError) {
+        setToast(String(refreshError));
+      }
+    });
+  }, [workspaceSummaries]);
 
   const selectedNodeIds = useMemo(
     () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
@@ -2137,125 +2156,33 @@ function WorkspaceCanvas() {
     return tuckspace.filter((item) => item.name.toLowerCase().includes(query));
   }, [tuckspace, tuckspaceQuery]);
 
-  const startTuckDrag = useCallback((tuckId: string, event: React.PointerEvent<HTMLElement>) => {
-    if (event.button !== 0) {
+  const workspaceReorder = useVerticalReorderDrag({
+    itemIds: workspaceSummaries.map((workspace) => workspace.id),
+    itemRefs: workspaceItemRefs,
+    onReorder: reorderWorkspaceList,
+  });
+
+  const tuckReorder = useVerticalReorderDrag({
+    itemIds: visibleTuckspace.map((item) => item.id),
+    itemRefs: tuckItemRefs,
+    onReorder: reorderTuckedSubgraphs,
+    bodyClassName: "is-tuck-dragging",
+  });
+
+  const startDragWorkspace = useCallback((workspaceId: string, event: React.PointerEvent<HTMLElement>) => {
+    workspaceReorder.startDrag(
+      workspaceId,
+      event,
+      event.currentTarget.closest(".workspace-list-item") as HTMLElement | null,
+    );
+  }, [workspaceReorder]);
+
+  const maybeUntuckSubgraph = useCallback((tuckId: string) => {
+    if (tuckReorder.shouldSuppressClick(tuckId)) {
       return;
     }
-    const card = event.currentTarget.closest(".tuckspace-item");
-    if (!(card instanceof HTMLElement)) {
-      return;
-    }
-    const rect = card.getBoundingClientRect();
-    setPendingTuckDrag({
-      tuckId,
-      startX: event.clientX,
-      startY: event.clientY,
-      width: rect.width,
-      height: rect.height,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!pendingTuckDrag || draggedTuckId) {
-      return;
-    }
-    const handleMove = (event: PointerEvent) => {
-      const dx = event.clientX - pendingTuckDrag.startX;
-      const dy = event.clientY - pendingTuckDrag.startY;
-      if (Math.hypot(dx, dy) < 6) {
-        return;
-      }
-      setDraggedTuckId(pendingTuckDrag.tuckId);
-      setTuckDragPreview({
-        x: event.clientX - pendingTuckDrag.offsetX * 0.5,
-        y: event.clientY - pendingTuckDrag.offsetY * 0.5,
-        width: pendingTuckDrag.width,
-        height: pendingTuckDrag.height,
-        offsetX: pendingTuckDrag.offsetX,
-        offsetY: pendingTuckDrag.offsetY,
-      });
-      setTuckDropMarker({ targetId: pendingTuckDrag.tuckId, position: "before" });
-      setPendingTuckDrag(null);
-    };
-    const finish = () => {
-      setPendingTuckDrag(null);
-    };
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
-    return () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-    };
-  }, [draggedTuckId, pendingTuckDrag]);
-
-  useEffect(() => {
-    if (!draggedTuckId || !tuckDragPreview) {
-      return;
-    }
-    const updateMarker = (clientY: number) => {
-      const candidates = visibleTuckspace.filter((item) => item.id !== draggedTuckId);
-      if (candidates.length === 0) {
-        setTuckDropMarker(null);
-        return;
-      }
-      for (const item of candidates) {
-        const element = tuckItemRefs.current.get(item.id);
-        if (!element) {
-          continue;
-        }
-        const rect = element.getBoundingClientRect();
-        const midpoint = rect.top + rect.height / 2;
-        if (clientY < midpoint) {
-          setTuckDropMarker({ targetId: item.id, position: "before" });
-          return;
-        }
-      }
-      const last = candidates[candidates.length - 1];
-      if (last) {
-        setTuckDropMarker({ targetId: last.id, position: "after" });
-      }
-    };
-
-    const handleMove = (event: PointerEvent) => {
-      setTuckDragPreview((current) =>
-        current
-          ? {
-              ...current,
-              x: event.clientX - current.offsetX * 0.5,
-              y: event.clientY - current.offsetY * 0.5,
-            }
-          : current,
-      );
-      updateMarker(event.clientY);
-    };
-
-    const finish = () => {
-      if (draggedTuckId) {
-        suppressTuckRestoreClickRef.current = { tuckId: draggedTuckId, until: Date.now() + 250 };
-      }
-      if (draggedTuckId && tuckDropMarker && tuckDropMarker.targetId !== draggedTuckId) {
-        reorderTuckedSubgraphs(draggedTuckId, tuckDropMarker.targetId, tuckDropMarker.position);
-      }
-      setDraggedTuckId(null);
-      setTuckDropMarker(null);
-      setTuckDragPreview(null);
-    };
-
-    document.body.classList.add("is-tuck-dragging");
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", finish, { once: true });
-    window.addEventListener("pointercancel", finish, { once: true });
-    return () => {
-      document.body.classList.remove("is-tuck-dragging");
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", finish);
-      window.removeEventListener("pointercancel", finish);
-    };
-  }, [draggedTuckId, reorderTuckedSubgraphs, tuckDragPreview, tuckDropMarker, visibleTuckspace]);
+    untuckSubgraph(tuckId);
+  }, [tuckReorder, untuckSubgraph]);
 
   const runLayout = useCallback(() => {
     const selectedNodeIds = nodesRef.current
@@ -2350,9 +2277,19 @@ function WorkspaceCanvas() {
                 return (
                   <div
                     key={workspace.id}
-                    className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}`}
+                    ref={(element) => {
+                      if (element) {
+                        workspaceItemRefs.current.set(workspace.id, element);
+                      } else {
+                        workspaceItemRefs.current.delete(workspace.id);
+                      }
+                    }}
+                    className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}${workspaceReorder.draggedId === workspace.id ? " is-drag-placeholder" : ""}${workspaceReorder.dropMarker?.targetId === workspace.id ? ` is-drop-${workspaceReorder.dropMarker.position}` : ""}`}
                   >
-                    <div className="workspace-list-main">
+                    <div
+                      className="workspace-list-main"
+                      onPointerDown={renaming ? undefined : (event) => startDragWorkspace(workspace.id, event)}
+                    >
                       {renaming ? (
                         <input
                           className="sidebar-input workspace-list-name-input"
@@ -2374,7 +2311,12 @@ function WorkspaceCanvas() {
                         <button
                           type="button"
                           className="workspace-list-select"
-                          onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
+                          onClick={() => {
+                            if (workspaceReorder.shouldSuppressClick(workspace.id)) {
+                              return;
+                            }
+                            void loadWorkspaceIntoCanvas(workspace.id);
+                          }}
                           disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
                           title={workspace.name}
                         >
@@ -2684,7 +2626,7 @@ function WorkspaceCanvas() {
             <div className="tuckspace-empty">No tucked subgraphs match that search.</div>
           ) : (
             visibleTuckspace.map((item) => {
-              const dropPosition = tuckDropMarker?.targetId === item.id ? tuckDropMarker.position : null;
+              const dropPosition = tuckReorder.dropMarker?.targetId === item.id ? tuckReorder.dropMarker.position : null;
               return (
                 <article
                   key={item.id}
@@ -2695,18 +2637,18 @@ function WorkspaceCanvas() {
                       tuckItemRefs.current.delete(item.id);
                     }
                   }}
-                  className={`tuckspace-item${draggedTuckId === item.id ? " is-drag-placeholder" : ""}${dropPosition ? ` is-drop-${dropPosition}` : ""}${isTuckspaceShell(item) ? " is-shell" : ""}${draggedTuckId ? " is-drag-active" : ""}`}
+                  className={`tuckspace-item${tuckReorder.draggedId === item.id ? " is-drag-placeholder" : ""}${dropPosition ? ` is-drop-${dropPosition}` : ""}${isTuckspaceShell(item) ? " is-shell" : ""}${tuckReorder.draggedId ? " is-drag-active" : ""}`}
                   title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
                 >
                   <TuckspaceCardBody
                     item={item}
                     canPopulate={canTuckSelection}
-                    interactive={draggedTuckId !== item.id}
+                    interactive={tuckReorder.draggedId !== item.id}
                     onRestore={() => maybeUntuckSubgraph(item.id)}
                     onPopulate={() => moveSelectionToTuckspace(item.id)}
                     onDeleteShell={() => deleteTuckShell(item.id)}
                     onRename={(value) => renameTuckedSubgraph(item.id, value)}
-                    onStartDrag={(event) => startTuckDrag(item.id, event)}
+                    onStartDrag={(event) => tuckReorder.startDrag(item.id, event, (event.currentTarget.closest(".tuckspace-item") as HTMLElement | null))}
                   />
                 </article>
               );
@@ -2714,8 +2656,31 @@ function WorkspaceCanvas() {
           )}
         </div>
       </SidebarPanel>
-      {draggedTuckId && tuckDragPreview && (() => {
-        const draggedItem = tuckspace.find((item) => item.id === draggedTuckId);
+      {workspaceReorder.draggedId && workspaceReorder.dragPreview && (() => {
+        const draggedWorkspace = workspaceSummaries.find((workspace) => workspace.id === workspaceReorder.draggedId);
+        if (!draggedWorkspace) {
+          return null;
+        }
+        return (
+          <div
+            className="workspace-drag-preview"
+            style={{
+              left: workspaceReorder.dragPreview.x,
+              top: workspaceReorder.dragPreview.y,
+              width: workspaceReorder.dragPreview.width,
+              height: workspaceReorder.dragPreview.height,
+            }}
+          >
+            <div className="workspace-list-item">
+              <div className="workspace-list-main">
+                <div className="workspace-list-select">{draggedWorkspace.name}</div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+      {tuckReorder.draggedId && tuckReorder.dragPreview && (() => {
+        const draggedItem = tuckspace.find((item) => item.id === tuckReorder.draggedId);
         if (!draggedItem) {
           return null;
         }
@@ -2723,10 +2688,10 @@ function WorkspaceCanvas() {
           <div
             className="tuckspace-drag-preview"
             style={{
-              left: tuckDragPreview.x,
-              top: tuckDragPreview.y,
-              width: tuckDragPreview.width,
-              height: tuckDragPreview.height,
+              left: tuckReorder.dragPreview.x,
+              top: tuckReorder.dragPreview.y,
+              width: tuckReorder.dragPreview.width,
+              height: tuckReorder.dragPreview.height,
               transform: "scale(0.5)",
               transformOrigin: "top left",
             }}

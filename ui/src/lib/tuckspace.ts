@@ -1,5 +1,6 @@
 import type { FlowEdge } from "./types";
 import type { TuckedSubgraph, TopologyPreviewNode, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
+import { reorderItemsWithPlacement } from "./reorderableList";
 import { encodeId } from "./utils";
 
 export function isClosedSelection(selectedNodeIds: ReadonlySet<string>, edges: readonly Pick<FlowEdge, "source" | "target">[]) {
@@ -157,20 +158,5 @@ export function reorderTuckspaceWithPlacement(
   targetId: string,
   position: "before" | "after",
 ) {
-  if (draggedId === targetId) {
-    return [...items];
-  }
-  const draggedIndex = items.findIndex((item) => item.id === draggedId);
-  if (draggedIndex === -1) {
-    return [...items];
-  }
-  const next = [...items];
-  const [dragged] = next.splice(draggedIndex, 1);
-  const targetIndex = next.findIndex((item) => item.id === targetId);
-  if (targetIndex === -1) {
-    return [...items];
-  }
-  const insertIndex = position === "before" ? targetIndex : targetIndex + 1;
-  next.splice(insertIndex, 0, dragged);
-  return next;
+  return reorderItemsWithPlacement(items, draggedId, targetId, position);
 }

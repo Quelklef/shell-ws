@@ -331,6 +331,7 @@ textarea {
 }
 
 .workspace-list-item {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -414,6 +415,42 @@ textarea {
   border-color: rgba(222, 93, 93, 0.72);
   background: rgba(79, 24, 24, 0.72);
   color: #ffd2d2;
+}
+
+.workspace-list-item.is-drag-placeholder {
+  background: rgba(17, 19, 22, 0.44);
+  border-style: dashed;
+}
+
+.workspace-list-item.is-drag-placeholder > * {
+  opacity: 0;
+}
+
+.workspace-list-item.is-drop-before::before,
+.workspace-list-item.is-drop-after::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(242, 192, 120, 0.9);
+  box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.18);
+  z-index: 2;
+}
+
+.workspace-list-item.is-drop-before::before {
+  top: -6px;
+}
+
+.workspace-list-item.is-drop-after::after {
+  bottom: -6px;
+}
+
+.workspace-drag-preview {
+  position: fixed;
+  pointer-events: none;
+  z-index: 30;
 }
 
 .workspace-list-confirm,

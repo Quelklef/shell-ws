@@ -51,6 +51,14 @@ export function saveWorkspace(workspace: Workspace) {
   });
 }
 
+
+export function reorderWorkspaces(orderedIds: string[]) {
+  return request<void>(`${kernelOrigin()}/api/workspaces/order`, {
+    method: "PUT",
+    body: JSON.stringify({ orderedIds }),
+  });
+}
+
 export function deleteWorkspace(id: string) {
   return request<void>(`${kernelOrigin()}/api/workspaces/${id}`, { method: "DELETE" });
 }

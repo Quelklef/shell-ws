@@ -75,6 +75,7 @@ export interface Workspace {
   id: string;
   name: string;
   createdAt?: number;
+  sortOrder?: number;
   cwd: string;
   openaiApiKey: string;
   nodes: WorkspaceNode[];
@@ -125,6 +126,7 @@ export interface WorkspaceSummary {
   id: string;
   name: string;
   createdAt?: number;
+  sortOrder?: number;
 }
 
 export type ClientEvent =

@@ -1675,6 +1675,7 @@ mod tests {
             id: "test".to_string(),
             name: "test".to_string(),
             created_at: 0,
+            sort_order: 0,
             cwd: default_cwd(),
             openai_api_key: Some(String::new()),
             nodes,

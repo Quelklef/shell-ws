@@ -8,6 +8,8 @@ pub struct Workspace {
     pub name: String,
     #[serde(default)]
     pub created_at: u64,
+    #[serde(default)]
+    pub sort_order: u64,
     #[serde(default = "default_cwd")]
     pub cwd: String,
     #[serde(default)]
@@ -28,6 +30,7 @@ impl Workspace {
             id: "default".to_string(),
             name: "Workspace".to_string(),
             created_at: 0,
+            sort_order: 0,
             cwd: default_cwd(),
             openai_api_key: Some(String::new()),
             nodes: Vec::new(),
@@ -42,6 +45,7 @@ impl Workspace {
             id: "default".to_string(),
             name: "Shell WS".to_string(),
             created_at: 0,
+            sort_order: 0,
             cwd: default_cwd(),
             openai_api_key: Some(String::new()),
             nodes: vec![
@@ -484,6 +488,8 @@ pub struct WorkspaceSummary {
     pub name: String,
     #[serde(default)]
     pub created_at: u64,
+    #[serde(default)]
+    pub sort_order: u64,
 }
 
 pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {

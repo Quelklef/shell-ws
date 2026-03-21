@@ -14,7 +14,7 @@ use axum::{
     },
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{get, post, put},
     Json, Router,
 };
 use execution::ExecutionManager;
@@ -73,6 +73,7 @@ async fn main() {
             "/api/workspaces",
             get(list_workspaces).post(create_workspace),
         )
+        .route("/api/workspaces/order", put(reorder_workspaces))
         .route(
             "/api/workspaces/:id",
             get(get_workspace)
@@ -117,8 +118,23 @@ async fn create_workspace(State(state): State<AppState>) -> Result<Json<Workspac
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
+    workspace.sort_order = state.store.next_sort_order().await?;
     state.store.save(&workspace.id, &workspace).await?;
     Ok(Json(workspace))
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReorderWorkspacesRequest {
+    ordered_ids: Vec<String>,
+}
+
+async fn reorder_workspaces(
+    State(state): State<AppState>,
+    Json(request): Json<ReorderWorkspacesRequest>,
+) -> Result<StatusCode, AppError> {
+    state.store.reorder(&request.ordered_ids).await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn get_workspace(

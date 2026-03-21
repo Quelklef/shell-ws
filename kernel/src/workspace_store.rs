@@ -41,16 +41,16 @@ impl WorkspaceStore {
                 id: workspace.id,
                 name: workspace.name,
                 created_at: workspace.created_at,
+                sort_order: workspace.sort_order,
             });
         }
-        workspaces.sort_by(|left, right| left.created_at.cmp(&right.created_at).then_with(|| left.name.cmp(&right.name)));
+        workspaces.sort_by(|left, right| left.sort_order.cmp(&right.sort_order).then_with(|| left.created_at.cmp(&right.created_at)).then_with(|| left.name.cmp(&right.name)));
         Ok(workspaces)
     }
 
 
     pub async fn load_all(&self) -> Result<Vec<Workspace>, std::io::Error> {
-        let mut summaries = self.list().await?;
-        summaries.sort_by(|left, right| left.name.cmp(&right.name));
+        let summaries = self.list().await?;
         let mut workspaces = Vec::with_capacity(summaries.len());
         for summary in summaries {
             workspaces.push(self.load(&summary.id).await?);
@@ -79,6 +79,33 @@ impl WorkspaceStore {
         let path = self.path_for(id);
         if fs::try_exists(&path).await? {
             fs::remove_file(path).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn next_sort_order(&self) -> Result<u64, std::io::Error> {
+        Ok(self
+            .list()
+            .await?
+            .into_iter()
+            .map(|workspace| workspace.sort_order)
+            .max()
+            .unwrap_or(0)
+            .saturating_add(1))
+    }
+
+    pub async fn reorder(&self, ordered_ids: &[String]) -> Result<(), std::io::Error> {
+        let mut workspaces = self.load_all().await?;
+        workspaces.sort_by_key(|workspace| workspace.sort_order);
+        let index_by_id = ordered_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| (id.as_str(), index))
+            .collect::<std::collections::HashMap<_, _>>();
+        workspaces.sort_by_key(|workspace| index_by_id.get(workspace.id.as_str()).copied().unwrap_or(usize::MAX));
+        for (index, workspace) in workspaces.iter_mut().enumerate() {
+            workspace.sort_order = index as u64;
+            self.save(&workspace.id, workspace).await?;
         }
         Ok(())
     }
