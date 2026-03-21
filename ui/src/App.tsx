@@ -54,9 +54,11 @@ import type {
   WorkspaceEdge,
   WorkspaceNode,
   TuckedSubgraph,
+  WorkspaceSummary,
 } from "./lib/types";
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
+import { sortWorkspaceSummaries, upsertWorkspaceSummary } from "./lib/workspaceList";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
@@ -483,10 +485,12 @@ function TuckspaceCardBody({
 }
 
 function WorkspaceCanvas() {
+  const [workspaceSummaries, setWorkspaceSummaries] = useState<WorkspaceSummary[]>([]);
   const [workspaceMeta, setWorkspaceMeta] = useState<Pick<
     Workspace,
     "id" | "name" | "cwd" | "openaiApiKey" | "ui"
   > | null>(null);
+  const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
   const [kernelConnected, setKernelConnected] = useState(false);
   const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
@@ -1049,54 +1053,6 @@ function WorkspaceCanvas() {
   );
 
   useEffect(() => {
-    let disposed = false;
-    listWorkspaces()
-      .then(async (summaries) => {
-        const loaded = sanitizeWorkspace(
-          summaries.length > 0
-            ? await getWorkspace(summaries[0].id)
-            : await createWorkspace(),
-        );
-        if (disposed) {
-          return;
-        }
-        const ui =
-          loaded.ui.viewportX === 0 &&
-          loaded.ui.viewportY === 0 &&
-          loaded.ui.zoom === 1
-            ? { ...loaded.ui, zoom: 0.5 }
-            : loaded.ui;
-        setWorkspaceMeta({ id: loaded.id, name: loaded.name, cwd: loaded.cwd, openaiApiKey: loaded.openaiApiKey, ui });
-        const loadedRuntime = Object.fromEntries(
-          loaded.nodes.map((node) => [
-            node.id,
-            {
-              running: false,
-              portActivity: {},
-              previews: runtimePreviewsFromNode(node),
-            },
-          ]),
-        );
-        const loadedEdges = loaded.edges.map((edge) =>
-          toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
-        );
-        setRuntime(loadedRuntime);
-        setTuckspace(loaded.tuckspace);
-        setNodes(
-          loaded.nodes.map((node) =>
-            toFlowNode(node, loadedRuntime, {}, handlers, loadedEdges),
-          ),
-        );
-        setEdges(loadedEdges);
-      })
-      .catch((error) => setToast(String(error)));
-
-    return () => {
-      disposed = true;
-    };
-  }, [handlers, setEdges, setNodes]);
-
-  useEffect(() => {
     setNodes((current) =>
       syncNodeData(current, runtime, generationRef.current, handlers, edgesRef.current),
     );
@@ -1457,6 +1413,169 @@ function WorkspaceCanvas() {
     },
     [handlers, persistSoon, setEdges, setNodes],
   );
+
+  // Workspace switches must flush any debounced saves first so delayed timers do not
+  // persist the old canvas into the newly selected workspace id.
+  const flushPendingWorkspaceSave = useCallback(async () => {
+    if (persistTimerRef.current !== null) {
+      window.clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = null;
+    }
+    if (layoutPersistTimerRef.current !== null) {
+      window.clearTimeout(layoutPersistTimerRef.current);
+      layoutPersistTimerRef.current = null;
+    }
+    const nextWorkspace = buildWorkspace();
+    if (nextWorkspace) {
+      await saveWorkspace(nextWorkspace);
+    }
+  }, [buildWorkspace]);
+
+  const applyLoadedWorkspace = useCallback((loaded: Workspace) => {
+    const ui =
+      loaded.ui.viewportX === 0 &&
+      loaded.ui.viewportY === 0 &&
+      loaded.ui.zoom === 1
+        ? { ...loaded.ui, zoom: 0.5 }
+        : loaded.ui;
+    const nextMeta = {
+      id: loaded.id,
+      name: loaded.name,
+      cwd: loaded.cwd,
+      openaiApiKey: loaded.openaiApiKey,
+      ui,
+    };
+    const loadedRuntime = Object.fromEntries(
+      loaded.nodes.map((node) => [
+        node.id,
+        {
+          running: false,
+          portActivity: {},
+          previews: runtimePreviewsFromNode(node),
+        },
+      ]),
+    );
+    const loadedEdges = loaded.edges.map((edge) =>
+      toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
+    );
+    const loadedNodes = loaded.nodes.map((node) =>
+      toFlowNode(node, loadedRuntime, {}, handlers, loadedEdges),
+    );
+
+    for (const handle of autorunRef.current.values()) {
+      window.clearInterval(handle.timerId);
+    }
+    autorunRef.current.clear();
+    for (const timerId of runningClearTimersRef.current.values()) {
+      window.clearTimeout(timerId);
+    }
+    runningClearTimersRef.current.clear();
+    runningStartedAtRef.current = {};
+    suppressTuckRestoreClickRef.current = null;
+
+    workspaceMetaRef.current = nextMeta;
+    nodesRef.current = loadedNodes;
+    edgesRef.current = loadedEdges;
+    runtimeRef.current = loadedRuntime;
+    tuckspaceRef.current = loaded.tuckspace;
+
+    setWorkspaceSummaries((current) =>
+      upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name }),
+    );
+    setWorkspaceMeta(nextMeta);
+    setGeneration({});
+    setRuntime(loadedRuntime);
+    setTuckspace(loaded.tuckspace);
+    setActiveExecutions([]);
+    setContextMenu(null);
+    setPendingTuckDrag(null);
+    setDraggedTuckId(null);
+    setTuckDropMarker(null);
+    setTuckDragPreview(null);
+    setTuckspaceQuery("");
+    setNodes(loadedNodes);
+    setEdges(loadedEdges);
+
+    // React Flow only applies `defaultViewport` on first mount, so switching
+    // workspaces has to push the saved viewport back in imperatively.
+    window.requestAnimationFrame(() => {
+      void flow.setViewport({ x: ui.viewportX, y: ui.viewportY, zoom: ui.zoom }, { duration: 0 });
+    });
+  }, [cycleEdgeBuffering, deleteEdge, flow, handlers, setEdges, setNodes]);
+
+  const loadWorkspaceIntoCanvas = useCallback(async (workspaceId: string) => {
+    if (workspaceMetaRef.current?.id === workspaceId) {
+      return;
+    }
+    if (activeExecutions.length > 0) {
+      setToast("stop active executions before switching workspaces");
+      return;
+    }
+    setWorkspaceSwitching(true);
+    try {
+      await flushPendingWorkspaceSave();
+      applyLoadedWorkspace(sanitizeWorkspace(await getWorkspace(workspaceId)));
+    } catch (error) {
+      setToast(String(error));
+    } finally {
+      setWorkspaceSwitching(false);
+    }
+  }, [activeExecutions.length, applyLoadedWorkspace, flushPendingWorkspaceSave]);
+
+  const createAndLoadWorkspace = useCallback(async () => {
+    if (activeExecutions.length > 0) {
+      setToast("stop active executions before creating a workspace");
+      return;
+    }
+    setWorkspaceSwitching(true);
+    try {
+      await flushPendingWorkspaceSave();
+      const created = sanitizeWorkspace(await createWorkspace());
+      applyLoadedWorkspace(created);
+    } catch (error) {
+      setToast(String(error));
+    } finally {
+      setWorkspaceSwitching(false);
+    }
+  }, [activeExecutions.length, applyLoadedWorkspace, flushPendingWorkspaceSave]);
+
+  useEffect(() => {
+    let disposed = false;
+
+    const loadInitialWorkspace = async () => {
+      setWorkspaceSwitching(true);
+      try {
+        const summaries = sortWorkspaceSummaries(await listWorkspaces());
+        if (disposed) {
+          return;
+        }
+        setWorkspaceSummaries(summaries);
+        const loaded = sanitizeWorkspace(
+          summaries.length > 0
+            ? await getWorkspace(summaries[0].id)
+            : await createWorkspace(),
+        );
+        if (disposed) {
+          return;
+        }
+        applyLoadedWorkspace(loaded);
+      } catch (error) {
+        if (!disposed) {
+          setToast(String(error));
+        }
+      } finally {
+        if (!disposed) {
+          setWorkspaceSwitching(false);
+        }
+      }
+    };
+
+    void loadInitialWorkspace();
+
+    return () => {
+      disposed = true;
+    };
+  }, [applyLoadedWorkspace]);
 
   const onConnect = useCallback(
     (connection: Connection) => {
@@ -1865,6 +1984,38 @@ function WorkspaceCanvas() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="sidebar-controls-group">
+          <label className="sidebar-field">
+            <span className="sidebar-label">workspace</span>
+            <div className="workspace-picker-row">
+              <select
+                className="sidebar-input workspace-picker-select"
+                value={workspaceMeta.id}
+                onChange={(event) => void loadWorkspaceIntoCanvas(event.target.value)}
+                disabled={workspaceSwitching || activeExecutions.length > 0}
+                title="choose a workspace"
+              >
+                {workspaceSummaries.map((workspace) => (
+                  <option key={workspace.id} value={workspace.id}>
+                    {workspace.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="workspace-picker-create"
+                onClick={() => void createAndLoadWorkspace()}
+                disabled={workspaceSwitching || activeExecutions.length > 0}
+                title="create a new workspace"
+              >
+                new
+              </button>
+            </div>
+            {workspaceSwitching ? (
+              <span className="workspace-picker-status">switching…</span>
+            ) : activeExecutions.length > 0 ? (
+              <span className="workspace-picker-status">stop runs to switch</span>
+            ) : null}
+          </label>
           <span
             className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}
           >
@@ -1878,6 +2029,7 @@ function WorkspaceCanvas() {
               onChange={(event) => updateWorkspaceCwd(event.target.value)}
               placeholder="/home/user"
               title="working directory for kernel execution"
+              disabled={workspaceSwitching}
             />
           </label>
           <label className="sidebar-field">
@@ -1890,6 +2042,7 @@ function WorkspaceCanvas() {
               onChange={(event) => updateWorkspaceApiKey(event.target.value)}
               placeholder="sk-..."
               title="workspace-level OpenAI API key for AI SCRIPT generation"
+              disabled={workspaceSwitching}
             />
           </label>
           {activeExecutions.length > 0 && (
