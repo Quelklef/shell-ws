@@ -1797,9 +1797,9 @@ function WorkspaceCanvas() {
               type="button"
               onClick={tuckSelectedSubgraph}
               disabled={!canTuckSelection}
-              title={tuckDisabledReason ?? "Move the selected closed subgraph into tuckspace."}
+              title={canTuckSelection ? "Move subgraph into tuckspace" : "Only closed subgraphs can be moved into tuckspace"}
             >
-              add to tuckspace
+              move to tuckspace
             </button>
           </div>
         )}
