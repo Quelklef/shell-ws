@@ -24,10 +24,10 @@ export const SIDEBAR_DEFAULTS: WorkspaceSidebars = {
 };
 
 export const SIDEBAR_MIN_WIDTH: Record<SidebarId, number> = {
-  workspaces: 180,
-  settings: 180,
-  nodes: 160,
-  tuckspace: 220,
+  workspaces: 100,
+  settings: 100,
+  nodes: 100,
+  tuckspace: 100,
 };
 
 export function normalizeWorkspaceUi(ui: { viewportX?: number; viewportY?: number; zoom?: number; sidebars?: Partial<WorkspaceSidebars> } | undefined): Workspace["ui"] {
