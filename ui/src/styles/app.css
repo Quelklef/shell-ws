@@ -192,7 +192,7 @@ textarea {
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 10px;
-  cursor: pointer;
+  cursor: default;
 }
 
 .execution-item button:hover {
@@ -381,7 +381,7 @@ textarea {
   border-radius: 8px;
   background: rgba(244, 236, 223, 0.04);
   color: var(--text);
-  cursor: pointer;
+  cursor: default;
 }
 
 .tuckspace-shell-action:disabled {
