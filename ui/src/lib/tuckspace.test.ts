@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTopologyPreview, defaultTuckedName, isClosedSelection } from "./tuckspace";
+import { buildTopologyPreview, defaultTuckedName, isClosedSelection, reorderTuckspace } from "./tuckspace";
 
 describe("tuckspace helpers", () => {
   it("detects closed selections", () => {
@@ -17,6 +17,16 @@ describe("tuckspace helpers", () => {
 
   it("generates the next untaken default name", () => {
     expect(defaultTuckedName([{ id: "1", name: "Subgraph 1", nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } }])).toBe("Subgraph 2");
+  });
+
+
+  it("reorders tucked items by id", () => {
+    const items = [
+      { id: "a", name: "A", nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } },
+      { id: "b", name: "B", nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } },
+      { id: "c", name: "C", nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } },
+    ];
+    expect(reorderTuckspace(items, "c", "a").map((item) => item.id)).toEqual(["c", "a", "b"]);
   });
 
   it("normalizes topology preview coordinates", () => {

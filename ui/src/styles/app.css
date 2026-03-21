@@ -358,6 +358,15 @@ textarea {
   background: rgba(9, 11, 13, 0.44);
 }
 
+.tuckspace-item.is-dragging {
+  opacity: 0.52;
+}
+
+.tuckspace-item.is-drop-target {
+  border-color: rgba(242, 192, 120, 0.42);
+  box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.18);
+}
+
 .tuckspace-restore {
   display: flex;
   flex-direction: column;

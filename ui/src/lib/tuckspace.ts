@@ -65,3 +65,19 @@ export function renameTuckedSubgraph(workspace: Workspace, tuckId: string, name:
     tuckspace: workspace.tuckspace.map((item) => (item.id === tuckId ? { ...item, name } : item)),
   };
 }
+
+
+export function reorderTuckspace(items: readonly TuckedSubgraph[], draggedId: string, targetId: string) {
+  if (draggedId === targetId) {
+    return [...items];
+  }
+  const draggedIndex = items.findIndex((item) => item.id === draggedId);
+  const targetIndex = items.findIndex((item) => item.id === targetId);
+  if (draggedIndex === -1 || targetIndex === -1) {
+    return [...items];
+  }
+  const next = [...items];
+  const [dragged] = next.splice(draggedIndex, 1);
+  next.splice(targetIndex, 0, dragged);
+  return next;
+}
