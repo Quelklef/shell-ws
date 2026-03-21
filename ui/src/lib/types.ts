@@ -1,3 +1,4 @@
+import type { WorkspaceSidebars } from "./workspaceUi";
 import type { Edge, Node } from "@xyflow/react";
 
 export type NodeKind =
@@ -82,6 +83,7 @@ export interface Workspace {
     viewportX: number;
     viewportY: number;
     zoom: number;
+    sidebars: WorkspaceSidebars;
   };
 }
 

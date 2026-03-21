@@ -1,4 +1,5 @@
 import type { AutoRunConfig, ExecArg, MaterializedValue, TuckedSubgraph, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
+import { normalizeWorkspaceUi } from "./workspaceUi";
 
 type LegacyMaterializedNode = WorkspaceNode & {
   materializedInputs?: Record<string, MaterializedValue> | null;
@@ -145,6 +146,7 @@ export function sanitizeWorkspace(workspace: Workspace): Workspace {
     ...workspace,
     cwd: workspace.cwd ?? "",
     openaiApiKey: workspace.openaiApiKey ?? "",
+    ui: normalizeWorkspaceUi(workspace.ui),
     nodes: sanitized.nodes,
     edges: sanitized.edges,
     tuckspace: (workspace.tuckspace ?? []).map(sanitizeTuckedSubgraph),

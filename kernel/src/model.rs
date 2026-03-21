@@ -332,7 +332,7 @@ pub struct Size {
     pub height: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceUi {
     #[serde(default)]
@@ -341,6 +341,51 @@ pub struct WorkspaceUi {
     pub viewport_y: f64,
     #[serde(default = "default_zoom")]
     pub zoom: f64,
+    #[serde(default)]
+    pub sidebars: WorkspaceSidebars,
+}
+
+impl Default for WorkspaceUi {
+    fn default() -> Self {
+        Self {
+            viewport_x: 0.0,
+            viewport_y: 0.0,
+            zoom: default_zoom(),
+            sidebars: WorkspaceSidebars::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSidebars {
+    #[serde(default = "default_workspaces_sidebar")]
+    pub workspaces: WorkspaceSidebarState,
+    #[serde(default = "default_settings_sidebar")]
+    pub settings: WorkspaceSidebarState,
+    #[serde(default = "default_nodes_sidebar")]
+    pub nodes: WorkspaceSidebarState,
+    #[serde(default = "default_tuckspace_sidebar")]
+    pub tuckspace: WorkspaceSidebarState,
+}
+
+impl Default for WorkspaceSidebars {
+    fn default() -> Self {
+        Self {
+            workspaces: default_workspaces_sidebar(),
+            settings: default_settings_sidebar(),
+            nodes: default_nodes_sidebar(),
+            tuckspace: default_tuckspace_sidebar(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceSidebarState {
+    pub width: f64,
+    #[serde(default)]
+    pub collapsed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -537,6 +582,34 @@ fn default_true() -> bool {
     true
 }
 
+fn default_workspaces_sidebar() -> WorkspaceSidebarState {
+    WorkspaceSidebarState {
+        width: 220.0,
+        collapsed: false,
+    }
+}
+
+fn default_settings_sidebar() -> WorkspaceSidebarState {
+    WorkspaceSidebarState {
+        width: 220.0,
+        collapsed: false,
+    }
+}
+
+fn default_nodes_sidebar() -> WorkspaceSidebarState {
+    WorkspaceSidebarState {
+        width: 190.0,
+        collapsed: false,
+    }
+}
+
+fn default_tuckspace_sidebar() -> WorkspaceSidebarState {
+    WorkspaceSidebarState {
+        width: 280.0,
+        collapsed: false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{default_cwd, ClientEvent, ExecutionAction, Workspace};
@@ -567,6 +640,21 @@ mod tests {
     fn display_kind_deserializes_as_display() {
         let kind: super::NodeKind = serde_json::from_str("\"display\"").expect("deserialize display kind");
         assert_eq!(kind, super::NodeKind::Display);
+    }
+
+    #[test]
+    fn workspace_ui_defaults_sidebars() {
+        let workspace: Workspace = serde_json::from_value(serde_json::json!({
+            "id": "w",
+            "name": "Workspace",
+            "ui": { "viewportX": 0.0, "viewportY": 0.0, "zoom": 1.0 },
+            "nodes": [],
+            "edges": []
+        }))
+        .expect("deserialize workspace ui defaults");
+
+        assert_eq!(workspace.ui.sidebars.workspaces.width, 220.0);
+        assert!(!workspace.ui.sidebars.tuckspace.collapsed);
     }
 
     #[test]

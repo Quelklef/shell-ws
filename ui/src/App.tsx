@@ -19,7 +19,7 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import "@xyflow/react/dist/style.css";
 
@@ -62,6 +62,7 @@ import type {
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
 import { sortWorkspaceSummaries, upsertWorkspaceSummary } from "./lib/workspaceList";
+import { COLLAPSED_SIDEBAR_WIDTH, SIDEBAR_MIN_WIDTH, type SidebarId } from "./lib/workspaceUi";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
@@ -432,7 +433,7 @@ function TuckspaceCardBody({
   onPopulate?: () => void;
   onDeleteShell?: () => void;
   onRename?: (value: string) => void;
-  onStartDrag?: (event: React.PointerEvent<HTMLElement>) => void;
+  onStartDrag?: (event: ReactPointerEvent<HTMLElement>) => void;
 }) {
   const shell = isTuckspaceShell(item);
   return (
@@ -484,6 +485,50 @@ function TuckspaceCardBody({
         )}
       </div>
     </>
+  );
+}
+
+function SidebarPanel({
+  id,
+  label,
+  collapsed,
+  side,
+  onToggle,
+  onResizeStart,
+  children,
+}: {
+  id: SidebarId;
+  label: string;
+  collapsed: boolean;
+  side: "left" | "right";
+  onToggle: () => void;
+  onResizeStart: (event: ReactPointerEvent<HTMLDivElement>) => void;
+  children: ReactNode;
+}) {
+  return (
+    <aside className={`app-sidebar app-sidebar-${id}${collapsed ? " is-collapsed" : ""}`}>
+      <div className="app-sidebar-header">
+        <span className="app-sidebar-title">{label}</span>
+        <button
+          type="button"
+          className="app-sidebar-toggle"
+          onClick={onToggle}
+          title={collapsed ? `expand ${label}` : `collapse ${label}`}
+        >
+          {collapsed ? (side === "left" ? "›" : "‹") : side === "left" ? "‹" : "›"}
+        </button>
+      </div>
+      {!collapsed && <div className="app-sidebar-body">{children}</div>}
+      {!collapsed && (
+        <div
+          className={`app-sidebar-resizer app-sidebar-resizer-${side}`}
+          onPointerDown={onResizeStart}
+          role="separator"
+          aria-orientation="vertical"
+          aria-label={`resize ${label}`}
+        />
+      )}
+    </aside>
   );
 }
 
@@ -540,6 +585,12 @@ function WorkspaceCanvas() {
   const suppressTuckRestoreClickRef = useRef<{ tuckId: string; until: number } | null>(null);
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
+  const sidebarResizeRef = useRef<{
+    id: SidebarId;
+    side: "left" | "right";
+    startClientX: number;
+    startWidth: number;
+  } | null>(null);
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
   const userSelectionRect = useStore((store) => store.userSelectionRect);
@@ -715,6 +766,30 @@ function WorkspaceCanvas() {
         setWorkspaceSummaries((summaries) =>
           upsertWorkspaceSummary(summaries, { id: next.id, name: next.name }),
         );
+        return next;
+      });
+    },
+    [buildWorkspace],
+  );
+
+
+  const updateWorkspaceUi = useCallback(
+    (
+      updater: (ui: Workspace["ui"]) => Workspace["ui"],
+      persist = false,
+    ) => {
+      setWorkspaceMeta((current) => {
+        if (!current) {
+          return current;
+        }
+        const next = { ...current, ui: updater(current.ui) };
+        workspaceMetaRef.current = next;
+        if (persist) {
+          const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
+          if (nextWorkspace) {
+            saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+          }
+        }
         return next;
       });
     },
@@ -1595,6 +1670,81 @@ function WorkspaceCanvas() {
     }
   }, [activeExecutions.length, applyLoadedWorkspace, cancelPendingWorkspaceSaves, workspaceSummaries]);
 
+  const toggleSidebar = useCallback((id: SidebarId) => {
+    updateWorkspaceUi(
+      (ui) => ({
+        ...ui,
+        sidebars: {
+          ...ui.sidebars,
+          [id]: {
+            ...ui.sidebars[id],
+            collapsed: !ui.sidebars[id].collapsed,
+          },
+        },
+      }),
+      true,
+    );
+  }, [updateWorkspaceUi]);
+
+  const startSidebarResize = useCallback((id: SidebarId, side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!workspaceMetaRef.current) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    sidebarResizeRef.current = {
+      id,
+      side,
+      startClientX: event.clientX,
+      startWidth: workspaceMetaRef.current.ui.sidebars[id].width,
+    };
+  }, []);
+
+  useEffect(() => {
+    const resize = sidebarResizeRef.current;
+    if (!resize) {
+      return;
+    }
+
+    const handleMove = (event: PointerEvent) => {
+      const active = sidebarResizeRef.current;
+      if (!active) {
+        return;
+      }
+      const delta = event.clientX - active.startClientX;
+      const width = Math.max(
+        SIDEBAR_MIN_WIDTH[active.id],
+        Math.round(active.startWidth + (active.side === "left" ? delta : -delta)),
+      );
+      updateWorkspaceUi((ui) => ({
+        ...ui,
+        sidebars: {
+          ...ui.sidebars,
+          [active.id]: {
+            ...ui.sidebars[active.id],
+            width,
+          },
+        },
+      }));
+    };
+
+    const finish = () => {
+      if (sidebarResizeRef.current) {
+        updateWorkspaceUi((ui) => ui, true);
+      }
+      sidebarResizeRef.current = null;
+    };
+
+    window.addEventListener("pointermove", handleMove);
+    window.addEventListener("pointerup", finish, { once: true });
+    window.addEventListener("pointercancel", finish, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [updateWorkspaceUi, workspaceMeta]);
+
   useEffect(() => {
     let disposed = false;
 
@@ -2039,78 +2189,94 @@ function WorkspaceCanvas() {
     return <div className="app-loading">loading workspace...</div>;
   }
 
+  const sidebarActionsDisabled = workspaceSwitching || activeExecutions.length > 0;
+  const sidebarWidths = {
+    workspaces: workspaceMeta.ui.sidebars.workspaces.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.workspaces.width,
+    settings: workspaceMeta.ui.sidebars.settings.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.settings.width,
+    nodes: workspaceMeta.ui.sidebars.nodes.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.nodes.width,
+    tuckspace: workspaceMeta.ui.sidebars.tuckspace.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.tuckspace.width,
+  };
+
   return (
-    <div className="app-shell">
-      <aside className="sidebar">
+    <div
+      className="app-shell"
+      style={{
+        ["--sidebar-workspaces-width" as string]: `${sidebarWidths.workspaces}px`,
+        ["--sidebar-settings-width" as string]: `${sidebarWidths.settings}px`,
+        ["--sidebar-nodes-width" as string]: `${sidebarWidths.nodes}px`,
+        ["--sidebar-tuckspace-width" as string]: `${sidebarWidths.tuckspace}px`,
+      }}
+    >
+      <SidebarPanel
+        id="workspaces"
+        label="workspaces"
+        collapsed={workspaceMeta.ui.sidebars.workspaces.collapsed}
+        side="left"
+        onToggle={() => toggleSidebar("workspaces")}
+        onResizeStart={(event) => startSidebarResize("workspaces", "left", event)}
+      >
         <div className="sidebar-controls-group">
-          <label className="sidebar-field">
-            <span className="sidebar-label">workspace</span>
-            <div className="workspace-picker-row">
-              <select
-                className="sidebar-input workspace-picker-select"
-                value={workspaceMeta.id}
-                onChange={(event) => void loadWorkspaceIntoCanvas(event.target.value)}
-                disabled={workspaceSwitching || activeExecutions.length > 0}
-                title="choose a workspace"
-              >
-                {workspaceSummaries.map((workspace) => (
-                  <option key={workspace.id} value={workspace.id}>
-                    {workspace.name}
-                  </option>
-                ))}
-              </select>
+          <div className="workspace-list">
+            {workspaceSummaries.map((workspace) => (
               <button
+                key={workspace.id}
                 type="button"
-                className="workspace-picker-create"
-                onClick={() => void createAndLoadWorkspace()}
-                disabled={workspaceSwitching || activeExecutions.length > 0}
-                title="create a new workspace"
+                className={`workspace-list-item${workspace.id === workspaceMeta.id ? " is-active" : ""}`}
+                onClick={() => void loadWorkspaceIntoCanvas(workspace.id)}
+                disabled={sidebarActionsDisabled || workspace.id === workspaceMeta.id}
+                title={workspace.name}
               >
-                new
+                {workspace.name}
               </button>
-              <button
-                type="button"
-                className="workspace-picker-delete"
-                onClick={() => setWorkspaceDeleteConfirming(true)}
-                disabled={workspaceSwitching || activeExecutions.length > 0}
-                title="delete this workspace"
-              >
-                del
-              </button>
-            </div>
-            {workspaceDeleteConfirming && !workspaceSwitching ? (
-              <div className="workspace-picker-confirm">
-                <span className="workspace-picker-status">delete this workspace?</span>
-                <div className="workspace-picker-confirm-actions">
-                  <button
-                    type="button"
-                    className="workspace-picker-delete workspace-picker-delete-confirm"
-                    onClick={() => void confirmDeleteWorkspace()}
-                    title="delete this workspace"
-                  >
-                    delete
-                  </button>
-                  <button
-                    type="button"
-                    className="workspace-picker-cancel"
-                    onClick={() => setWorkspaceDeleteConfirming(false)}
-                    title="keep this workspace"
-                  >
-                    cancel
-                  </button>
-                </div>
+            ))}
+          </div>
+          <div className="workspace-picker-row">
+            <button
+              type="button"
+              className="workspace-picker-create"
+              onClick={() => void createAndLoadWorkspace()}
+              disabled={sidebarActionsDisabled}
+              title="create a new workspace"
+            >
+              new
+            </button>
+            <button
+              type="button"
+              className="workspace-picker-delete"
+              onClick={() => setWorkspaceDeleteConfirming(true)}
+              disabled={sidebarActionsDisabled}
+              title="delete this workspace"
+            >
+              del
+            </button>
+          </div>
+          {workspaceDeleteConfirming && !workspaceSwitching ? (
+            <div className="workspace-picker-confirm">
+              <span className="workspace-picker-status">delete this workspace?</span>
+              <div className="workspace-picker-confirm-actions">
+                <button
+                  type="button"
+                  className="workspace-picker-delete workspace-picker-delete-confirm"
+                  onClick={() => void confirmDeleteWorkspace()}
+                  title="delete this workspace"
+                >
+                  delete
+                </button>
+                <button
+                  type="button"
+                  className="workspace-picker-cancel"
+                  onClick={() => setWorkspaceDeleteConfirming(false)}
+                  title="keep this workspace"
+                >
+                  cancel
+                </button>
               </div>
-            ) : workspaceSwitching ? (
-              <span className="workspace-picker-status">switching…</span>
-            ) : activeExecutions.length > 0 ? (
-              <span className="workspace-picker-status">stop runs to switch</span>
-            ) : null}
-          </label>
-          <span
-            className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}
-          >
-            {kernelConnected ? "kernel online" : "kernel offline"}
-          </span>
+            </div>
+          ) : workspaceSwitching ? (
+            <span className="workspace-picker-status">switching…</span>
+          ) : activeExecutions.length > 0 ? (
+            <span className="workspace-picker-status">stop runs to switch</span>
+          ) : null}
           <label className="sidebar-field">
             <span className="sidebar-label">workspace name</span>
             <input
@@ -2122,6 +2288,21 @@ function WorkspaceCanvas() {
               disabled={workspaceSwitching}
             />
           </label>
+        </div>
+      </SidebarPanel>
+
+      <SidebarPanel
+        id="settings"
+        label="settings"
+        collapsed={workspaceMeta.ui.sidebars.settings.collapsed}
+        side="left"
+        onToggle={() => toggleSidebar("settings")}
+        onResizeStart={(event) => startSidebarResize("settings", "left", event)}
+      >
+        <div className="sidebar-controls-group">
+          <span className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}>
+            {kernelConnected ? "kernel online" : "kernel offline"}
+          </span>
           <label className="sidebar-field">
             <span className="sidebar-label">pwd</span>
             <input
@@ -2169,7 +2350,16 @@ function WorkspaceCanvas() {
             </section>
           )}
         </div>
-        <div className="sidebar-divider" />
+      </SidebarPanel>
+
+      <SidebarPanel
+        id="nodes"
+        label="nodes"
+        collapsed={workspaceMeta.ui.sidebars.nodes.collapsed}
+        side="left"
+        onToggle={() => toggleSidebar("nodes")}
+        onResizeStart={(event) => startSidebarResize("nodes", "left", event)}
+      >
         <div className="node-palette-groups">
           {paletteGroups().map((group) => (
             <section key={group.label} className="node-palette-group">
@@ -2191,7 +2381,7 @@ function WorkspaceCanvas() {
             </section>
           ))}
         </div>
-      </aside>
+      </SidebarPanel>
 
       <main
         ref={canvasRef}
@@ -2273,24 +2463,15 @@ function WorkspaceCanvas() {
           colorMode="dark"
           connectionLineType={ConnectionLineType.SmoothStep}
           onMoveEnd={(_, viewport) =>
-            setWorkspaceMeta((current) => {
-              if (!current) {
-                return current;
-              }
-              const next = {
-                ...current,
-                ui: {
-                  viewportX: viewport.x,
-                  viewportY: viewport.y,
-                  zoom: viewport.zoom,
-                },
-              };
-              const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
-              if (nextWorkspace) {
-                saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
-              }
-              return next;
-            })
+            updateWorkspaceUi(
+              (ui) => ({
+                ...ui,
+                viewportX: viewport.x,
+                viewportY: viewport.y,
+                zoom: viewport.zoom,
+              }),
+              true,
+            )
           }
         >
           <MiniMap pannable zoomable className="minimap" />
@@ -2348,9 +2529,15 @@ function WorkspaceCanvas() {
         {toast && <div className="toast">{toast}</div>}
       </main>
 
-      <aside className="tuckspace-drawer">
+      <SidebarPanel
+        id="tuckspace"
+        label="tuckspace"
+        collapsed={workspaceMeta.ui.sidebars.tuckspace.collapsed}
+        side="right"
+        onToggle={() => toggleSidebar("tuckspace")}
+        onResizeStart={(event) => startSidebarResize("tuckspace", "right", event)}
+      >
         <div className="tuckspace-header">
-          <div className="node-palette-label">tuckspace</div>
           <input
             className="tuckspace-search"
             value={tuckspaceQuery}
@@ -2395,7 +2582,7 @@ function WorkspaceCanvas() {
             })
           )}
         </div>
-      </aside>
+      </SidebarPanel>
       {draggedTuckId && tuckDragPreview && (() => {
         const draggedItem = tuckspace.find((item) => item.id === draggedTuckId);
         if (!draggedItem) {

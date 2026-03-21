@@ -54,7 +54,7 @@ describe("sanitizeWorkspace", () => {
 
 
   it("drops legacy unslotted argv edges", () => {
-    const workspace: Workspace = {
+    const workspace = {
       id: "w",
       name: "w",
       ui: { viewportX: 0, viewportY: 0, zoom: 1 },
@@ -86,7 +86,7 @@ describe("sanitizeWorkspace", () => {
         },
       ],
       tuckspace: [],
-    };
+    } as unknown as Workspace;
 
     expect(sanitizeWorkspace(workspace).edges.map((edge) => edge.id)).toEqual([
       "stdin",
@@ -297,4 +297,21 @@ it("defaults tuckspace to an empty list and sanitizes tucked subgraphs", () => {
   const sanitized = sanitizeWorkspace(workspace);
   expect(sanitizeWorkspace({ ...workspace, tuckspace: undefined as never }).tuckspace).toEqual([]);
   expect(sanitized.tuckspace[0]?.nodes[0]?.kind).toBe("file");
+});
+
+it("defaults persisted sidebar ui state", () => {
+  const workspace = {
+    id: "w",
+    name: "w",
+    ui: { viewportX: 0, viewportY: 0, zoom: 1 },
+    cwd: "",
+    openaiApiKey: "",
+    nodes: [],
+    edges: [],
+    tuckspace: [],
+  } as unknown as Workspace;
+
+  const sanitized = sanitizeWorkspace(workspace);
+  expect(sanitized.ui.sidebars.workspaces.width).toBeGreaterThan(0);
+  expect(sanitized.ui.sidebars.tuckspace.collapsed).toBe(false);
 });
