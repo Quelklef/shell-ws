@@ -529,6 +529,7 @@ function WorkspaceCanvas() {
   const generationRef = useRef<Record<string, AiGenerationState>>({});
   const tuckspaceRef = useRef<TuckedSubgraph[]>([]);
   const tuckItemRefs = useRef(new Map<string, HTMLElement>());
+  const suppressTuckRestoreClickRef = useRef<{ tuckId: string; until: number } | null>(null);
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
 
@@ -1661,6 +1662,15 @@ function WorkspaceCanvas() {
     persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
   }, [cycleEdgeBuffering, deleteEdge, flow, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
 
+  const maybeUntuckSubgraph = useCallback((tuckId: string) => {
+    const suppression = suppressTuckRestoreClickRef.current;
+    if (suppression && suppression.tuckId === tuckId && suppression.until > Date.now()) {
+      suppressTuckRestoreClickRef.current = null;
+      return;
+    }
+    untuckSubgraph(tuckId);
+  }, [untuckSubgraph]);
+
   const reorderTuckedSubgraphs = useCallback((draggedId: string, targetId: string, position: "before" | "after") => {
     const nextTuckspace = reorderTuckspaceWithPlacement(tuckspaceRef.current, draggedId, targetId, position);
     if (nextTuckspace.every((item, index) => item.id === tuckspaceRef.current[index]?.id)) {
@@ -1800,6 +1810,9 @@ function WorkspaceCanvas() {
     };
 
     const finish = () => {
+      if (draggedTuckId) {
+        suppressTuckRestoreClickRef.current = { tuckId: draggedTuckId, until: Date.now() + 250 };
+      }
       if (draggedTuckId && tuckDropMarker && tuckDropMarker.targetId !== draggedTuckId) {
         reorderTuckedSubgraphs(draggedTuckId, tuckDropMarker.targetId, tuckDropMarker.position);
       }
@@ -2117,7 +2130,7 @@ function WorkspaceCanvas() {
                     item={item}
                     canPopulate={canTuckSelection}
                     interactive={draggedTuckId !== item.id}
-                    onRestore={() => untuckSubgraph(item.id)}
+                    onRestore={() => maybeUntuckSubgraph(item.id)}
                     onPopulate={() => moveSelectionToTuckspace(item.id)}
                     onDeleteShell={() => deleteTuckShell(item.id)}
                     onRename={(value) => renameTuckedSubgraph(item.id, value)}
