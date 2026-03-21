@@ -367,6 +367,18 @@ textarea {
   border: 0;
   background: transparent;
   text-align: left;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.tuckspace-restore:hover {
+  background: rgba(244, 236, 223, 0.04);
+  transform: translateY(-1px);
+}
+
+.tuckspace-restore:hover .tuckspace-preview {
+  border-color: rgba(244, 236, 223, 0.16);
 }
 
 .tuckspace-preview {
