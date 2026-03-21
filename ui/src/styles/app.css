@@ -371,7 +371,7 @@ textarea {
   gap: 10px;
   background: rgba(17, 19, 22, 0.76);
   cursor: grab;
-  transition: box-shadow 140ms ease;
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
 .tuckspace-shell-action {
@@ -440,7 +440,7 @@ textarea {
   background: transparent;
   text-align: left;
   cursor: pointer;
-  transition: box-shadow 140ms ease;
+  transition: transform 160ms ease, box-shadow 160ms ease;
 }
 
 .tuckspace-restore:disabled {
@@ -455,7 +455,8 @@ textarea {
 
 .tuckspace-item:hover .tuckspace-restore,
 .tuckspace-item:hover .tuckspace-shell-body {
-  box-shadow: inset 4px 0 0 rgba(242, 192, 120, 0.78);
+  transform: perspective(900px) rotateY(-9deg);
+  box-shadow: 8px 0 18px rgba(0, 0, 0, 0.2), -4px 0 10px rgba(0, 0, 0, 0.12);
 }
 
 
