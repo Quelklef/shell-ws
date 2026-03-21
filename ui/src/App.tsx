@@ -697,6 +697,27 @@ function WorkspaceCanvas() {
     [buildWorkspace],
   );
 
+
+  const updateWorkspaceName = useCallback(
+    (name: string) => {
+      setWorkspaceMeta((current) => {
+        if (!current) {
+          return current;
+        }
+        const next = { ...current, name };
+        const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
+        if (nextWorkspace) {
+          saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
+        }
+        setWorkspaceSummaries((summaries) =>
+          upsertWorkspaceSummary(summaries, { id: next.id, name: next.name }),
+        );
+        return next;
+      });
+    },
+    [buildWorkspace],
+  );
+
   const persistWorkspaceSnapshot = useCallback((
     nextNodes: FlowNode[],
     nextEdges: FlowEdge[],
@@ -2021,6 +2042,17 @@ function WorkspaceCanvas() {
           >
             {kernelConnected ? "kernel online" : "kernel offline"}
           </span>
+          <label className="sidebar-field">
+            <span className="sidebar-label">workspace name</span>
+            <input
+              className="sidebar-input"
+              value={workspaceMeta.name}
+              onChange={(event) => updateWorkspaceName(event.target.value)}
+              placeholder="Workspace name"
+              title="workspace name"
+              disabled={workspaceSwitching}
+            />
+          </label>
           <label className="sidebar-field">
             <span className="sidebar-label">pwd</span>
             <input
