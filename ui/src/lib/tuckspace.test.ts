@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildTopologyPreview, defaultTuckedName, isClosedSelection, reorderTuckspace } from "./tuckspace";
+import { buildTopologyPreview, defaultTuckedName, emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, storeTuckedSubgraph } from "./tuckspace";
 
 describe("tuckspace helpers", () => {
   it("detects closed selections", () => {
@@ -27,6 +27,23 @@ describe("tuckspace helpers", () => {
       { id: "c", name: "C", nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } },
     ];
     expect(reorderTuckspace(items, "c", "a").map((item) => item.id)).toEqual(["c", "a", "b"]);
+  });
+
+
+  it("fills an existing shell without changing its identity", () => {
+    const items = [
+      { id: "shell-1", name: "Saved shell", nodes: [], edges: [], topologyPreview: { nodes: [], edges: [] } },
+    ];
+    const next = storeTuckedSubgraph(
+      items,
+      [{ id: "n1", kind: "text", title: "", comment: "", position: { x: 0, y: 0 }, size: { width: 10, height: 10 } }] as never,
+      [],
+      "shell-1",
+    );
+    expect(next[0]?.id).toBe("shell-1");
+    expect(next[0]?.name).toBe("Saved shell");
+    expect(next[0]?.nodes).toHaveLength(1);
+    expect(isTuckspaceShell(emptyTuckedSubgraph(next[0]!))).toBe(true);
   });
 
   it("normalizes topology preview coordinates", () => {

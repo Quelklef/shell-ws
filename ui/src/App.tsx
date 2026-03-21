@@ -60,7 +60,7 @@ import { sanitizeWorkspace } from "./lib/workspace";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
-import { buildTuckedSubgraph, defaultTuckedName, isClosedSelection, reorderTuckspace } from "./lib/tuckspace";
+import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, reorderTuckspace, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
 const nodeTypes = {
@@ -1499,7 +1499,7 @@ function WorkspaceCanvas() {
     persistWorkspaceSnapshot(nodesRef.current, edgesRef.current, nextTuckspace);
   }, [persistWorkspaceSnapshot]);
 
-  const tuckSelectedSubgraph = useCallback(() => {
+  const moveSelectionToTuckspace = useCallback((targetShellId?: string) => {
     const selectedIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
     if (!isClosedSelection(selectedIds, edgesRef.current)) {
       return;
@@ -1510,10 +1510,7 @@ function WorkspaceCanvas() {
     const tuckedEdges = edgesRef.current
       .filter((edge) => selectedIds.has(edge.source) && selectedIds.has(edge.target))
       .map(flowEdgeToWorkspaceEdge);
-    const nextTuckspace = [
-      ...tuckspaceRef.current,
-      buildTuckedSubgraph(defaultTuckedName(tuckspaceRef.current), tuckedNodes, tuckedEdges),
-    ];
+    const nextTuckspace = storeTuckedSubgraph(tuckspaceRef.current, tuckedNodes, tuckedEdges, targetShellId);
     const nextNodes = nodesRef.current.filter((node) => !selectedIds.has(node.id));
     const nextEdges = edgesRef.current.filter(
       (edge) => !selectedIds.has(edge.source) && !selectedIds.has(edge.target),
@@ -1547,7 +1544,7 @@ function WorkspaceCanvas() {
       setToast('cannot restore subgraph: ids already exist in this workspace');
       return;
     }
-    const nextTuckspace = tuckspaceRef.current.filter((entry) => entry.id !== tuckId);
+    const nextTuckspace = tuckspaceRef.current.map((entry) => (entry.id === tuckId ? emptyTuckedSubgraph(entry) : entry));
     const restoredRuntime = Object.fromEntries(
       item.nodes.map((node) => [
         node.id,
@@ -1599,6 +1596,11 @@ function WorkspaceCanvas() {
     : canTuckSelection
       ? null
       : 'selection must be closed before tucking';
+
+  const tuckspaceShells = useMemo(
+    () => tuckspace.filter(isTuckspaceShell),
+    [tuckspace],
+  );
 
   const visibleTuckspace = useMemo(() => {
     const query = tuckspaceQuery.trim().toLowerCase();
@@ -1840,14 +1842,30 @@ function WorkspaceCanvas() {
             <button type="button" onClick={runLayout}>
               layout selected
             </button>
-            <button
-              type="button"
-              onClick={tuckSelectedSubgraph}
-              disabled={!canTuckSelection}
-              title={canTuckSelection ? "Move subgraph into tuckspace" : "Only closed subgraphs can be moved into tuckspace"}
-            >
-              move to tuckspace
-            </button>
+            <div className="context-menu-item context-menu-item-has-submenu">
+              <button
+                type="button"
+                onClick={() => moveSelectionToTuckspace()}
+                disabled={!canTuckSelection}
+                title={canTuckSelection ? "Move subgraph into tuckspace" : "Only closed subgraphs can be moved into tuckspace"}
+              >
+                move to tuckspace
+              </button>
+              {canTuckSelection && tuckspaceShells.length > 0 && (
+                <div className="context-submenu">
+                  {tuckspaceShells.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      title={`Move subgraph into ${item.name}`}
+                      onClick={() => moveSelectionToTuckspace(item.id)}
+                    >
+                      {item.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
         {toast && <div className="toast">{toast}</div>}
@@ -1873,8 +1891,9 @@ function WorkspaceCanvas() {
             visibleTuckspace.map((item) => (
               <article
                 key={item.id}
-                className={`tuckspace-item${draggedTuckId === item.id ? " is-dragging" : ""}${dropTuckId === item.id ? " is-drop-target" : ""}`}
+                className={`tuckspace-item${draggedTuckId === item.id ? " is-dragging" : ""}${dropTuckId === item.id ? " is-drop-target" : ""}${isTuckspaceShell(item) ? " is-shell" : ""}`}
                 draggable
+                title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
                 onDragStart={(event) => {
                   setDraggedTuckId(item.id);
                   setDropTuckId(item.id);
@@ -1901,19 +1920,25 @@ function WorkspaceCanvas() {
                   setDropTuckId(null);
                 }}
               >
-                <button type="button" className="tuckspace-restore" onClick={() => untuckSubgraph(item.id)} title="Move to workspace">
+                <button
+                  type="button"
+                  className="tuckspace-restore"
+                  onClick={() => untuckSubgraph(item.id)}
+                  title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
+                  disabled={isTuckspaceShell(item)}
+                >
                   <TuckspacePreview item={item} />
-                  <span className="tuckspace-divider" aria-hidden="true" />
-                  <input
-                    className="tuckspace-name"
-                    draggable={false}
-                    value={item.name}
-                    onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
-                    onClick={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    aria-label="tucked subgraph name"
-                  />
                 </button>
+                <span className="tuckspace-divider" aria-hidden="true" />
+                <input
+                  className="tuckspace-name"
+                  draggable={false}
+                  value={item.name}
+                  onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  aria-label="tucked subgraph name"
+                />
               </article>
             ))
           )}

@@ -81,3 +81,48 @@ export function reorderTuckspace(items: readonly TuckedSubgraph[], draggedId: st
   next.splice(targetIndex, 0, dragged);
   return next;
 }
+
+
+export function isTuckspaceShell(item: TuckedSubgraph) {
+  return item.nodes.length === 0 && item.edges.length === 0;
+}
+
+export function storeTuckedSubgraph(
+  items: readonly TuckedSubgraph[],
+  nodes: WorkspaceNode[],
+  edges: WorkspaceEdge[],
+  targetShellId?: string,
+) {
+  const topologyPreview = buildTopologyPreview(nodes, edges);
+  if (!targetShellId) {
+    return [
+      ...items,
+      {
+        id: encodeId("tuck"),
+        name: defaultTuckedName(items),
+        nodes,
+        edges,
+        topologyPreview,
+      },
+    ];
+  }
+  return items.map((item) =>
+    item.id === targetShellId
+      ? {
+          ...item,
+          nodes,
+          edges,
+          topologyPreview,
+        }
+      : item,
+  );
+}
+
+export function emptyTuckedSubgraph(item: TuckedSubgraph): TuckedSubgraph {
+  return {
+    ...item,
+    nodes: [],
+    edges: [],
+    topologyPreview: { nodes: [], edges: [] },
+  };
+}

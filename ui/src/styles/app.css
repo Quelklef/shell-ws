@@ -357,6 +357,10 @@ textarea {
   overflow: hidden;
 }
 
+.tuckspace-item.is-shell {
+  border-style: dashed;
+}
+
 .tuckspace-item.is-dragging {
   opacity: 0.52;
 }
@@ -376,16 +380,19 @@ textarea {
   background: transparent;
   text-align: left;
   cursor: pointer;
-  border-radius: 8px;
   transition: transform 140ms ease, background 140ms ease;
 }
 
-.tuckspace-restore:hover {
+.tuckspace-restore:disabled {
+  cursor: default;
+}
+
+.tuckspace-item:not(.is-shell):hover .tuckspace-restore {
   background: rgba(244, 236, 223, 0.04);
   transform: translateY(-1px);
 }
 
-.tuckspace-restore:hover .tuckspace-divider {
+.tuckspace-item:not(.is-shell):hover .tuckspace-divider {
   background: rgba(244, 236, 223, 0.16);
 }
 
@@ -460,6 +467,30 @@ textarea {
   background: rgba(12, 14, 16, 0.96);
   border: 1px solid var(--line);
   box-shadow: var(--shadow);
+}
+
+.context-menu-item {
+  position: relative;
+}
+
+.context-submenu {
+  position: absolute;
+  left: calc(100% + 8px);
+  top: 0;
+  display: none;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 170px;
+  padding: 8px;
+  border-radius: 8px;
+  background: rgba(12, 14, 16, 0.96);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
+.context-menu-item-has-submenu:hover .context-submenu,
+.context-menu-item-has-submenu:focus-within .context-submenu {
+  display: flex;
 }
 
 .context-menu button:disabled {
