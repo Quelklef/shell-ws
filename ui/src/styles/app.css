@@ -333,13 +333,13 @@ textarea {
 .workspace-list-item {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 4px;
   align-items: stretch;
   border: 1px solid rgba(244, 236, 223, 0.12);
   background: rgba(9, 11, 13, 0.44);
   color: var(--text);
   border-radius: 7px;
-  overflow: hidden;
+  padding: 6px;
 }
 
 .workspace-list-item.is-active {
@@ -348,7 +348,7 @@ textarea {
 }
 
 .workspace-list-main {
-  padding: 6px;
+  padding: 0;
 }
 
 .workspace-list-select,
@@ -379,9 +379,9 @@ textarea {
   display: flex;
   justify-content: flex-end;
   gap: 4px;
-  padding: 6px;
-  border-top: 1px solid rgba(244, 236, 223, 0.08);
-  background: rgba(244, 236, 223, 0.02);
+  padding: 0;
+  background: transparent;
+  border: 0;
 }
 
 .workspace-list-action {
@@ -389,8 +389,8 @@ textarea {
   background: rgba(244, 236, 223, 0.04);
   color: var(--text-soft);
   border-radius: 6px;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -422,8 +422,8 @@ textarea {
   background: rgba(244, 236, 223, 0.04);
   color: var(--text-soft);
   border-radius: 6px;
-  min-height: 28px;
-  padding: 0 9px;
+  min-height: 24px;
+  padding: 0 5px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
