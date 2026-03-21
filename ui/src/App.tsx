@@ -448,7 +448,7 @@ function TuckspaceCardBody({
             className="tuckspace-shell-action tuckspace-shell-delete"
             onClick={onDeleteShell}
             disabled={!interactive}
-            title="Delete shell"
+            title="Delete tuckspace entry shell"
           >
             ×
           </button>
