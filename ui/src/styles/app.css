@@ -458,9 +458,9 @@ textarea {
   transform-origin: center center;
 }
 
-.tuckspace-item:hover {
-  transform: perspective(900px) rotateY(-36deg);
-  box-shadow: 28px 0 48px rgba(0, 0, 0, 0.26), -12px 0 18px rgba(0, 0, 0, 0.14);
+.tuckspace-item:not(.is-shell):hover {
+  transform: perspective(900px) rotateY(-18deg);
+  box-shadow: 14px 0 28px rgba(0, 0, 0, 0.22), -6px 0 12px rgba(0, 0, 0, 0.12);
 }
 
 
