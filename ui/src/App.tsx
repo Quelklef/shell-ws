@@ -1846,9 +1846,6 @@ function WorkspaceCanvas() {
               <article key={item.id} className="tuckspace-item">
                 <button type="button" className="tuckspace-restore" onClick={() => untuckSubgraph(item.id)}>
                   <TuckspacePreview item={item} />
-                  <span className="tuckspace-meta">
-                    <span className="tuckspace-stats">{item.nodes.length} nodes · {item.edges.length} wires</span>
-                  </span>
                 </button>
                 <input
                   className="tuckspace-name"
