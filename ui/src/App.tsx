@@ -427,7 +427,7 @@ function TuckspaceCardBody({
   onPopulate?: () => void;
   onDeleteShell?: () => void;
   onRename?: (value: string) => void;
-  onStartDrag?: (event: Parameters<NonNullable<JSX.IntrinsicElements["div"]["onPointerDown"]>>[0]) => void;
+  onStartDrag?: (event: React.PointerEvent<HTMLElement>) => void;
 }) {
   const shell = isTuckspaceShell(item);
   return (
@@ -457,6 +457,7 @@ function TuckspaceCardBody({
         <button
           type="button"
           className="tuckspace-restore"
+          onPointerDown={interactive ? onStartDrag : undefined}
           onClick={onRestore}
           title="Move to workspace"
           disabled={!interactive}
@@ -1701,7 +1702,7 @@ function WorkspaceCanvas() {
     return tuckspace.filter((item) => item.name.toLowerCase().includes(query));
   }, [tuckspace, tuckspaceQuery]);
 
-  const startTuckDrag = useCallback((tuckId: string, event: Parameters<NonNullable<JSX.IntrinsicElements["div"]["onPointerDown"]>>[0]) => {
+  const startTuckDrag = useCallback((tuckId: string, event: React.PointerEvent<HTMLElement>) => {
     const card = event.currentTarget.closest(".tuckspace-item");
     if (!(card instanceof HTMLElement)) {
       return;
