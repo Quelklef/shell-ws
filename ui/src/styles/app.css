@@ -453,10 +453,14 @@ textarea {
   cursor: grabbing;
 }
 
-.tuckspace-item:hover .tuckspace-restore,
-.tuckspace-item:hover .tuckspace-shell-body {
-  transform: perspective(900px) rotateY(-9deg);
-  box-shadow: 8px 0 18px rgba(0, 0, 0, 0.2), -4px 0 10px rgba(0, 0, 0, 0.12);
+.tuckspace-item {
+  transition: transform 160ms ease, box-shadow 160ms ease;
+  transform-origin: center center;
+}
+
+.tuckspace-item:hover {
+  transform: perspective(900px) rotateY(-36deg);
+  box-shadow: 28px 0 48px rgba(0, 0, 0, 0.26), -12px 0 18px rgba(0, 0, 0, 0.14);
 }
 
 
