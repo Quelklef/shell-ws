@@ -10,6 +10,8 @@ pub struct WorkspaceStore {
     base_dir: PathBuf,
 }
 
+const RESERVED_FILENAMES: &[&str] = &["tuckspace.json"];
+
 impl WorkspaceStore {
     pub async fn new(base_dir: impl AsRef<Path>) -> Result<Self, std::io::Error> {
         let base_dir = base_dir.as_ref().to_path_buf();
@@ -27,7 +29,9 @@ impl WorkspaceStore {
         let mut entries = fs::read_dir(&self.base_dir).await?;
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+                || path.file_name().and_then(|name| name.to_str()).is_some_and(|name| RESERVED_FILENAMES.contains(&name))
+            {
                 continue;
             }
             let content = fs::read(&path).await?;
@@ -57,7 +61,9 @@ impl WorkspaceStore {
         let mut workspaces = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json")
+                || path.file_name().and_then(|name| name.to_str()).is_some_and(|name| RESERVED_FILENAMES.contains(&name))
+            {
                 continue;
             }
             let content = fs::read(&path).await?;

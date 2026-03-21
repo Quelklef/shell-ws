@@ -41,3 +41,12 @@ async fn workspace_store_lists_and_reorders_by_sort_order() {
     let reordered = store.list().await.expect("list after reorder");
     assert_eq!(reordered.iter().map(|workspace| workspace.id.as_str()).collect::<Vec<_>>(), vec!["beta", bootstrapped_id.as_str(), "alpha"]);
 }
+
+#[tokio::test]
+async fn workspace_store_ignores_reserved_json_files() {
+    let temp_dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(temp_dir.path().join("tuckspace.json"), "[]").expect("write tuckspace");
+    let store = WorkspaceStore::new(temp_dir.path()).await.expect("store");
+    let workspaces = store.list().await.expect("list");
+    assert_eq!(workspaces.len(), 1);
+}
