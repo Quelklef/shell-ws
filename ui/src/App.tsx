@@ -62,7 +62,14 @@ import type {
 import { connectKernel } from "./lib/ws";
 import { sanitizeWorkspace } from "./lib/workspace";
 import { sortWorkspaceSummaries, upsertWorkspaceSummary } from "./lib/workspaceList";
-import { COLLAPSED_SIDEBAR_WIDTH, SIDEBAR_MIN_WIDTH, type SidebarId } from "./lib/workspaceUi";
+import {
+  COLLAPSED_SIDEBAR_WIDTH,
+  SIDEBAR_MIN_WIDTH,
+  loadGlobalSidebarState,
+  saveGlobalSidebarState,
+  type SidebarId,
+  type WorkspaceSidebars,
+} from "./lib/workspaceUi";
 import { missingConnectedInputs, missingOutputs, outputPortsForKind, previewOutputPortsForKind, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
@@ -571,6 +578,7 @@ function WorkspaceCanvas() {
     "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"
   > | null>(null);
   const [workspaceSwitching, setWorkspaceSwitching] = useState(false);
+  const [sidebarUi, setSidebarUi] = useState<WorkspaceSidebars>(() => loadGlobalSidebarState());
   const [workspaceDeleteConfirmingId, setWorkspaceDeleteConfirmingId] = useState<string | null>(null);
   const [workspaceRenamingId, setWorkspaceRenamingId] = useState<string | null>(null);
   const [workspaceRenameDraft, setWorkspaceRenameDraft] = useState("");
@@ -607,6 +615,7 @@ function WorkspaceCanvas() {
   const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "createdAt" | "cwd" | "openaiApiKey" | "ui"> | null>(
     null,
   );
+  const sidebarUiRef = useRef<WorkspaceSidebars>(sidebarUi);
   const nodesRef = useRef<FlowNode[]>([]);
   const edgesRef = useRef<FlowEdge[]>([]);
   const autorunRef = useRef<Map<string, AutorunHandle>>(new Map());
@@ -631,6 +640,10 @@ function WorkspaceCanvas() {
   useEffect(() => {
     workspaceMetaRef.current = workspaceMeta;
   }, [workspaceMeta]);
+
+  useEffect(() => {
+    sidebarUiRef.current = sidebarUi;
+  }, [sidebarUi]);
 
   useEffect(() => {
     nodesRef.current = nodes;
@@ -822,6 +835,38 @@ function WorkspaceCanvas() {
     [buildWorkspace],
   );
 
+
+  const updateSidebarUi = useCallback((updater: (sidebars: WorkspaceSidebars) => WorkspaceSidebars, persist = true) => {
+    setSidebarUi((current) => {
+      const next = updater(current);
+      sidebarUiRef.current = next;
+      if (persist) {
+        saveGlobalSidebarState(next);
+      }
+      setWorkspaceMeta((currentMeta) => {
+        if (!currentMeta) {
+          return currentMeta;
+        }
+        return {
+          ...currentMeta,
+          ui: {
+            ...currentMeta.ui,
+            sidebars: next,
+          },
+        };
+      });
+      if (workspaceMetaRef.current) {
+        workspaceMetaRef.current = {
+          ...workspaceMetaRef.current,
+          ui: {
+            ...workspaceMetaRef.current.ui,
+            sidebars: next,
+          },
+        };
+      }
+      return next;
+    });
+  }, []);
 
   const updateWorkspaceUi = useCallback(
     (
@@ -1584,12 +1629,15 @@ function WorkspaceCanvas() {
   }, [buildWorkspace, cancelPendingWorkspaceSaves]);
 
   const applyLoadedWorkspace = useCallback((loaded: Workspace) => {
-    const ui =
+    const workspaceUi =
       loaded.ui.viewportX === 0 &&
       loaded.ui.viewportY === 0 &&
       loaded.ui.zoom === 1
         ? { ...loaded.ui, zoom: 0.5 }
         : loaded.ui;
+    // Sidebar chrome is global UI state, so workspace loads keep the current
+    // shared sidebar settings instead of reviving per-workspace sidebar state.
+    const ui = { ...workspaceUi, sidebars: sidebarUiRef.current };
     const nextMeta = {
       id: loaded.id,
       name: loaded.name,
@@ -1741,46 +1789,30 @@ function WorkspaceCanvas() {
   }, []);
 
   const toggleSidebar = useCallback((id: SidebarId) => {
-    updateWorkspaceUi(
-      (ui) => ({
-        ...ui,
-        sidebars: {
-          ...ui.sidebars,
-          [id]: {
-            ...ui.sidebars[id],
-            collapsed: !ui.sidebars[id].collapsed,
-          },
-        },
-      }),
-      true,
-    );
-  }, [updateWorkspaceUi]);
+    updateSidebarUi((sidebars) => ({
+      ...sidebars,
+      [id]: {
+        ...sidebars[id],
+        collapsed: !sidebars[id].collapsed,
+      },
+    }));
+  }, [updateSidebarUi]);
 
   const persistSidebarWidth = useCallback((id: SidebarId, width: number) => {
-    updateWorkspaceUi(
-      (ui) => ({
-        ...ui,
-        sidebars: {
-          ...ui.sidebars,
-          [id]: {
-            ...ui.sidebars[id],
-            width,
-          },
-        },
-      }),
-      true,
-    );
-  }, [updateWorkspaceUi]);
+    updateSidebarUi((sidebars) => ({
+      ...sidebars,
+      [id]: {
+        ...sidebars[id],
+        width,
+      },
+    }));
+  }, [updateSidebarUi]);
 
   const startSidebarResize = useCallback((id: SidebarId, side: "left" | "right", event: ReactPointerEvent<HTMLDivElement>) => {
-    const current = workspaceMetaRef.current;
-    if (!current) {
-      return;
-    }
     event.preventDefault();
     event.stopPropagation();
     const startClientX = event.clientX;
-    const startWidth = current.ui.sidebars[id].width;
+    const startWidth = sidebarUiRef.current[id].width;
 
     const handleMove = (moveEvent: PointerEvent) => {
       const delta = moveEvent.clientX - startClientX;
@@ -1788,32 +1820,26 @@ function WorkspaceCanvas() {
         SIDEBAR_MIN_WIDTH[id],
         Math.round(startWidth + (side === "left" ? delta : -delta)),
       );
-      updateWorkspaceUi((ui) => ({
-        ...ui,
-        sidebars: {
-          ...ui.sidebars,
-          [id]: {
-            ...ui.sidebars[id],
-            width,
-          },
+      updateSidebarUi((sidebars) => ({
+        ...sidebars,
+        [id]: {
+          ...sidebars[id],
+          width,
         },
-      }));
+      }), false);
     };
 
     const finish = () => {
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
-      const finalWidth = workspaceMetaRef.current?.ui.sidebars[id].width;
-      if (typeof finalWidth === "number") {
-        persistSidebarWidth(id, finalWidth);
-      }
+      persistSidebarWidth(id, sidebarUiRef.current[id].width);
     };
 
     window.addEventListener("pointermove", handleMove);
     window.addEventListener("pointerup", finish);
     window.addEventListener("pointercancel", finish);
-  }, [persistSidebarWidth, updateWorkspaceUi]);
+  }, [persistSidebarWidth, updateSidebarUi]);
 
   useEffect(() => {
     let disposed = false;
@@ -2261,9 +2287,9 @@ function WorkspaceCanvas() {
 
   const sidebarActionsDisabled = workspaceSwitching || activeExecutions.length > 0;
   const sidebarWidths = {
-    workspaces: workspaceMeta.ui.sidebars.workspaces.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.workspaces.width,
-    nodes: workspaceMeta.ui.sidebars.nodes.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.nodes.width,
-    tuckspace: workspaceMeta.ui.sidebars.tuckspace.collapsed ? COLLAPSED_SIDEBAR_WIDTH : workspaceMeta.ui.sidebars.tuckspace.width,
+    workspaces: sidebarUi.workspaces.collapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarUi.workspaces.width,
+    nodes: sidebarUi.nodes.collapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarUi.nodes.width,
+    tuckspace: sidebarUi.tuckspace.collapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarUi.tuckspace.width,
   };
 
   return (
@@ -2278,7 +2304,7 @@ function WorkspaceCanvas() {
       <SidebarPanel
         id="workspaces"
         label="kernel, workspaces, settings"
-        collapsed={workspaceMeta.ui.sidebars.workspaces.collapsed}
+        collapsed={sidebarUi.workspaces.collapsed}
         side="left"
         onToggle={() => toggleSidebar("workspaces")}
         onResizeStart={(event) => startSidebarResize("workspaces", "left", event)}
@@ -2460,7 +2486,7 @@ function WorkspaceCanvas() {
       <SidebarPanel
         id="nodes"
         label="nodes"
-        collapsed={workspaceMeta.ui.sidebars.nodes.collapsed}
+        collapsed={sidebarUi.nodes.collapsed}
         side="left"
         onToggle={() => toggleSidebar("nodes")}
         onResizeStart={(event) => startSidebarResize("nodes", "left", event)}
@@ -2637,7 +2663,7 @@ function WorkspaceCanvas() {
       <SidebarPanel
         id="tuckspace"
         label="tuckspace"
-        collapsed={workspaceMeta.ui.sidebars.tuckspace.collapsed}
+        collapsed={sidebarUi.tuckspace.collapsed}
         side="right"
         onToggle={() => toggleSidebar("tuckspace")}
         onResizeStart={(event) => startSidebarResize("tuckspace", "right", event)}

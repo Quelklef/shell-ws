@@ -1,5 +1,7 @@
 import type { Workspace } from "./types";
 
+const SIDEBAR_STORAGE_KEY = "shell-ws.sidebar-ui";
+
 export type SidebarId = "workspaces" | "settings" | "nodes" | "tuckspace";
 
 export interface SidebarUiState {
@@ -29,6 +31,28 @@ export const SIDEBAR_MIN_WIDTH: Record<SidebarId, number> = {
   nodes: 100,
   tuckspace: 100,
 };
+
+export function loadGlobalSidebarState(): WorkspaceSidebars {
+  if (typeof window === "undefined") {
+    return normalizeWorkspaceSidebars(undefined);
+  }
+  try {
+    const raw = window.localStorage.getItem(SIDEBAR_STORAGE_KEY);
+    if (!raw) {
+      return normalizeWorkspaceSidebars(undefined);
+    }
+    return normalizeWorkspaceSidebars(JSON.parse(raw) as Partial<WorkspaceSidebars>);
+  } catch {
+    return normalizeWorkspaceSidebars(undefined);
+  }
+}
+
+export function saveGlobalSidebarState(sidebars: WorkspaceSidebars) {
+  if (typeof window === "undefined") {
+    return;
+  }
+  window.localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify(sidebars));
+}
 
 export function normalizeWorkspaceUi(ui: { viewportX?: number; viewportY?: number; zoom?: number; sidebars?: Partial<WorkspaceSidebars> } | undefined): Workspace["ui"] {
   return {

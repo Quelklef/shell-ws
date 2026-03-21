@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { COLLAPSED_SIDEBAR_WIDTH, SIDEBAR_DEFAULTS, normalizeWorkspaceUi } from "./workspaceUi";
+import { COLLAPSED_SIDEBAR_WIDTH, SIDEBAR_DEFAULTS, loadGlobalSidebarState, normalizeWorkspaceUi, saveGlobalSidebarState } from "./workspaceUi";
 
 describe("workspaceUi", () => {
   it("fills in default sidebars", () => {
@@ -20,4 +20,16 @@ describe("workspaceUi", () => {
     expect(ui.sidebars.workspaces.width).toBeGreaterThan(COLLAPSED_SIDEBAR_WIDTH);
     expect(ui.sidebars.settings).toEqual(SIDEBAR_DEFAULTS.settings);
   });
+});
+
+it("loads and saves sidebar state globally", () => {
+  window.localStorage.clear();
+  expect(loadGlobalSidebarState()).toEqual(SIDEBAR_DEFAULTS);
+
+  saveGlobalSidebarState({
+    ...SIDEBAR_DEFAULTS,
+    nodes: { width: 123, collapsed: true },
+  });
+
+  expect(loadGlobalSidebarState().nodes).toEqual({ width: 123, collapsed: true });
 });
