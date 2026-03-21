@@ -392,7 +392,7 @@ textarea {
 }
 
 .tuckspace-item.is-dragging {
-  opacity: 0.52;
+  opacity: 0.4;
 }
 
 .tuckspace-item.is-drop-target {
@@ -470,11 +470,19 @@ textarea {
   color: var(--text-soft);
 }
 
+.tuckspace-footer {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  background: rgba(9, 11, 13, 0.54);
+}
+
 .tuckspace-name {
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   border: 0;
   outline: none;
-  background: rgba(9, 11, 13, 0.54);
+  background: transparent;
   color: var(--text);
   padding: 10px 12px;
   font-size: 12px;
@@ -490,6 +498,25 @@ textarea {
 .tuckspace-name:focus-visible {
   background: rgba(14, 17, 19, 0.78);
   box-shadow: inset 0 0 0 1px rgba(242, 192, 120, 0.62);
+}
+
+
+.tuckspace-drag-handle {
+  width: 34px;
+  border: 0;
+  border-left: 1px solid rgba(244, 236, 223, 0.08);
+  background: transparent;
+  color: var(--text-soft);
+  cursor: grab;
+}
+
+.tuckspace-drag-handle:hover {
+  background: rgba(244, 236, 223, 0.04);
+  color: var(--text);
+}
+
+.tuckspace-drag-handle:active {
+  cursor: grabbing;
 }
 
 .toast {

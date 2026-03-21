@@ -1900,14 +1900,7 @@ function WorkspaceCanvas() {
               <article
                 key={item.id}
                 className={`tuckspace-item${draggedTuckId === item.id ? " is-dragging" : ""}${dropTuckId === item.id ? " is-drop-target" : ""}${isTuckspaceShell(item) ? " is-shell" : ""}`}
-                draggable
                 title={isTuckspaceShell(item) ? "Empty shell" : "Move to workspace"}
-                onDragStart={(event) => {
-                  setDraggedTuckId(item.id);
-                  setDropTuckId(item.id);
-                  event.dataTransfer.effectAllowed = "move";
-                  event.dataTransfer.setData("text/plain", item.id);
-                }}
                 onDragOver={(event) => {
                   event.preventDefault();
                   if (dropTuckId !== item.id) {
@@ -1920,10 +1913,6 @@ function WorkspaceCanvas() {
                   if (draggedId) {
                     reorderTuckedSubgraphs(draggedId, item.id);
                   }
-                  setDraggedTuckId(null);
-                  setDropTuckId(null);
-                }}
-                onDragEnd={() => {
                   setDraggedTuckId(null);
                   setDropTuckId(null);
                 }}
@@ -1959,20 +1948,38 @@ function WorkspaceCanvas() {
                   </button>
                 )}
                 <span className="tuckspace-divider" aria-hidden="true" />
-                <input
-                  className="tuckspace-name"
-                  draggable={false}
-                  value={item.name}
-                  onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (event.detail >= 3) {
-                      event.currentTarget.select();
-                    }
-                  }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  aria-label="tucked subgraph name"
-                />
+                <div className="tuckspace-footer">
+                  <input
+                    className="tuckspace-name"
+                    value={item.name}
+                    onChange={(event) => renameTuckedSubgraph(item.id, event.target.value)}
+                    aria-label="tucked subgraph name"
+                  />
+                  <button
+                    type="button"
+                    className="tuckspace-drag-handle"
+                    draggable
+                    title="Reorder"
+                    aria-label="Reorder tucked subgraph"
+                    onClick={(event) => event.preventDefault()}
+                    onDragStart={(event) => {
+                      setDraggedTuckId(item.id);
+                      setDropTuckId(item.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", item.id);
+                      const card = event.currentTarget.closest(".tuckspace-item");
+                      if (card instanceof HTMLElement) {
+                        event.dataTransfer.setDragImage(card, card.clientWidth / 2, 18);
+                      }
+                    }}
+                    onDragEnd={() => {
+                      setDraggedTuckId(null);
+                      setDropTuckId(null);
+                    }}
+                  >
+                    <span aria-hidden="true">⋮⋮</span>
+                  </button>
+                </div>
               </article>
             ))
           )}
