@@ -58,15 +58,6 @@ export default function WorkspaceEdge({
 
   return (
     <>
-      <path
-        d={path}
-        className="workspace-edge-hover-target"
-        fill="none"
-        stroke="transparent"
-        strokeWidth={20}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-      />
       {buffering === "on_complete" ? (
         <>
           <BaseEdge id={`${id}-complete-outer`} path={path} style={completeEdgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${selected ? "is-selected" : ""}`} />
@@ -75,6 +66,16 @@ export default function WorkspaceEdge({
       ) : (
         <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${animated ? "is-animated" : ""} ${selected ? "is-selected" : ""}`} />
       )}
+      <path
+        d={path}
+        className="workspace-edge-hover-target"
+        fill="none"
+        stroke="currentColor"
+        strokeOpacity={0}
+        strokeWidth={20}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+      />
       <EdgeLabelRenderer>
         <div
           className={`edge-toolbar nodrag nopan ${selected ? "is-selected" : ""} ${hovered ? "is-visible" : ""}`}
