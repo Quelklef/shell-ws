@@ -206,6 +206,14 @@ export default function ShellNode({ data }: NodeProps) {
   );
 
   const floatingPreviewPanes = orderedOpenPreviewTabs.map((port) => {
+    const closePreviewPane = () => {
+      typedData.onUpdate(model.id, {
+        uiState: {
+          ...(model.uiState ?? {}),
+          openPreviewTabs: openPreviewTabs.filter((entry) => entry !== port),
+        },
+      });
+    };
     const minimizePreviewPane = () => {
       typedData.onResizePaneWidth(model.id, paneId, defaultPaneWidth(paneId, model.size.width));
       typedData.onResizePaneHeight(model.id, paneId, defaultPaneHeight(paneId));
@@ -280,6 +288,18 @@ export default function ShellNode({ data }: NodeProps) {
                 <path d="M10 5.5h3.5V2" />
                 <path d="M6 10.5H2.5V14" />
                 <path d="M10 10.5h3.5V14" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="port-preview-copy nodrag nopan"
+              title={`close ${port}`}
+              aria-label={`close ${port}`}
+              onClick={closePreviewPane}
+            >
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                <path d="M4 4l8 8" />
+                <path d="M12 4l-8 8" />
               </svg>
             </button>
             <button
