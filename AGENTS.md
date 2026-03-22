@@ -17,7 +17,6 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - NEVER read from, write to, move, delete, or otherwise touch paths outside `/per/dev/shell-ws` without explicit user consent. This includes exploratory searches, cleanup, migration, and recovery attempts.
 - Keep the UI and kernel loosely coupled over explicit HTTP and WebSocket interfaces.
 - Preserve JSON workspace compatibility where reasonable.
-- When data models change, explicitly evaluate whether migration logic is needed; add migrations deliberately rather than by default.
 - Prefer small, testable pieces over large framework-heavy indirection.
 - Add brief comments for subtle, non-obvious logic where future readers would otherwise have to rediscover the reason.
 - Add or update tests whenever behavior changes materially.
@@ -25,6 +24,7 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - Use `apply_patch` for manual edits.
 - Initialize and use git in this repo. Create frequent, meaningful commits.
 - Commit messages must use a short summary headline, with `WHAT:`, `WHY:`, and `HOW:` sections in the commit body.
+- When creating commit bodies from the shell, use real newlines via multiple `-m` flags or a heredoc/file; do not embed literal `\n` sequences in commit text.
 - Kernel code should fail clearly and surface execution state to the UI.
 - UI interactions should stay smooth with dozens to hundreds of nodes.
 - Avoid investor-demo aesthetics. Aim for a clean, tool-like interface.
