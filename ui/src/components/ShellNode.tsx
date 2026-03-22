@@ -257,17 +257,21 @@ export default function ShellNode({ data }: NodeProps) {
       >
         {openPreviewTabs.length > 0 ? (
           <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-            <path d="M13 3 8.5 7.5" />
-            <path d="M9 3h4v4" />
-            <path d="M3 13 7.5 8.5" />
-            <path d="M3 9v4h4" />
+            <path d="M13 3 8.75 7.25" />
+            <path d="M8.75 7.25V5.25" />
+            <path d="M8.75 7.25H10.75" />
+            <path d="M3 13 7.25 8.75" />
+            <path d="M7.25 8.75V10.75" />
+            <path d="M7.25 8.75H5.25" />
           </svg>
         ) : (
           <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-            <path d="M8.5 7.5 13 3" />
-            <path d="M9 3h4v4" />
-            <path d="M7.5 8.5 3 13" />
-            <path d="M3 9v4h4" />
+            <path d="M8.75 7.25 13 3" />
+            <path d="M13 3V5" />
+            <path d="M13 3H11" />
+            <path d="M7.25 8.75 3 13" />
+            <path d="M3 13V11" />
+            <path d="M3 13H5" />
           </svg>
         )}
       </button>
@@ -367,10 +371,12 @@ export default function ShellNode({ data }: NodeProps) {
               onClick={minimizePreviewPane}
             >
               <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                <path d="M13 3 8.5 7.5" />
-                <path d="M9 3h4v4" />
-                <path d="M3 13 7.5 8.5" />
-                <path d="M3 9v4h4" />
+                <path d="M8.75 7.25 13 3" />
+                <path d="M13 3V5" />
+                <path d="M13 3H11" />
+                <path d="M7.25 8.75 3 13" />
+                <path d="M3 13V11" />
+                <path d="M3 13H5" />
               </svg>
             </button>
             <button
