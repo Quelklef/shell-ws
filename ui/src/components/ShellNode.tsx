@@ -245,7 +245,10 @@ export default function ShellNode({ data }: NodeProps) {
               void navigator.clipboard?.writeText(text);
             }}
           >
-            copy
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <rect x="5" y="3" width="7" height="9" rx="1.2" />
+              <path d="M4 5H3.2A1.2 1.2 0 0 0 2 6.2v6.6A1.2 1.2 0 0 0 3.2 14h5.6A1.2 1.2 0 0 0 10 12.8V12" />
+            </svg>
           </button>
         </div>
         <div className="port-preview-body">{renderedPreview.content}</div>

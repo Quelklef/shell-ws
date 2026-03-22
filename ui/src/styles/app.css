@@ -1845,15 +1845,27 @@ textarea {
 }
 
 .port-preview-copy {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   border: 1px solid rgba(244, 232, 214, 0.16);
   background: rgba(9, 11, 13, 0.4);
   color: var(--text-soft);
   border-radius: 7px;
-  padding: 3px 7px;
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+  width: 24px;
+  height: 24px;
+  padding: 0;
   cursor: pointer;
+}
+
+.port-preview-copy svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .port-preview-copy:hover {
