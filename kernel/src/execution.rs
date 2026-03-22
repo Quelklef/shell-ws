@@ -373,16 +373,12 @@ impl ExecutionContext {
         self.last_exit_codes.lock().get(node_id).copied().flatten()
     }
 
-    fn materialized_outputs_are_usable(&self, node_id: &str) -> bool {
-        self.node_last_exit_code(node_id) == Some(0)
-    }
-
     fn ensure_rerunnable(&self, node_id: &str) -> Result<(), String> {
         let available = self.node_materialized_inputs(node_id);
         let mut missing = HashSet::new();
         for edge in self.connected_input_edges(node_id) {
             let key = input_key(edge.to.port, edge.to.slot);
-            if !self.materialized_outputs_are_usable(&edge.from.node_id) || !available.contains_key(&key) {
+            if !available.contains_key(&key) {
                 missing.insert(key);
             }
         }
@@ -392,7 +388,7 @@ impl ExecutionContext {
             Ok(())
         } else {
             Err(format!(
-                "{} is missing usable materialized {}.",
+                "{} is missing materialized {}.",
                 node_label(self.nodes.get(node_id).expect("node")),
                 missing.join(", "),
             ))
@@ -404,9 +400,6 @@ impl ExecutionContext {
         let required = source_output_ports(&node.kind);
         if required.is_empty() {
             return Err(format!("{} has no outputs to push.", node_label(node)));
-        }
-        if !self.materialized_outputs_are_usable(node_id) {
-            return Err(format!("{} has no successful materialized outputs to push.", node_label(node)));
         }
         let available = self.node_materialized_outputs(node_id);
         let missing: Vec<String> = required
@@ -911,9 +904,7 @@ impl RunController {
                     }
                     _ => {}
                 }
-            } else if !self.context.materialized_outputs_are_usable(&edge.from.node_id)
-                || !inputs.contains_key(&key)
-            {
+            } else if !inputs.contains_key(&key) {
                 return false;
             }
         }
@@ -1028,7 +1019,9 @@ impl RunController {
             let bytes = outputs.get(output_key(*port)).cloned().unwrap_or_default();
             self.handle_output_chunk(&node.id, *port, bytes).await?;
         }
-        self.handle_node_exit(&node.id, Some(0)).await
+        // Repush replays the materialized result, including its exit status, so downstream
+        // propagation follows the same success/failure rules as a fresh execution.
+        self.handle_node_exit(&node.id, self.context.node_last_exit_code(&node.id)).await
     }
 
     fn begin_node(&mut self, node_id: &str) {
@@ -2593,56 +2586,70 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rerun_push_blocks_reuse_from_failed_materialized_upstream() {
+    async fn rerun_uses_materialized_inputs_even_if_upstream_last_exit_failed() {
         let (tx, _) = broadcast::channel(64);
-        let mut a = node(NodeKind::Script, "a");
-        a.script = Some("printf 'A'; exit 1".to_string());
-        seed_materialized_text(&mut a, "stdout", "A");
-        a.last_exit_code = Some(1);
-        let mut b = node(NodeKind::Script, "b");
-        b.script = Some("printf 'B'".to_string());
-        let mut c = node(NodeKind::Script, "c");
-        c.script = Some("printf '%s %s C' \"$1\" \"$2\"".to_string());
-        seed_materialized_text(&mut c, "argv-1", "old-A");
-        seed_materialized_text(&mut c, "argv-2", "old-B");
-        seed_materialized_text(&mut c, "stdout", "old-c");
-        let mut d = node(NodeKind::Script, "d");
-        d.script = Some("printf '%s D' \"$1\"".to_string());
-        seed_materialized_text(&mut d, "argv-1", "old-c");
-        seed_materialized_text(&mut d, "stdout", "old-d");
-        let mut e = node(NodeKind::Script, "e");
-        e.script = Some("printf '%s E' \"$1\"".to_string());
-        seed_materialized_text(&mut e, "argv-1", "old-b");
-        seed_materialized_text(&mut e, "stdout", "old-e");
+        let mut source = node(NodeKind::Script, "source");
+        source.last_exit_code = Some(1);
+        let mut target = node(NodeKind::Script, "target");
+        target.script = Some("cat".to_string());
+        seed_materialized_text(&mut target, "stdin", "old-input
+");
         let context = Arc::new(
             ExecutionContext::new(
-                "rerun-push-fail-gate".to_string(),
+                "rerun-materialized-inputs".to_string(),
                 workspace(
-                    vec![a, b, c, d, e],
-                    vec![
-                        edge("edge-a-c", "a", PortKind::Stdout, "c", PortKind::Argv, Some(1)),
-                        edge("edge-b-c", "b", PortKind::Stdout, "c", PortKind::Argv, Some(2)),
-                        edge("edge-c-d", "c", PortKind::Stdout, "d", PortKind::Argv, Some(1)),
-                        edge("edge-b-e", "b", PortKind::Stdout, "e", PortKind::Argv, Some(1)),
-                    ],
+                    vec![source, target],
+                    vec![edge("edge-1", "source", PortKind::Stdout, "target", PortKind::Stdin, None)],
                 ),
-                ExecutionAction::RerunPush,
+                ExecutionAction::Rerun,
                 tx,
                 CancellationToken::new(),
             )
             .expect("context"),
         );
 
-        context.clone().run("b".to_string()).await.expect("run");
+        context.clone().run("target".to_string()).await.expect("run");
+        assert_eq!(materialized_text(&context, "target", "stdout"), "old-input
+");
+        assert_eq!(context.node_last_exit_code("target"), Some(0));
+    }
 
-        assert_eq!(materialized_text(&context, "a", "stdout"), "A");
-        assert_eq!(context.node_last_exit_code("a"), Some(1));
-        assert_eq!(materialized_text(&context, "b", "stdout"), "B");
-        assert_eq!(context.node_last_exit_code("b"), Some(0));
-        assert_eq!(materialized_text(&context, "c", "stdout"), "old-c");
-        assert_eq!(materialized_text(&context, "d", "stdout"), "old-d");
-        assert_eq!(materialized_text(&context, "e", "stdout"), "B E");
-        assert_eq!(context.node_last_exit_code("e"), Some(0));
+    #[tokio::test]
+    async fn repush_replays_failed_exit_without_materializing_downstream() {
+        let (tx, _) = broadcast::channel(64);
+        let mut source = node(NodeKind::Script, "source");
+        seed_materialized_text(&mut source, "stdout", "watch me
+");
+        seed_materialized_text(&mut source, "stderr", "");
+        source.last_exit_code = Some(1);
+        let mut sink = node(NodeKind::Script, "sink");
+        sink.script = Some("cat".to_string());
+        seed_materialized_text(&mut sink, "stdin", "old-input
+");
+        seed_materialized_text(&mut sink, "stdout", "old-output
+");
+        let context = Arc::new(
+            ExecutionContext::new(
+                "repush-failed-status".to_string(),
+                workspace(
+                    vec![source, sink],
+                    vec![edge("edge-1", "source", PortKind::Stdout, "sink", PortKind::Stdin, None)],
+                ),
+                ExecutionAction::Repush,
+                tx,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        );
+
+        context.clone().run("source".to_string()).await.expect("run");
+        assert_eq!(materialized_text(&context, "source", "stdout"), "watch me
+");
+        assert_eq!(context.node_last_exit_code("source"), Some(1));
+        assert_eq!(materialized_text(&context, "sink", "stdin"), "old-input
+");
+        assert_eq!(materialized_text(&context, "sink", "stdout"), "old-output
+");
     }
 
     #[tokio::test]
