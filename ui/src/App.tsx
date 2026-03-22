@@ -2757,7 +2757,7 @@ function WorkspaceCanvas() {
                   <path d="M11 9l2.5 2.5" />
                 </svg>
               </span>
-              <span>layout selected</span>
+              <span>organize</span>
             </button>
             <div className="selection-actions-item selection-actions-item-has-submenu">
               <button
