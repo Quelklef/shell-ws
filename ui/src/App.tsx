@@ -41,7 +41,7 @@ import { collectAiScriptSamples } from "./lib/aiScript";
 import { layoutSelectedNodes } from "./lib/layout";
 import { chooseNodePosition } from "./lib/nodePlacement";
 import { selectionRectToFlowRect } from "./lib/selectionRect";
-import { nodeArgvSlots, nodeHasArgvPort, nodePreviewTabs, nodePreviewTabsForNode } from "./lib/nodePorts";
+import { nodeArgvSlots, nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs, nodePreviewTabsForNode } from "./lib/nodePorts";
 import type {
   AiGenerationState,
   AutoRunConfig,
@@ -207,6 +207,26 @@ function computeArgvSlots(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
 
 function computePreviewTabs(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
   return nodePreviewTabsForNode(nodeId, kind, edges, parseHandleId);
+}
+
+const PORT_STACK_TOP = 48;
+const PORT_SPACING = 30;
+
+function portTopForEdgeHandle(node: FlowNode, handle: { port: PortKind; slot?: number }, edges: FlowEdge[]) {
+  if (handle.port === "stdin" || handle.port === "argv") {
+    let index = 0;
+    if (nodeHasInputPort(node.data.model.kind)) {
+      if (handle.port === "stdin") {
+        return PORT_STACK_TOP + index * PORT_SPACING;
+      }
+      index += 1;
+    }
+    const argvSlots = computeArgvSlots(node.id, node.data.model.kind, edges) ?? [1];
+    const slotIndex = argvSlots.findIndex((slot) => slot === (handle.slot ?? 1));
+    return PORT_STACK_TOP + (index + Math.max(slotIndex, 0)) * PORT_SPACING;
+  }
+  const outputIndex = outputPortsForKind(node.data.model.kind).findIndex((port) => port === handle.port);
+  return PORT_STACK_TOP + Math.max(outputIndex, 0) * PORT_SPACING;
 }
 
 function rectsIntersect(
@@ -2282,32 +2302,42 @@ function WorkspaceCanvas() {
     [selectedNodes],
   );
   const selectedEdgeBounds = useMemo(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || selectedEdges.length === 0) {
+    if (selectedEdges.length === 0) {
       return null;
     }
-    const canvasBounds = canvas.getBoundingClientRect();
-    const bounds = selectedEdges
-      .map((edge) => {
-        const edgeElement = canvas.querySelector<SVGGElement>(`.react-flow__edge[data-id="${edge.id}"]`);
-        if (!edgeElement) {
-          return null;
-        }
-        const edgeBounds = edgeElement.getBoundingClientRect();
-        return {
-          top: edgeBounds.top - canvasBounds.top,
-          right: edgeBounds.right - canvasBounds.left,
-        };
-      })
-      .filter((entry): entry is { top: number; right: number } => entry !== null);
-    if (bounds.length === 0) {
+    const [viewportX, viewportY, zoom] = viewportTransform;
+    const anchors = selectedEdges.flatMap((edge) => {
+      const sourceNode = nodes.find((node) => node.id === edge.source);
+      const targetNode = nodes.find((node) => node.id === edge.target);
+      if (!sourceNode || !targetNode) {
+        return [];
+      }
+      const sourceHandle = parseHandleId(edge.sourceHandle as string | null | undefined);
+      const targetHandle = parseHandleId(edge.targetHandle as string | null | undefined);
+      const sourceWidth = sourceNode.measured?.width ?? sourceNode.width ?? sourceNode.data.model.size.width;
+      const targetWidth = targetNode.measured?.width ?? targetNode.width ?? targetNode.data.model.size.width;
+      return [
+        {
+          top: sourceNode.position.y * zoom + viewportY + portTopForEdgeHandle(sourceNode, sourceHandle, edges),
+          right: (sourceNode.position.x + sourceWidth) * zoom + viewportX,
+        },
+        {
+          top: targetNode.position.y * zoom + viewportY + portTopForEdgeHandle(targetNode, targetHandle, edges),
+          right: targetNode.position.x * zoom + viewportX,
+        },
+      ];
+    });
+    if (anchors.length === 0) {
       return null;
     }
+    const rightmost = anchors.reduce((best, anchor) =>
+      anchor.right > best.right || (anchor.right === best.right && anchor.top < best.top) ? anchor : best,
+    );
     return {
-      top: Math.min(...bounds.map((entry) => entry.top)),
-      right: Math.max(...bounds.map((entry) => entry.right)),
+      top: rightmost.top,
+      right: rightmost.right,
     };
-  }, [selectedEdges]);
+  }, [edges, nodes, selectedEdges, viewportTransform]);
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
     [edges, selectedNodeIds],
