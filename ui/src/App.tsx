@@ -2279,6 +2279,7 @@ function WorkspaceCanvas() {
   );
   const canToggleSelectedPreviewTabs = useMemo(
     () => ({
+      all: selectionSupportsPreviewCategory(selectedPreviewNodes, "all"),
       stdin: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdin"),
       stdout: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdout"),
       stderr: selectionSupportsPreviewCategory(selectedPreviewNodes, "stderr"),
@@ -2939,6 +2940,7 @@ function WorkspaceCanvas() {
               </button>
               {selectedNodes.length > 0 && (
                 <div className="selection-actions-submenu">
+                  <button type="button" disabled={!canToggleSelectedPreviewTabs.all} onClick={() => toggleSelectedPreviewTabs("all")}>all</button>
                   <button type="button" disabled={!canToggleSelectedPreviewTabs.stdin} onClick={() => toggleSelectedPreviewTabs("stdin")}>stdin</button>
                   <button type="button" disabled={!canToggleSelectedPreviewTabs.stdout} onClick={() => toggleSelectedPreviewTabs("stdout")}>stdout</button>
                   <button type="button" disabled={!canToggleSelectedPreviewTabs.stderr} onClick={() => toggleSelectedPreviewTabs("stderr")}>stderr</button>

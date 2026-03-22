@@ -1,4 +1,4 @@
-export type PreviewToggleCategory = "stdin" | "stdout" | "stderr" | "argv";
+export type PreviewToggleCategory = "all" | "stdin" | "stdout" | "stderr" | "argv";
 
 export interface PreviewToggleNode {
   id: string;
@@ -7,6 +7,9 @@ export interface PreviewToggleNode {
 }
 
 function tabsForCategory(previewTabs: string[], category: PreviewToggleCategory) {
+  if (category === "all") {
+    return [...previewTabs];
+  }
   if (category === "argv") {
     return previewTabs.filter((tab) => /^argv-\d+$/.test(tab));
   }

@@ -39,6 +39,14 @@ describe("togglePreviewCategoryForSelection", () => {
     expect(next.get("b")).toEqual([]);
   });
 
+  test("toggles all preview tabs together", () => {
+    const next = togglePreviewCategoryForSelection(
+      [makeNode({ id: "a", previewTabs: ["stdin", "argv-1", "stdout"], openPreviewTabs: [] })],
+      "all",
+    );
+    expect(next.get("a")).toEqual(["stdin", "argv-1", "stdout"]);
+  });
+
   test("toggles all argv tabs together", () => {
     const next = togglePreviewCategoryForSelection(
       [makeNode({ id: "a", previewTabs: ["argv-1", "argv-2", "stdout"], openPreviewTabs: ["argv-1"] })],
@@ -51,6 +59,7 @@ describe("togglePreviewCategoryForSelection", () => {
 describe("selectionSupportsPreviewCategory", () => {
   test("detects category support", () => {
     expect(selectionSupportsPreviewCategory([makeNode({ previewTabs: ["stdin"] })], "stdin")).toBe(true);
+    expect(selectionSupportsPreviewCategory([makeNode({ previewTabs: ["stdout"] })], "all")).toBe(true);
     expect(selectionSupportsPreviewCategory([makeNode({ previewTabs: ["stdout"] })], "argv")).toBe(false);
   });
 });
