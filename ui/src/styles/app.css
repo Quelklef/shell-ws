@@ -1706,6 +1706,10 @@ textarea {
   animation: workspace-edge-crawl 800ms linear infinite;
 }
 
+.workspace-edge-path.is-selected {
+  filter: drop-shadow(0 0 5px color-mix(in srgb, var(--selection) 36%, transparent));
+}
+
 @keyframes workspace-edge-crawl {
   from {
     stroke-dashoffset: 0;
@@ -1721,6 +1725,12 @@ textarea {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.edge-toolbar.is-selected .edge-buffering {
+  border-color: color-mix(in srgb, var(--selection) 82%, white 18%);
+  color: white;
+  background: color-mix(in srgb, var(--selection) 22%, rgba(12, 14, 16, 0.96));
 }
 
 .edge-buffering,
