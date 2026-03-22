@@ -2629,10 +2629,29 @@ function WorkspaceCanvas() {
         {selectionActionsStyle && (
           <div className="selection-actions" style={selectionActionsStyle}>
             <button type="button" onClick={deleteSelected}>
-              delete
+              <span className="selection-actions-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <path d="M3.5 4.5h9" />
+                  <path d="M6 4.5V3.2h4V4.5" />
+                  <path d="M5.2 4.5v7.3" />
+                  <path d="M8 4.5v7.3" />
+                  <path d="M10.8 4.5v7.3" />
+                  <path d="M4.2 4.5l.5 8.3h6.6l.5-8.3" />
+                </svg>
+              </span>
+              <span>delete</span>
             </button>
             <button type="button" onClick={runLayout}>
-              layout selected
+              <span className="selection-actions-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <path d="M2.5 4.5h11" />
+                  <path d="M2.5 8h8" />
+                  <path d="M2.5 11.5h5" />
+                  <path d="M11 7l2.5-2.5" />
+                  <path d="M11 9l2.5 2.5" />
+                </svg>
+              </span>
+              <span>layout selected</span>
             </button>
             <div className="selection-actions-item selection-actions-item-has-submenu">
               <button
@@ -2641,7 +2660,16 @@ function WorkspaceCanvas() {
                 disabled={!canTuckSelection}
                 title={canTuckSelection ? "Move subgraph into tuckspace" : "Only closed subgraphs can be moved into tuckspace"}
               >
-                move to tuckspace
+                <span className="selection-actions-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false">
+                    <path d="M2.5 5.5h11" />
+                    <path d="M3.5 5.5v6h9v-6" />
+                    <path d="M6 5.5V4h4v1.5" />
+                    <path d="M8 2.5v7" />
+                    <path d="M5.5 7 8 9.5 10.5 7" />
+                  </svg>
+                </span>
+                <span>move to tuckspace</span>
               </button>
               {canTuckSelection && tuckspaceShells.length > 0 && (
                 <div className="selection-actions-submenu">
