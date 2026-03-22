@@ -2317,7 +2317,7 @@ function WorkspaceCanvas() {
       top: rightmost.top,
       right: rightmost.right,
     };
-  }, [selectedEdges]);
+  }, [selectedEdges, viewportTransform]);
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
     [edges, selectedNodeIds],
