@@ -1,7 +1,7 @@
 node_modules/
 target/
 ui/dist/
-workspace-data/
+app-data/
 .DS_Store
 .codex/*
 !.codex/config.toml
