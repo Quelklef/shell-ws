@@ -2561,7 +2561,7 @@ function WorkspaceCanvas() {
       <main
         ref={canvasRef}
         className="canvas-shell"
-        onPointerDown={(event) => {
+        onPointerDownCapture={(event) => {
           if (event.button === 2) {
             rightDragRef.current = {
               pointerId: event.pointerId,
@@ -2571,7 +2571,7 @@ function WorkspaceCanvas() {
             };
           }
         }}
-        onPointerMove={(event) => {
+        onPointerMoveCapture={(event) => {
           const state = rightDragRef.current;
           if (
             state.pointerId !== null &&
@@ -2587,7 +2587,7 @@ function WorkspaceCanvas() {
             }
           }
         }}
-        onPointerUp={() => {
+        onPointerUpCapture={() => {
           if (rightDragRef.current.moved) {
             suppressContextMenuUntilRef.current = Date.now() + 250;
           }
@@ -2598,7 +2598,7 @@ function WorkspaceCanvas() {
             moved: false,
           };
         }}
-        onContextMenu={(event) => {
+        onContextMenuCapture={(event) => {
           if (rightDragRef.current.moved || Date.now() < suppressContextMenuUntilRef.current) {
             event.preventDefault();
             rightDragRef.current = {
