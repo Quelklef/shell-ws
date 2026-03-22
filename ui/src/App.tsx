@@ -2269,6 +2269,72 @@ function WorkspaceCanvas() {
     untuckSubgraph(tuckId);
   }, [tuckReorder, untuckSubgraph]);
 
+  const duplicateSelected = useCallback(() => {
+    const selectedNodes = nodesRef.current.filter((node) => node.selected);
+    if (selectedNodes.length === 0) {
+      return;
+    }
+    const selectedNodeIds = new Set(selectedNodes.map((node) => node.id));
+    const duplicatedModels = selectedNodes.map((node) => {
+      const model = flowNodeToPersistedWorkspaceNode(node, runtimeRef.current);
+      return {
+        ...model,
+        id: encodeId(`node-${model.kind.replaceAll("_", "-")}`),
+        position: {
+          x: model.position.x + 48,
+          y: model.position.y + 48,
+        },
+      };
+    });
+    const nodeIdMap = new Map(selectedNodes.map((node, index) => [node.id, duplicatedModels[index]!.id]));
+    const duplicatedEdges = edgesRef.current
+      .filter((edge) => selectedNodeIds.has(edge.source) && selectedNodeIds.has(edge.target))
+      .map((edge) => ({
+        ...flowEdgeToWorkspaceEdge(edge),
+        id: encodeId('edge'),
+        from: {
+          ...flowEdgeToWorkspaceEdge(edge).from,
+          nodeId: nodeIdMap.get(edge.source) ?? flowEdgeToWorkspaceEdge(edge).from.nodeId,
+        },
+        to: {
+          ...flowEdgeToWorkspaceEdge(edge).to,
+          nodeId: nodeIdMap.get(edge.target) ?? flowEdgeToWorkspaceEdge(edge).to.nodeId,
+        },
+      }));
+    const duplicatedRuntime = Object.fromEntries(
+      duplicatedModels.map((node) => [
+        node.id,
+        {
+          running: false,
+          portActivity: {},
+          previews: runtimePreviewsFromNode(node),
+        },
+      ]),
+    );
+    const nextRuntime = {
+      ...runtimeRef.current,
+      ...duplicatedRuntime,
+    };
+    const nextEdges = [
+      ...edgesRef.current.map((edge) => ({ ...edge, selected: false })),
+      ...duplicatedEdges.map((edge) => ({
+        ...toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
+        selected: true,
+      })),
+    ];
+    const nextNodes = [
+      ...nodesRef.current.map((node) => ({ ...node, selected: false })),
+      ...duplicatedModels.map((node) => ({
+        ...toFlowNode(node, nextRuntime, generationRef.current, handlers, nextEdges, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+        selected: true,
+      })),
+    ];
+    setRuntime(nextRuntime);
+    setEdges(nextEdges);
+    setNodes(nextNodes);
+    persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime);
+  }, [cycleEdgeBuffering, deleteEdge, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
+
   const deleteSelected = useCallback(() => {
     const selectedNodeIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
     const selectedEdgeIds = new Set(edgesRef.current.filter((edge) => edge.selected).map((edge) => edge.id));
@@ -2629,6 +2695,15 @@ function WorkspaceCanvas() {
         </ReactFlow>
         {selectionActionsStyle && (
           <div className="selection-actions" style={selectionActionsStyle}>
+            <button type="button" onClick={duplicateSelected} disabled={selectedNodes.length === 0}>
+              <span className="selection-actions-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <rect x="5" y="5" width="8" height="8" rx="1.2" />
+                  <path d="M11 5V3.7A1.2 1.2 0 0 0 9.8 2.5H3.7A1.2 1.2 0 0 0 2.5 3.7v6.1A1.2 1.2 0 0 0 3.7 11H5" />
+                </svg>
+              </span>
+              <span>duplicate</span>
+            </button>
             <button type="button" onClick={deleteSelected}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
