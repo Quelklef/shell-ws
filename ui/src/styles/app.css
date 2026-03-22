@@ -949,6 +949,7 @@ textarea {
 }
 
 .selection-actions button {
+  width: 100%;
   min-width: 0;
   display: inline-flex;
   align-items: center;
