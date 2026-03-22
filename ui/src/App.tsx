@@ -2916,6 +2916,7 @@ function WorkspaceCanvas() {
         }}
       >
         <ReactFlow<FlowNode, FlowEdge>
+          style={{ ["--selection-border-width" as string]: `${1 / Math.max(viewportTransform[2], 0.01)}px` }}
           defaultViewport={{
             x: workspaceMeta.ui.viewportX,
             y: workspaceMeta.ui.viewportY,

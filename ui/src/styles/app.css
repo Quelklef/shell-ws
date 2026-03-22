@@ -54,7 +54,7 @@ textarea {
 
 .react-flow {
   --xy-selection-background-color: color-mix(in srgb, var(--selection) 14%, transparent);
-  --xy-selection-border: 1px solid color-mix(in srgb, var(--selection) 82%, white 18%);
+  --xy-selection-border: var(--selection-border-width, 1px) solid color-mix(in srgb, var(--selection) 82%, white 18%);
 }
 
 .app-shell {
@@ -1636,7 +1636,7 @@ textarea {
   
 .react-flow {
   --xy-selection-background-color: color-mix(in srgb, var(--selection) 14%, transparent);
-  --xy-selection-border: 1px solid color-mix(in srgb, var(--selection) 82%, white 18%);
+  --xy-selection-border: var(--selection-border-width, 1px) solid color-mix(in srgb, var(--selection) 82%, white 18%);
 }
 
   .app-shell {
