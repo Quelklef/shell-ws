@@ -269,21 +269,25 @@ export default function ShellNode({ data }: NodeProps) {
       const paneElement = event.currentTarget.closest(".port-preview-pane") as HTMLElement | null;
       const bodyElement = paneElement?.querySelector(".port-preview-body") as HTMLElement | null;
       const headerElement = paneElement?.querySelector(".port-preview-header") as HTMLElement | null;
+      const preElement = bodyElement?.querySelector(".display-code") as HTMLElement | null;
       if (!paneElement || !bodyElement) {
         return;
       }
-      const tabSize = Number.parseInt(window.getComputedStyle(bodyElement).tabSize || "8", 10) || 8;
-      const longestLineColumns = previewText.split(/\r?\n/).reduce((max, line) => {
-        return Math.max(max, tabExpandedLength(line, tabSize));
-      }, 0);
-      const charWidth = measureMonospaceCharWidth(bodyElement);
       const maxWidth = Math.max(180, Math.floor(window.innerWidth * 0.3));
       const maxHeight = Math.max(defaultPaneHeight(paneId), Math.floor(window.innerHeight * 0.8));
-      const widthChrome = Math.max(24, paneElement.offsetWidth - bodyElement.clientWidth);
       const headerHeight = headerElement?.offsetHeight ?? 0;
       const heightChrome = Math.max(16, paneElement.offsetHeight - headerHeight - bodyElement.clientHeight);
-      const contentWidth = Math.ceil(longestLineColumns * charWidth);
-      const nextWidth = Math.min(maxWidth, Math.max(180, contentWidth + widthChrome));
+      let nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(bodyElement.scrollWidth + (paneElement.offsetWidth - bodyElement.clientWidth))));
+      if (preElement) {
+        const tabSize = Number.parseInt(window.getComputedStyle(preElement).tabSize || "8", 10) || 8;
+        const longestLineColumns = previewText.split(/\r?\n/).reduce((max, line) => {
+          return Math.max(max, tabExpandedLength(line, tabSize));
+        }, 0);
+        const charWidth = measureMonospaceCharWidth(preElement);
+        const desiredPreWidth = Math.ceil(longestLineColumns * charWidth);
+        const widthChrome = Math.max(24, paneElement.getBoundingClientRect().width - preElement.getBoundingClientRect().width);
+        nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(desiredPreWidth + widthChrome)));
+      }
       const nextHeight = Math.min(maxHeight, Math.max(96, Math.ceil(bodyElement.scrollHeight + headerHeight + heightChrome)));
       typedData.onResizePaneWidth(model.id, paneId, nextWidth);
       typedData.onResizePaneHeight(model.id, paneId, nextHeight);
