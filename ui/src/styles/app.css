@@ -5,7 +5,7 @@
   --bg: #131415;
   --bg-elevated: rgba(23, 27, 30, 0.86);
   --bg-panel: rgba(17, 19, 22, 0.92);
-  --card: rgba(29, 34, 38, 0.92);
+  --card: rgb(29, 34, 38);
   --card-soft: rgba(42, 48, 54, 0.78);
   --line: rgba(244, 232, 214, 0.16);
   --line-strong: rgba(244, 232, 214, 0.34);
