@@ -34,12 +34,25 @@ export default function WorkspaceEdge({
   });
   const typedData = (data ?? {}) as FlowEdgeData;
   const buffering = String(typedData.buffering ?? "line_or_1024");
+  const edgeStroke = selected ? "color-mix(in srgb, var(--selection) 82%, white 18%)" : "rgba(242, 192, 120, 0.9)";
+  const edgeGlow = selected
+    ? "drop-shadow(0 0 5px color-mix(in srgb, var(--selection) 36%, transparent))"
+    : "drop-shadow(0 0 4px rgba(242, 192, 120, 0.14))";
   const edgeStyle = {
-    stroke: selected ? "color-mix(in srgb, var(--selection) 82%, white 18%)" : "rgba(242, 192, 120, 0.9)",
-    strokeWidth: buffering === "on_complete" ? (selected ? 5.2 : 4.1) : selected ? 4.2 : 3.1,
-    filter: selected
-      ? "drop-shadow(0 0 5px color-mix(in srgb, var(--selection) 36%, transparent))"
-      : "drop-shadow(0 0 4px rgba(242, 192, 120, 0.14))",
+    stroke: edgeStroke,
+    strokeWidth: selected ? 4.2 : 3.1,
+    filter: edgeGlow,
+    ...(style ?? {}),
+  };
+  const completeEdgeStyle = {
+    stroke: edgeStroke,
+    strokeWidth: selected ? 6.6 : 5.2,
+    filter: edgeGlow,
+    ...(style ?? {}),
+  };
+  const completeEdgeCutoutStyle = {
+    stroke: "rgba(12, 14, 16, 0.96)",
+    strokeWidth: selected ? 2.6 : 2.2,
     ...(style ?? {}),
   };
 
@@ -54,7 +67,14 @@ export default function WorkspaceEdge({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       />
-      <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${animated ? "is-animated" : ""} ${selected ? "is-selected" : ""}`} />
+      {buffering === "on_complete" ? (
+        <>
+          <BaseEdge id={`${id}-complete-outer`} path={path} style={completeEdgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${selected ? "is-selected" : ""}`} />
+          <BaseEdge id={`${id}-complete-cutout`} path={path} style={completeEdgeCutoutStyle} className="workspace-edge-path workspace-edge-path-on_complete-cutout" />
+        </>
+      ) : (
+        <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${animated ? "is-animated" : ""} ${selected ? "is-selected" : ""}`} />
+      )}
       <EdgeLabelRenderer>
         <div
           className={`edge-toolbar nodrag nopan ${selected ? "is-selected" : ""} ${hovered ? "is-visible" : ""}`}
