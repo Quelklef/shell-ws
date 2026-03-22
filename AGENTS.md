@@ -19,6 +19,11 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 - Commit messages must use a short summary headline, with `WHAT:`, `WHY:`, and `HOW:` sections in the commit body.
 - NEVER prompt the user with the interactive multiple-choice question feature. ALWAYS use the standard text chat instead. This allows for nuanced back-and-forth instead of shoehorning the user into making a final choice. You MAY present the user with a set of multiple-choice questions, formatted similar to how they would be if using the interactive feature, but you MUST NOT actually use the feature.
 - Communicate directly and efficiently. Do not repeat points the user already made or restate your earlier answer unless doing so is necessary to resolve ambiguity or support a new conclusion.
+- Do not repeat points the user already acknowledged unless there is new information, a correction, or the repetition is strictly necessary for precision.
+- After answering the direct question, stop. Do not restate prior context, rationale, or conclusions unless the user asks for elaboration.
+- Prefer delta-style responses: say only what changed, what is true, or what to do next.
+- If the user asks a narrow follow-up, answer only that narrow follow-up.
+- Assume the user remembers the immediately preceding exchange. Treat repeated explanation as a mistake unless it adds new content.
 
 ## Technical Pushback
 
