@@ -1786,6 +1786,7 @@ textarea {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+  pointer-events: none;
 }
 
 .port-preview-tab {
@@ -1891,6 +1892,7 @@ textarea {
 }
 
 .port-preview-floating-pane {
+  pointer-events: initial;
   width: auto;
 }
 
