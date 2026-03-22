@@ -2356,6 +2356,37 @@ function WorkspaceCanvas() {
     persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime);
   }, [cycleEdgeBuffering, deleteEdge, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
 
+  const setSelectedEdgeBuffering = useCallback((buffering: BufferingMode) => {
+    const selectedEdgeIds = new Set(
+      edgesRef.current.filter((edge) => edge.selected).map((edge) => edge.id),
+    );
+    if (selectedEdgeIds.size === 0) {
+      return;
+    }
+    setEdges((current) => {
+      const next = current.map((edge) => {
+        if (!selectedEdgeIds.has(edge.id)) {
+          return edge;
+        }
+        return {
+          ...edge,
+          data: {
+            buffering,
+            onDelete: deleteEdge,
+            onCycle: cycleEdgeBuffering,
+          },
+          animated: buffering === "unbuffered",
+          label: buffering.replaceAll("_", " "),
+        };
+      });
+      setNodes((nodesCurrent) =>
+        syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+      );
+      persistSoon(nodesRef.current, next);
+      return next;
+    });
+  }, [cycleEdgeBuffering, deleteEdge, handlers, persistSoon, runtime, setEdges, setNodes]);
+
   const deleteSelected = useCallback(() => {
     const selectedNodeIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
     const selectedEdgeIds = new Set(edgesRef.current.filter((edge) => edge.selected).map((edge) => edge.id));
@@ -2759,6 +2790,27 @@ function WorkspaceCanvas() {
               </span>
               <span>organize</span>
             </button>
+            <div className="selection-actions-item selection-actions-item-has-submenu">
+              <button type="button" disabled={selectedEdges.length === 0} title={selectedEdges.length === 0 ? "select wires first" : "set wire buffer mode"}>
+                <span className="selection-actions-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false">
+                    <path d="M2.5 8h3" />
+                    <path d="M7 8h2" />
+                    <path d="M11 8h2.5" />
+                    <circle cx="5" cy="8" r="0.8" fill="currentColor" stroke="none" />
+                    <circle cx="10" cy="8" r="0.8" fill="currentColor" stroke="none" />
+                  </svg>
+                </span>
+                <span>wire buffering</span>
+              </button>
+              {selectedEdges.length > 0 && (
+                <div className="selection-actions-submenu">
+                  <button type="button" onClick={() => setSelectedEdgeBuffering("unbuffered")}>unbuffered</button>
+                  <button type="button" onClick={() => setSelectedEdgeBuffering("line_or_1024")}>line or 1024</button>
+                  <button type="button" onClick={() => setSelectedEdgeBuffering("on_complete")}>on complete</button>
+                </div>
+              )}
+            </div>
             <div className="selection-actions-item selection-actions-item-has-submenu">
               <button
                 type="button"
