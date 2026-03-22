@@ -1923,6 +1923,12 @@ textarea {
   background: rgba(56, 41, 16, 0.7);
 }
 
+.port-preview-tab:hover {
+  border-color: rgba(242, 192, 120, 0.32);
+  color: var(--text);
+  background: rgba(56, 41, 16, 0.5);
+}
+
 .port-preview-dot {
   position: absolute;
   top: 0;

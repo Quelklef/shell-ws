@@ -371,12 +371,10 @@ export default function ShellNode({ data }: NodeProps) {
               onClick={minimizePreviewPane}
             >
               <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                <path d="M8.75 7.25 13 3" />
-                <path d="M13 3V5" />
-                <path d="M13 3H11" />
-                <path d="M7.25 8.75 3 13" />
-                <path d="M3 13V11" />
-                <path d="M3 13H5" />
+                <path d="M6 5.5H2.5V2" />
+                <path d="M10 5.5h3.5V2" />
+                <path d="M6 10.5H2.5V14" />
+                <path d="M10 10.5h3.5V14" />
               </svg>
             </button>
             <button
