@@ -241,6 +241,36 @@ export default function ShellNode({ data }: NodeProps) {
           </button>
         );
       })}
+      <button
+        type="button"
+        className="port-preview-tab port-preview-tab-icon nodrag nopan"
+        title={openPreviewTabs.length > 0 ? "collapse all previews" : "open all previews"}
+        aria-label={openPreviewTabs.length > 0 ? "collapse all previews" : "open all previews"}
+        onClick={() => {
+          typedData.onUpdate(model.id, {
+            uiState: {
+              ...(model.uiState ?? {}),
+              openPreviewTabs: openPreviewTabs.length > 0 ? [] : [...previewTabs],
+            },
+          });
+        }}
+      >
+        {openPreviewTabs.length > 0 ? (
+          <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+            <path d="M13 3 8.5 7.5" />
+            <path d="M9 3h4v4" />
+            <path d="M3 13 7.5 8.5" />
+            <path d="M3 9v4h4" />
+          </svg>
+        ) : (
+          <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+            <path d="M8.5 7.5 13 3" />
+            <path d="M9 3h4v4" />
+            <path d="M7.5 8.5 3 13" />
+            <path d="M3 9v4h4" />
+          </svg>
+        )}
+      </button>
     </div>
   );
 
