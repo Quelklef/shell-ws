@@ -28,6 +28,10 @@ pub fn encode_exec_id() -> String {
     encode_compact_id("exec")
 }
 
+pub fn encode_matout_id() -> String {
+    encode_compact_id("matout")
+}
+
 pub fn encode_node_id(kind: &NodeKind) -> String {
     encode_compact_id(&format!("node-{}", kind_slug(kind)))
 }
@@ -172,7 +176,6 @@ mod tests {
         BufferingMode, Edge, Node, NodeKind, PortKind, PortRef, Position, Size, TopologyPreview,
         TuckedSubgraph, Workspace, WorkspaceUi,
     };
-    use std::collections::HashMap;
 
     fn node(kind: NodeKind, id: &str) -> Node {
         Node {
@@ -193,8 +196,7 @@ mod tests {
             args: None,
             text: None,
             formula: None,
-            materialized_values: HashMap::new(),
-            last_exit_code: None,
+            materialized: crate::model::NodeMaterialized::default(),
             auto_run: None,
             ui_state: Default::default(),
         }

@@ -272,8 +272,7 @@ mod tests {
             args: None,
             text: None,
             formula: None,
-            materialized_values: Default::default(),
-            last_exit_code: None,
+            materialized: crate::model::NodeMaterialized::default(),
             auto_run: None,
             ui_state: Default::default(),
         }

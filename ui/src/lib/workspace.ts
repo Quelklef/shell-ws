@@ -1,9 +1,11 @@
-import type { AutoRunConfig, ExecArg, MaterializedValue, TuckedSubgraph, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
+import type { AutoRunConfig, ExecArg, MaterializedValue, NodeMaterialized, TuckedSubgraph, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
 import { normalizeWorkspaceUi } from "./workspaceUi";
 
 type LegacyMaterializedNode = WorkspaceNode & {
   materializedInputs?: Record<string, MaterializedValue> | null;
   materializedOutputs?: Record<string, MaterializedValue> | null;
+  materializedValues?: Record<string, MaterializedValue> | null;
+  lastExitCode?: number | null;
 };
 
 const REMOVED_NODE_KINDS = new Set([
@@ -93,19 +95,26 @@ function sanitizeNodesAndEdges(nodesInput: WorkspaceNode[], edgesInput: Workspac
       const migrated = migrateLegacyPreviews(node.uiState?.previews);
       // Older workspaces persisted materialized inputs and outputs separately.
       const legacyNode = node as LegacyMaterializedNode;
-      const materializedValues =
-        node.materializedValues && Object.keys(node.materializedValues).length > 0
-          ? node.materializedValues
-          : {
-              ...(legacyNode.materializedInputs ?? {}),
-              ...(legacyNode.materializedOutputs ?? {}),
-              ...migrated,
-            };
+      const materialized = ({
+        inputs: { ...(node.materialized?.inputs ?? {}) },
+        outputs: { ...(node.materialized?.outputs ?? {}) },
+        values:
+          node.materialized?.values && Object.keys(node.materialized.values).length > 0
+            ? node.materialized.values
+            : legacyNode.materializedValues && Object.keys(legacyNode.materializedValues).length > 0
+              ? legacyNode.materializedValues
+              : {
+                  ...(legacyNode.materializedInputs ?? {}),
+                  ...(legacyNode.materializedOutputs ?? {}),
+                  ...migrated,
+                },
+        lastExitCode: node.materialized?.lastExitCode ?? legacyNode.lastExitCode ?? null,
+      } satisfies NodeMaterialized);
       return {
         ...node,
         autoRun: normalizeAutoRun(node.autoRun),
         args: normalizeExecArgs(node.args),
-        materializedValues,
+        materialized,
         uiState: node.uiState
           ? {
               ...node.uiState,

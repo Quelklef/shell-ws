@@ -457,9 +457,9 @@ export default function ShellNode({ data }: NodeProps) {
           <span className={`node-state-pill ${runtime.running ? "is-running" : "is-idle"}`}>
             {runtime.running ? "running" : "idle"}
           </span>
-          {model.lastExitCode != null && (
-            <span className={`node-state-pill node-exit-pill ${model.lastExitCode === 0 ? "is-success" : "is-failed"}`}>
-              exit {model.lastExitCode}
+          {model.materialized?.lastExitCode != null && (
+            <span className={`node-state-pill node-exit-pill ${model.materialized.lastExitCode === 0 ? "is-success" : "is-failed"}`}>
+              exit {model.materialized.lastExitCode}
             </span>
           )}
         </div>

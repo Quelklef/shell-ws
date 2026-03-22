@@ -17,6 +17,8 @@ function summarizeServerEvent(event: ServerEvent) {
   switch (event.type) {
     case "exec_started":
       return `start ${event.node_id} ${event.exec_id}`;
+    case "materialized_state":
+      return `mat ${event.node_id} upserts=${Object.keys(event.upserted_entries).length} deletes=${event.deleted_ids.length}`;
     case "exec_finished":
       return `finish ${event.node_id} ${event.exec_id} code=${event.exit_code ?? "null"} mat=${event.materialized ? 1 : 0}`;
     case "port_activity":

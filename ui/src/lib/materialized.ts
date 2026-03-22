@@ -2,12 +2,14 @@ import type {
   DisplayState,
   FlowEdge,
   MaterializedValue,
-  NodeKind,
+  MaterializedOutputStore,
   NodeRuntimeState,
   PortKind,
   WorkspaceNode,
 } from "./types";
 import { outputPortsForKind } from "./portSchema";
+import { fromBase64, toBase64 } from "./utils";
+import { resolveNodeMaterializedValue } from "./materializedOutputs";
 
 export function isInputPreviewKey(key: string) {
   return key === "stdin" || /^argv-\d+$/.test(key);
@@ -36,29 +38,25 @@ export function serializeMaterializedValue(state?: { bytes: Uint8Array }): Mater
   };
 }
 
-export function runtimePreviewsFromNode(node: WorkspaceNode) {
+export function runtimePreviewsFromNode(node: WorkspaceNode, store: MaterializedOutputStore) {
   const previews: Record<string, DisplayState> = {};
-  for (const [key, value] of Object.entries(node.materializedValues ?? {})) {
-    const deserialized = deserializeMaterializedValue(value);
-    if (deserialized) {
-      previews[key] = deserialized;
+  const keys = new Set<string>([
+    ...Object.keys(node.materialized?.inputs ?? {}),
+    ...Object.keys(node.materialized?.outputs ?? {}),
+    ...Object.keys(node.materialized?.values ?? {}),
+  ]);
+  for (const key of keys) {
+    const resolved = resolveNodeMaterializedValue(node, key, store);
+    if (resolved) {
+      previews[key] = { bytes: resolved, completed: true };
+      continue;
+    }
+    const legacy = deserializeMaterializedValue(node.materialized?.values?.[key]);
+    if (legacy) {
+      previews[key] = legacy;
     }
   }
   return Object.keys(previews).length > 0 ? previews : undefined;
-}
-
-export function materializedValuesFromRuntime(previews?: Record<string, DisplayState>) {
-  const materializedValues: Record<string, MaterializedValue> = {};
-  for (const [key, state] of Object.entries(previews ?? {})) {
-    const serialized = serializeMaterializedValue(state);
-    if (!serialized) {
-      continue;
-    }
-    if (isInputPreviewKey(key) || isOutputPreviewKey(key)) {
-      materializedValues[key] = serialized;
-    }
-  }
-  return materializedValues;
 }
 
 export function connectedInputKeys(
@@ -95,17 +93,4 @@ export function missingConnectedInputs(
 export function missingOutputs(node: WorkspaceNode, runtime: NodeRuntimeState | undefined) {
   const previews = runtime?.previews ?? {};
   return outputPortsForKind(node.kind).filter((port) => !(port in previews));
-}
-
-function toBase64(bytes: Uint8Array) {
-  const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join("");
-  return btoa(binary);
-}
-
-function fromBase64(value: string) {
-  if (!value) {
-    return new Uint8Array();
-  }
-  const binary = atob(value);
-  return Uint8Array.from(binary, (char) => char.charCodeAt(0));
 }

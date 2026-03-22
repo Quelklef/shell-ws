@@ -170,9 +170,14 @@ it("migrates legacy preview bytes into materialized inputs and outputs", () => {
   } as unknown as Workspace;
 
   const sanitized = sanitizeWorkspace(workspace);
-  expect(sanitized.nodes[0]?.materializedValues).toEqual({
-    stdin: { dataBase64: "aGVsbG8=" },
-    stdout: { dataBase64: "d29ybGQ=" },
+  expect(sanitized.nodes[0]?.materialized).toEqual({
+    inputs: {},
+    outputs: {},
+    values: {
+      stdin: { dataBase64: "aGVsbG8=" },
+      stdout: { dataBase64: "d29ybGQ=" },
+    },
+    lastExitCode: null,
   });
 });
 
@@ -204,9 +209,14 @@ it("merges legacy materialized input and output maps", () => {
   } as unknown as Workspace;
 
   const sanitized = sanitizeWorkspace(workspace);
-  expect(sanitized.nodes[0]?.materializedValues).toEqual({
-    stdin: { dataBase64: "aGVsbG8=" },
-    stdout: { dataBase64: "d29ybGQ=" },
+  expect(sanitized.nodes[0]?.materialized).toEqual({
+    inputs: {},
+    outputs: {},
+    values: {
+      stdin: { dataBase64: "aGVsbG8=" },
+      stdout: { dataBase64: "d29ybGQ=" },
+    },
+    lastExitCode: null,
   });
 });
 

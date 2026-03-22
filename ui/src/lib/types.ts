@@ -25,6 +25,35 @@ export interface MaterializedValue {
   dataBase64: string;
 }
 
+export type MaterializedOutputPort = "stdout" | "stderr";
+export type MatOutId = string;
+
+export interface MaterializedReferrer {
+  nodeId: string;
+  key: string;
+}
+
+export interface ProducedBy {
+  execId: string;
+  nodeId: string;
+  port: MaterializedOutputPort;
+}
+
+export interface MatOutEntry {
+  dataBase64: string;
+  producedBy: ProducedBy;
+  referrers: MaterializedReferrer[];
+}
+
+export type MaterializedOutputStore = Record<MatOutId, MatOutEntry>;
+
+export interface NodeMaterialized {
+  inputs?: Record<string, MatOutId> | null;
+  outputs?: Partial<Record<MaterializedOutputPort, MatOutId>> | null;
+  lastExitCode?: number | null;
+  values?: Record<string, MaterializedValue> | null;
+}
+
 export type ExecArg =
   | { source: "literal"; value: string }
   | { source: "argv"; slot: number };
@@ -108,8 +137,7 @@ export interface WorkspaceNode {
   args?: ExecArg[] | null;
   text?: string | null;
   formula?: string | null;
-  materializedValues?: Record<string, MaterializedValue> | null;
-  lastExitCode?: number | null;
+  materialized?: NodeMaterialized | null;
   autoRun?: AutoRunConfig | null;
   uiState?: NodeUiState | null;
 }
@@ -138,6 +166,7 @@ export type ClientEvent =
   | {
       type: "run_node";
       workspace: Workspace;
+      materialized_output_store: MaterializedOutputStore;
       node_id: string;
       action: ExecutionAction;
     }
@@ -152,6 +181,14 @@ export type ServerEvent =
       type: "exec_started";
       exec_id: string;
       node_id: string;
+      timestamp: number;
+    }
+  | {
+      type: "materialized_state";
+      node_id: string;
+      materialized: NodeMaterialized;
+      upserted_entries: MaterializedOutputStore;
+      deleted_ids: string[];
       timestamp: number;
     }
   | {

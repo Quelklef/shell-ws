@@ -67,8 +67,7 @@ impl Workspace {
                     args: None,
                     text: Some(String::new()),
                     formula: None,
-                    materialized_values: HashMap::new(),
-                    last_exit_code: None,
+                    materialized: NodeMaterialized::default(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
@@ -90,8 +89,7 @@ impl Workspace {
                     args: None,
                     text: None,
                     formula: None,
-                    materialized_values: HashMap::new(),
-                    last_exit_code: None,
+                    materialized: NodeMaterialized::default(),
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
@@ -184,9 +182,7 @@ pub struct Node {
     #[serde(default)]
     pub formula: Option<String>,
     #[serde(default)]
-    pub materialized_values: HashMap<String, MaterializedValue>,
-    #[serde(default)]
-    pub last_exit_code: Option<i32>,
+    pub materialized: NodeMaterialized,
     #[serde(default, alias = "auto_run")]
     pub auto_run: Option<AutoRunConfig>,
     #[serde(default)]
@@ -197,6 +193,45 @@ impl Node {
     pub fn shell_value(&self) -> String {
         self.shell.clone().unwrap_or_else(default_shell)
     }
+}
+
+pub type MaterializedOutputStore = HashMap<String, MatOutEntry>;
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MaterializedReferrer {
+    pub node_id: String,
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProducedBy {
+    pub exec_id: String,
+    pub node_id: String,
+    pub port: PortKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MatOutEntry {
+    pub data_base64: String,
+    pub produced_by: ProducedBy,
+    #[serde(default)]
+    pub referrers: Vec<MaterializedReferrer>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeMaterialized {
+    #[serde(default)]
+    pub inputs: HashMap<String, String>,
+    #[serde(default)]
+    pub outputs: HashMap<String, String>,
+    #[serde(default)]
+    pub last_exit_code: Option<i32>,
+    #[serde(default, rename = "values", skip_serializing)]
+    pub legacy_values: HashMap<String, MaterializedValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -429,6 +464,8 @@ pub struct WorkspaceSidebarState {
 pub enum ClientEvent {
     RunNode {
         workspace: Workspace,
+        #[serde(default)]
+        materialized_output_store: MaterializedOutputStore,
         node_id: String,
         action: ExecutionAction,
     },
@@ -444,6 +481,13 @@ pub enum ServerEvent {
     ExecStarted {
         exec_id: String,
         node_id: String,
+        timestamp: u64,
+    },
+    MaterializedState {
+        node_id: String,
+        materialized: NodeMaterialized,
+        upserted_entries: MaterializedOutputStore,
+        deleted_ids: Vec<String>,
         timestamp: u64,
     },
     ExecFinished {
@@ -595,10 +639,22 @@ fn sanitize_graph_container(obj: &mut serde_json::Map<String, serde_json::Value>
 }
 
 fn merge_legacy_materialized_values(node: &mut serde_json::Map<String, serde_json::Value>) {
-    let mut merged = node
-        .remove("materializedValues")
+    let mut materialized = node
+        .remove("materialized")
         .and_then(|value| value.as_object().cloned())
         .unwrap_or_default();
+
+    let mut merged = materialized
+        .remove("values")
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default();
+
+    if let Some(values) = node
+        .remove("materializedValues")
+        .and_then(|value| value.as_object().cloned())
+    {
+        merged.extend(values);
+    }
 
     for legacy_key in ["materializedInputs", "materialized_inputs"] {
         if let Some(values) = node
@@ -617,11 +673,18 @@ fn merge_legacy_materialized_values(node: &mut serde_json::Map<String, serde_jso
         }
     }
 
+    let last_exit_code = materialized
+        .remove("lastExitCode")
+        .or_else(|| node.remove("lastExitCode"));
+
     if !merged.is_empty() {
-        node.insert(
-            "materializedValues".to_string(),
-            serde_json::Value::Object(merged),
-        );
+        materialized.insert("values".to_string(), serde_json::Value::Object(merged));
+    }
+    if let Some(last_exit_code) = last_exit_code {
+        materialized.insert("lastExitCode".to_string(), last_exit_code);
+    }
+    if !materialized.is_empty() {
+        node.insert("materialized".to_string(), serde_json::Value::Object(materialized));
     }
 }
 
@@ -766,14 +829,16 @@ mod tests {
             serde_json::from_value(value).expect("deserialize sanitized workspace");
         assert_eq!(
             workspace.nodes[0]
-                .materialized_values
+                .materialized
+                .legacy_values
                 .get("stdin")
                 .map(|value| value.data_base64.as_str()),
             Some("aGVsbG8=")
         );
         assert_eq!(
             workspace.nodes[0]
-                .materialized_values
+                .materialized
+                .legacy_values
                 .get("stdout")
                 .map(|value| value.data_base64.as_str()),
             Some("d29ybGQ=")
@@ -981,9 +1046,11 @@ mod tests {
         match event {
             ClientEvent::RunNode {
                 workspace,
+                materialized_output_store,
                 node_id,
                 action,
             } => {
+                assert!(materialized_output_store.is_empty());
                 assert_eq!(workspace.id, "default");
                 assert_eq!(node_id, "text-1");
                 assert_eq!(action, ExecutionAction::RerunPush);

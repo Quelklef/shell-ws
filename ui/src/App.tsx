@@ -30,10 +30,12 @@ import {
   deleteWorkspace,
   reorderWorkspaces,
   generateScript,
+  getMaterializedOutputs,
   getTuckspace,
   getWorkspace,
   listWorkspaces,
   pickFilePath,
+  saveMaterializedOutputs,
   saveTuckspace,
   saveWorkspace,
 } from "./lib/api";
@@ -50,6 +52,7 @@ import type {
   ExecutionAction,
   FlowEdge,
   FlowNode,
+  MaterializedOutputStore,
   NodeKind,
   NodeRuntimeState,
   NodeUiState,
@@ -73,13 +76,14 @@ import {
   type SidebarId,
   type WorkspaceSidebars,
 } from "./lib/workspaceUi";
-import { missingConnectedInputs, missingOutputs, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
+import { missingConnectedInputs, missingOutputs, runtimePreviewsFromNode } from "./lib/materialized";
 import { outputPortsForKind, previewOutputPortsForKind } from "./lib/portSchema";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { selectionSupportsPreviewCategory, togglePreviewCategoryForSelection, type PreviewToggleCategory } from "./lib/selectionPreviewTabs";
 import { nextPaneSizes } from "./lib/paneLayout";
 import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
+import { clearNodeMaterialized, duplicateNodeMaterialized, migrateLegacyNodeMaterialized } from "./lib/materializedOutputs";
 
 const nodeTypes = {
   shell: ShellNode,
@@ -107,8 +111,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     args: kind === "exec" ? [] : null,
     text: kind === "text" ? "" : null,
     formula: kind === "formula" ? "$1 + 1" : null,
-    materializedValues: {},
-    lastExitCode: null,
+    materialized: { inputs: {}, outputs: {}, lastExitCode: null },
     autoRun: null,
     uiState: { openPreviewTabs: previewOpenByDefault },
   };
@@ -371,14 +374,17 @@ function flowEdgeToWorkspaceEdge(edge: FlowEdge): WorkspaceEdge {
 }
 function flowNodeToPersistedWorkspaceNode(
   node: FlowNode,
-  runtime: Record<string, NodeRuntimeState>,
+  _runtime: Record<string, NodeRuntimeState>,
 ): WorkspaceNode {
   const model = flowNodeToWorkspaceNode(node);
-  const runtimeState = runtime[node.id];
-  const materializedValues = materializedValuesFromRuntime(runtimeState?.previews);
   return {
     ...model,
-    materializedValues: runtimeState?.previews ? materializedValues : model.materializedValues,
+    materialized: model.materialized
+      ? {
+          ...model.materialized,
+          values: undefined,
+        }
+      : model.materialized,
   };
 }
 
@@ -644,6 +650,7 @@ function WorkspaceCanvas() {
   const [kernelConnected, setKernelConnected] = useState(false);
   const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
+  const [materializedOutputStore, setMaterializedOutputStore] = useState<MaterializedOutputStore>({});
   const [tuckspace, setTuckspace] = useState<TuckedSubgraph[]>([]);
   const [activeExecutions, setActiveExecutions] = useState<
     { execId: string; nodeId: string }[]
@@ -675,6 +682,7 @@ function WorkspaceCanvas() {
   const edgesRef = useRef<FlowEdge[]>([]);
   const autorunRef = useRef<Map<string, AutorunHandle>>(new Map());
   const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
+  const materializedOutputStoreRef = useRef<MaterializedOutputStore>({});
   const persistTimerRef = useRef<number | null>(null);
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
@@ -721,6 +729,10 @@ function WorkspaceCanvas() {
   useEffect(() => {
     runtimeRef.current = runtime;
   }, [runtime]);
+
+  useEffect(() => {
+    materializedOutputStoreRef.current = materializedOutputStore;
+  }, [materializedOutputStore]);
 
   useEffect(() => {
     tuckspaceRef.current = tuckspace;
@@ -865,6 +877,7 @@ function WorkspaceCanvas() {
       if (nextWorkspace) {
         saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
       }
+      saveMaterializedOutputs(materializedOutputStoreRef.current).catch((error) => setToast(String(error)));
       persistTimerRef.current = null;
     }, 150);
   }, [buildWorkspace]);
@@ -1013,21 +1026,54 @@ function WorkspaceCanvas() {
     [buildWorkspace, handlersFallback, setNodes],
   );
 
+  const persistMaterializedOutputStore = useCallback((nextStore: MaterializedOutputStore) => {
+    materializedOutputStoreRef.current = nextStore;
+    saveMaterializedOutputs(nextStore).catch((error) => setToast(String(error)));
+  }, []);
+
+  const migrateLoadedMaterializedState = useCallback((loadedWorkspace: Workspace, loadedTuckspace: TuckedSubgraph[], store: MaterializedOutputStore) => {
+    let nextStore = store;
+    let changed = false;
+    const nextWorkspace = {
+      ...loadedWorkspace,
+      nodes: loadedWorkspace.nodes.map((node) => {
+        const migrated = migrateLegacyNodeMaterialized(node, nextStore);
+        nextStore = migrated.store;
+        changed ||= migrated.changed;
+        return migrated.node;
+      }),
+    };
+    const nextTuckspace = loadedTuckspace.map((item) => ({
+      ...item,
+      nodes: item.nodes.map((node) => {
+        const migrated = migrateLegacyNodeMaterialized(node, nextStore);
+        nextStore = migrated.store;
+        changed ||= migrated.changed;
+        return migrated.node;
+      }),
+    }));
+    return { workspace: nextWorkspace, tuckspace: nextTuckspace, store: nextStore, changed };
+  }, []);
+
+
   const persistWorkspaceSnapshot = useCallback((
     nextNodes: FlowNode[],
     nextEdges: FlowEdge[],
     nextTuckspace: TuckedSubgraph[],
     nextRuntime: Record<string, NodeRuntimeState> = runtimeRef.current,
+    nextStore: MaterializedOutputStore = materializedOutputStoreRef.current,
   ) => {
     nodesRef.current = nextNodes;
     edgesRef.current = nextEdges;
     tuckspaceRef.current = nextTuckspace;
     runtimeRef.current = nextRuntime;
+    materializedOutputStoreRef.current = nextStore;
     const nextWorkspace = buildWorkspace(nextNodes, nextEdges, workspaceMetaRef.current, nextRuntime);
     if (nextWorkspace) {
       saveWorkspace(nextWorkspace).catch((error) => setToast(String(error)));
     }
     saveTuckspace(nextTuckspace).catch((error) => setToast(String(error)));
+    saveMaterializedOutputs(nextStore).catch((error) => setToast(String(error)));
   }, [buildWorkspace]);
 
   const updateWorkspaceCwd = useCallback(
@@ -1111,6 +1157,7 @@ function WorkspaceCanvas() {
       const event: ClientEvent = {
         type: "run_node",
         workspace,
+        materialized_output_store: materializedOutputStoreRef.current,
         node_id: nodeId,
         action,
       };
@@ -1248,15 +1295,34 @@ function WorkspaceCanvas() {
         });
       },
       onClearMaterialized: (nodeId) => {
-        setRuntime((current) => ({
-          ...current,
+        const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+        if (!node) {
+          return;
+        }
+        const cleared = clearNodeMaterialized(
+          flowNodeToPersistedWorkspaceNode(node, runtimeRef.current),
+          materializedOutputStoreRef.current,
+        );
+        const nextRuntime = {
+          ...runtimeRef.current,
           [nodeId]: {
-            ...(current[nodeId] ?? { running: false, portActivity: {} }),
-            previews: {},
+            ...(runtimeRef.current[nodeId] ?? { running: false, portActivity: {} }),
+            previews: runtimePreviewsFromNode(cleared.node, cleared.store),
             livePreviews: undefined,
           },
-        }));
-        persistRuntimeSoon();
+        };
+        const nextNodes = nodesRef.current.map((candidate) =>
+          candidate.id === nodeId
+            ? {
+                ...toFlowNode(cleared.node, nextRuntime, generationRef.current, handlersRef.current ?? handlersFallback, edgesRef.current, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+                selected: candidate.selected,
+              }
+            : candidate,
+        );
+        setMaterializedOutputStore(cleared.store);
+        setRuntime(nextRuntime);
+        setNodes(nextNodes);
+        persistWorkspaceSnapshot(nextNodes, edgesRef.current, tuckspaceRef.current, nextRuntime, cleared.store);
       },
       onConvertKind: (nodeId, kind) => {
         setNodes((current) => {
@@ -1461,6 +1527,47 @@ function WorkspaceCanvas() {
                 },
               };
             }
+            case "materialized_state": {
+              const nextStore = { ...materializedOutputStoreRef.current, ...event.upserted_entries };
+              for (const id of event.deleted_ids) {
+                delete nextStore[id];
+              }
+              materializedOutputStoreRef.current = nextStore;
+              setMaterializedOutputStore(nextStore);
+              let updatedModel: WorkspaceNode | undefined;
+              setNodes((nodesCurrent) =>
+                nodesCurrent.map((candidate) => {
+                  if (candidate.id !== event.node_id) {
+                    return candidate;
+                  }
+                  updatedModel = {
+                    ...candidate.data.model,
+                    materialized: {
+                      ...event.materialized,
+                      values: undefined,
+                    },
+                  };
+                  return {
+                    ...candidate,
+                    data: {
+                      ...candidate.data,
+                      model: updatedModel,
+                    },
+                  };
+                }),
+              );
+              const previous = current[event.node_id] ?? {
+                running: false,
+                portActivity: {},
+              };
+              return {
+                ...current,
+                [event.node_id]: {
+                  ...previous,
+                  previews: updatedModel ? runtimePreviewsFromNode(updatedModel, nextStore) : previous.previews,
+                },
+              };
+            }
             case "exec_finished": {
               const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
               setNodes((nodesCurrent) =>
@@ -1472,9 +1579,12 @@ function WorkspaceCanvas() {
                           ...candidate.data,
                           model: {
                             ...candidate.data.model,
-                            lastExitCode: event.materialized
-                              ? event.exit_code
-                              : candidate.data.model.lastExitCode ?? null,
+                            materialized: {
+                              ...(candidate.data.model.materialized ?? { values: {} }),
+                              lastExitCode: event.materialized
+                                ? event.exit_code
+                                : candidate.data.model.materialized?.lastExitCode ?? null,
+                            },
                           },
                         },
                       }
@@ -1795,7 +1905,7 @@ function WorkspaceCanvas() {
     }
   }, [buildWorkspace, cancelPendingWorkspaceSaves]);
 
-  const applyLoadedWorkspace = useCallback((loaded: Workspace) => {
+  const applyLoadedWorkspace = useCallback((loaded: Workspace, store: MaterializedOutputStore = materializedOutputStoreRef.current) => {
     const workspaceUi =
       loaded.ui.viewportX === 0 &&
       loaded.ui.viewportY === 0 &&
@@ -1820,7 +1930,7 @@ function WorkspaceCanvas() {
         {
           running: false,
           portActivity: {},
-          previews: runtimePreviewsFromNode(node),
+          previews: runtimePreviewsFromNode(node, store),
         },
       ]),
     );
@@ -1878,7 +1988,17 @@ function WorkspaceCanvas() {
     setWorkspaceSwitching(true);
     try {
       await flushPendingWorkspaceSave();
-      applyLoadedWorkspace(sanitizeWorkspace(await getWorkspace(workspaceId)));
+      const migrated = migrateLoadedMaterializedState(
+        sanitizeWorkspace(await getWorkspace(workspaceId)),
+        tuckspaceRef.current,
+        materializedOutputStoreRef.current,
+      );
+      if (migrated.changed) {
+        setMaterializedOutputStore(migrated.store);
+        materializedOutputStoreRef.current = migrated.store;
+        saveMaterializedOutputs(migrated.store).catch((error) => setToast(String(error)));
+      }
+      applyLoadedWorkspace(migrated.workspace, migrated.store);
     } catch (error) {
       setToast(String(error));
     } finally {
@@ -1895,7 +2015,7 @@ function WorkspaceCanvas() {
     try {
       await flushPendingWorkspaceSave();
       const created = sanitizeWorkspace(await createWorkspace());
-      applyLoadedWorkspace(created);
+      applyLoadedWorkspace(created, materializedOutputStoreRef.current);
     } catch (error) {
       setToast(String(error));
     } finally {
@@ -1918,6 +2038,16 @@ function WorkspaceCanvas() {
       if (deletingActive) {
         cancelPendingWorkspaceSaves();
       }
+      let nextStore = materializedOutputStoreRef.current;
+      const materializedNodes = deletingActive
+        ? nodesRef.current.map((node) => flowNodeToPersistedWorkspaceNode(node, runtimeRef.current))
+        : sanitizeWorkspace(await getWorkspace(workspaceId)).nodes;
+      for (const node of materializedNodes) {
+        const cleared = clearNodeMaterialized(node, nextStore);
+        nextStore = cleared.store;
+      }
+      setMaterializedOutputStore(nextStore);
+      persistMaterializedOutputStore(nextStore);
       const remainingSummaries = workspaceSummaries.filter((workspace) => workspace.id !== workspaceId);
       await deleteWorkspace(workspaceId);
       if (!deletingActive) {
@@ -1926,11 +2056,11 @@ function WorkspaceCanvas() {
       }
       if (remainingSummaries.length === 0) {
         const created = sanitizeWorkspace(await createWorkspace());
-        applyLoadedWorkspace(created);
+        applyLoadedWorkspace(created, materializedOutputStoreRef.current);
         return;
       }
       setWorkspaceSummaries(remainingSummaries);
-      applyLoadedWorkspace(sanitizeWorkspace(await getWorkspace(remainingSummaries[0].id)));
+      applyLoadedWorkspace(sanitizeWorkspace(await getWorkspace(remainingSummaries[0].id)), materializedOutputStoreRef.current);
     } catch (error) {
       setToast(String(error));
     } finally {
@@ -2020,17 +2150,24 @@ function WorkspaceCanvas() {
           readWorkspaceIdFromUrl(),
           loadGlobalActiveWorkspaceId(),
         );
-        const [sharedTuckspace, loadedWorkspace] = await Promise.all([
+        const [sharedTuckspace, sharedMaterializedOutputs, loadedWorkspace] = await Promise.all([
           getTuckspace(),
+          getMaterializedOutputs(),
           initialWorkspaceId ? getWorkspace(initialWorkspaceId) : createWorkspace(),
         ]);
-        const loaded = sanitizeWorkspace(loadedWorkspace);
+        const migrated = migrateLoadedMaterializedState(sanitizeWorkspace(loadedWorkspace), sharedTuckspace, sharedMaterializedOutputs);
         if (disposed) {
           return;
         }
-        setTuckspace(sharedTuckspace);
-        tuckspaceRef.current = sharedTuckspace;
-        applyLoadedWorkspace(loaded);
+        setTuckspace(migrated.tuckspace);
+        tuckspaceRef.current = migrated.tuckspace;
+        setMaterializedOutputStore(migrated.store);
+        materializedOutputStoreRef.current = migrated.store;
+        if (migrated.changed) {
+          saveTuckspace(migrated.tuckspace).catch((error) => setToast(String(error)));
+          saveMaterializedOutputs(migrated.store).catch((error) => setToast(String(error)));
+        }
+        applyLoadedWorkspace(migrated.workspace, migrated.store);
       } catch (error) {
         if (!disposed) {
           setToast(String(error));
@@ -2230,7 +2367,7 @@ function WorkspaceCanvas() {
         {
           running: false,
           portActivity: {},
-          previews: runtimePreviewsFromNode(node),
+          previews: runtimePreviewsFromNode(node, materializedOutputStoreRef.current),
         },
       ]),
     );
@@ -2479,25 +2616,43 @@ function WorkspaceCanvas() {
   }, [tuckReorder, untuckSubgraph]);
 
   const clearSelectedMaterialized = useCallback(() => {
-    const selectedNodeIds = nodesRef.current
-      .filter((node) => node.selected)
-      .map((node) => node.id);
-    if (selectedNodeIds.length === 0) {
+    const selectedNodeIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
+    if (selectedNodeIds.size === 0) {
       return;
     }
-    setRuntime((current) => {
-      const next = { ...current };
-      for (const nodeId of selectedNodeIds) {
-        next[nodeId] = {
-          ...(next[nodeId] ?? { running: false, portActivity: {} }),
-          previews: {},
-          livePreviews: undefined,
-        };
+    let nextStore = materializedOutputStoreRef.current;
+    const updatedModels = new Map<string, WorkspaceNode>();
+    for (const node of nodesRef.current) {
+      if (!selectedNodeIds.has(node.id)) {
+        continue;
       }
-      return next;
+      const persisted = flowNodeToPersistedWorkspaceNode(node, runtimeRef.current);
+      const cleared = clearNodeMaterialized(persisted, nextStore);
+      nextStore = cleared.store;
+      updatedModels.set(node.id, cleared.node);
+    }
+    const nextRuntime = { ...runtimeRef.current };
+    for (const [nodeId, model] of updatedModels) {
+      nextRuntime[nodeId] = {
+        ...(nextRuntime[nodeId] ?? { running: false, portActivity: {} }),
+        previews: runtimePreviewsFromNode(model, nextStore),
+        livePreviews: undefined,
+      };
+    }
+    const nextNodes = nodesRef.current.map((node) => {
+      const updated = updatedModels.get(node.id);
+      return updated
+        ? {
+            ...toFlowNode(updated, nextRuntime, generationRef.current, handlers, edgesRef.current, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+            selected: node.selected,
+          }
+        : node;
     });
-    persistRuntimeSoon();
-  }, [persistRuntimeSoon]);
+    setMaterializedOutputStore(nextStore);
+    setRuntime(nextRuntime);
+    setNodes(nextNodes);
+    persistWorkspaceSnapshot(nextNodes, edgesRef.current, tuckspaceRef.current, nextRuntime, nextStore);
+  }, [handlers, persistWorkspaceSnapshot, setNodes]);
 
   const duplicateSelected = useCallback(() => {
     const selectedNodes = nodesRef.current.filter((node) => node.selected);
@@ -2505,16 +2660,21 @@ function WorkspaceCanvas() {
       return;
     }
     const selectedNodeIds = new Set(selectedNodes.map((node) => node.id));
+    let nextStore = materializedOutputStoreRef.current;
     const duplicatedModels = selectedNodes.map((node) => {
       const model = flowNodeToPersistedWorkspaceNode(node, runtimeRef.current);
-      return {
+      const duplicated = {
         ...model,
+        materialized: { inputs: {}, outputs: {}, lastExitCode: model.materialized?.lastExitCode ?? null },
         id: encodeId(`node-${model.kind.replaceAll("_", "-")}`),
         position: {
           x: model.position.x + 48,
           y: model.position.y + 48,
         },
       };
+      const result = duplicateNodeMaterialized(model, duplicated, nextStore);
+      nextStore = result.store;
+      return result.node;
     });
     const nodeIdMap = new Map(selectedNodes.map((node, index) => [node.id, duplicatedModels[index]!.id]));
     const duplicatedEdges = edgesRef.current
@@ -2537,7 +2697,7 @@ function WorkspaceCanvas() {
         {
           running: false,
           portActivity: {},
-          previews: runtimePreviewsFromNode(node),
+          previews: runtimePreviewsFromNode(node, nextStore),
         },
       ]),
     );
@@ -2559,10 +2719,11 @@ function WorkspaceCanvas() {
         selected: true,
       })),
     ];
+    setMaterializedOutputStore(nextStore);
     setRuntime(nextRuntime);
     setEdges(nextEdges);
     setNodes(nextNodes);
-    persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime);
+    persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime, nextStore);
   }, [cycleEdgeBuffering, deleteEdge, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
 
   const setSelectedEdgeBuffering = useCallback((buffering: BufferingMode) => {
@@ -2633,13 +2794,25 @@ function WorkspaceCanvas() {
     if (selectedNodeIds.size === 0 && selectedEdgeIds.size === 0) {
       return;
     }
+    let nextStore = materializedOutputStoreRef.current;
+    for (const node of nodesRef.current) {
+      if (!selectedNodeIds.has(node.id)) {
+        continue;
+      }
+      const persisted = flowNodeToPersistedWorkspaceNode(node, runtimeRef.current);
+      const cleared = clearNodeMaterialized(persisted, nextStore);
+      nextStore = cleared.store;
+    }
     const nextEdges = edgesRef.current.filter(
       (edge) => !selectedEdgeIds.has(edge.id) && !selectedNodeIds.has(edge.source) && !selectedNodeIds.has(edge.target),
     );
     const nextNodes = nodesRef.current.filter((node) => !selectedNodeIds.has(node.id));
+    const nextRuntime = Object.fromEntries(Object.entries(runtimeRef.current).filter(([nodeId]) => !selectedNodeIds.has(nodeId)));
+    setMaterializedOutputStore(nextStore);
+    setRuntime(nextRuntime);
     setEdges(nextEdges);
     setNodes(nextNodes);
-    persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current);
+    persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime, nextStore);
   }, [persistWorkspaceSnapshot, setEdges, setNodes]);
 
   const runLayout = useCallback(() => {

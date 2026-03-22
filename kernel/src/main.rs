@@ -1,5 +1,7 @@
 mod execution;
 mod formula;
+mod materialized_output_store;
+mod materialized_outputs;
 mod id;
 mod model;
 mod openai;
@@ -24,9 +26,10 @@ use axum::{
     Json, Router,
 };
 use execution::ExecutionManager;
+use materialized_output_store::MaterializedOutputStoreHandle;
 use futures::{sink::SinkExt, stream::StreamExt};
 use id::encode_workspace_id;
-use model::{ClientEvent, ServerEvent, TuckedSubgraph, Workspace};
+use model::{ClientEvent, MaterializedOutputStore, ServerEvent, TuckedSubgraph, Workspace};
 use openai::{generate_script, GenerateScriptRequest, GenerateScriptResponse};
 use tokio::{fs, sync::broadcast};
 use tower_http::{cors::CorsLayer, services::ServeDir};
@@ -38,6 +41,7 @@ use workspace_store::WorkspaceStore;
 struct AppState {
     store: WorkspaceStore,
     tuckspace_store: TuckspaceStore,
+    materialized_output_store: MaterializedOutputStoreHandle,
     // Persistence stays separate from execution. The execution manager consumes
     // workspace snapshots, but save/load state must not be hidden inside it.
     execution: ExecutionManager,
@@ -48,6 +52,7 @@ struct AppState {
 const APP_DATA_DIR: &str = "app-data";
 const APP_WORKSPACES_DIR: &str = "workspaces";
 const APP_TUCKSPACE_FILE: &str = "tuckspace.json";
+const APP_MATERIALIZED_OUTPUTS_FILE: &str = "materialized-outputs.json";
 const LEGACY_DATA_DIR: &str = "workspace-data";
 
 fn app_data_dir(root: &FsPath) -> PathBuf {
@@ -62,16 +67,21 @@ fn app_tuckspace_path(root: &FsPath) -> PathBuf {
     app_data_dir(root).join(APP_TUCKSPACE_FILE)
 }
 
+fn app_materialized_outputs_path(root: &FsPath) -> PathBuf {
+    app_data_dir(root).join(APP_MATERIALIZED_OUTPUTS_FILE)
+}
+
 fn legacy_data_dir(root: &FsPath) -> PathBuf {
     root.join(LEGACY_DATA_DIR)
 }
 
-async fn prepare_app_data_layout(root: &FsPath) -> Result<(PathBuf, PathBuf), std::io::Error> {
+async fn prepare_app_data_layout(root: &FsPath) -> Result<(PathBuf, PathBuf, PathBuf), std::io::Error> {
     let workspaces_dir = app_workspaces_dir(root);
     let tuckspace_path = app_tuckspace_path(root);
+    let materialized_outputs_path = app_materialized_outputs_path(root);
     migrate_legacy_data(root, &workspaces_dir, &tuckspace_path).await?;
     fs::create_dir_all(&workspaces_dir).await?;
-    Ok((workspaces_dir, tuckspace_path))
+    Ok((workspaces_dir, tuckspace_path, materialized_outputs_path))
 }
 
 async fn migrate_legacy_data(
@@ -130,7 +140,7 @@ async fn main() {
         )
         .init();
 
-    let (workspaces_dir, tuckspace_path) = prepare_app_data_layout(FsPath::new("."))
+    let (workspaces_dir, tuckspace_path, materialized_outputs_path) = prepare_app_data_layout(FsPath::new("."))
         .await
         .expect("prepare app data");
     let store = WorkspaceStore::new(&workspaces_dir)
@@ -139,6 +149,9 @@ async fn main() {
     let tuckspace_store = TuckspaceStore::new(&tuckspace_path, &store)
         .await
         .expect("tuckspace store");
+    let materialized_output_store = MaterializedOutputStoreHandle::new(&materialized_outputs_path)
+        .await
+        .expect("materialized output store");
     let (broadcaster, _) = broadcast::channel(512);
     let execution = ExecutionManager::new(broadcaster.clone());
     let openai_client = reqwest::Client::builder()
@@ -147,6 +160,7 @@ async fn main() {
     let state = AppState {
         store,
         tuckspace_store,
+        materialized_output_store,
         execution,
         broadcaster,
         openai_client,
@@ -166,6 +180,7 @@ async fn main() {
                 .delete(delete_workspace),
         )
         .route("/api/tuckspace", get(get_tuckspace).put(save_tuckspace))
+        .route("/api/materialized-outputs", get(get_materialized_outputs).put(save_materialized_outputs))
         .route("/api/pick-file", post(pick_file))
         .route("/api/generate-script", post(generate_script_handler))
         .route("/ws", get(ws_handler))
@@ -250,6 +265,20 @@ async fn save_tuckspace(
     Json(tuckspace): Json<Vec<TuckedSubgraph>>,
 ) -> Result<StatusCode, AppError> {
     state.tuckspace_store.save(&tuckspace).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn get_materialized_outputs(
+    State(state): State<AppState>,
+) -> Result<Json<MaterializedOutputStore>, AppError> {
+    Ok(Json(state.materialized_output_store.load().await?))
+}
+
+async fn save_materialized_outputs(
+    State(state): State<AppState>,
+    Json(store): Json<MaterializedOutputStore>,
+) -> Result<StatusCode, AppError> {
+    state.materialized_output_store.save(&store).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -387,10 +416,11 @@ async fn handle_client_event(event: ClientEvent, state: AppState) -> Result<(), 
     match event {
         ClientEvent::RunNode {
             workspace,
+            materialized_output_store,
             node_id,
             action,
         } => {
-            state.execution.run(workspace, node_id, action);
+            state.execution.run(workspace, materialized_output_store, node_id, action);
         }
         ClientEvent::StopExecution { exec_id, node_id } => {
             if let Some(exec_id) = exec_id {
@@ -439,6 +469,9 @@ fn summarize_server_event(event: &ServerEvent) -> String {
         ServerEvent::ExecStarted {
             exec_id, node_id, ..
         } => format!("start {} {}", node_id, exec_id),
+        ServerEvent::MaterializedState { node_id, upserted_entries, deleted_ids, .. } => {
+            format!("mat {} upserts={} deletes={}", node_id, upserted_entries.len(), deleted_ids.len())
+        }
         ServerEvent::ExecFinished {
             exec_id,
             node_id,
@@ -532,7 +565,7 @@ mod tests {
             .await
             .expect("tuckspace file");
 
-        let (workspaces_dir, tuckspace_path) = prepare_app_data_layout(temp_dir.path())
+        let (workspaces_dir, tuckspace_path, materialized_outputs_path) = prepare_app_data_layout(temp_dir.path())
             .await
             .expect("prepare app data");
 
@@ -542,6 +575,7 @@ mod tests {
         assert!(fs::try_exists(&tuckspace_path)
             .await
             .expect("tuckspace exists"));
+        assert_eq!(materialized_outputs_path, temp_dir.path().join(APP_DATA_DIR).join(APP_MATERIALIZED_OUTPUTS_FILE));
         assert!(!fs::try_exists(legacy_dir.join("alpha.json"))
             .await
             .expect("legacy workspace gone"));
