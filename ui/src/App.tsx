@@ -76,6 +76,7 @@ import {
 import { missingConnectedInputs, missingOutputs, runtimePreviewsFromNode, materializedValuesFromRuntime } from "./lib/materialized";
 import { outputPortsForKind, previewOutputPortsForKind } from "./lib/portSchema";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
+import { selectionSupportsPreviewCategory, togglePreviewCategoryForSelection, type PreviewToggleCategory } from "./lib/selectionPreviewTabs";
 import { nextPaneSizes } from "./lib/paneLayout";
 import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
@@ -2188,6 +2189,16 @@ function WorkspaceCanvas() {
     () => new Set(selectedEdges.map((edge) => edge.id)),
     [selectedEdges],
   );
+  const selectedPreviewNodes = useMemo(
+    () => selectedNodes.map((node) => ({
+      id: node.id,
+      previewTabs: node.data.previewTabs ?? nodePreviewTabs(node.data.model.kind),
+      openPreviewTabs:
+        node.data.model.uiState?.openPreviewTabs ??
+        (node.data.model.uiState?.activePreviewTab ? [node.data.model.uiState.activePreviewTab] : []),
+    })),
+    [selectedNodes],
+  );
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
     [edges, selectedNodeIds],
@@ -2202,7 +2213,15 @@ function WorkspaceCanvas() {
     () => tuckspace.filter((item) => isTuckspaceShell(item) && item.userNamed),
     [tuckspace],
   );
-
+  const canToggleSelectedPreviewTabs = useMemo(
+    () => ({
+      stdin: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdin"),
+      stdout: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdout"),
+      stderr: selectionSupportsPreviewCategory(selectedPreviewNodes, "stderr"),
+      argv: selectionSupportsPreviewCategory(selectedPreviewNodes, "argv"),
+    }),
+    [selectedPreviewNodes],
+  );
 
   const selectionActionsStyle = useMemo(() => {
     if (selectedNodes.length === 0 && selectedEdges.length === 0) {
@@ -2386,6 +2405,37 @@ function WorkspaceCanvas() {
       return next;
     });
   }, [cycleEdgeBuffering, deleteEdge, handlers, persistSoon, runtime, setEdges, setNodes]);
+
+  const toggleSelectedPreviewTabs = useCallback((category: PreviewToggleCategory) => {
+    const nextTabsByNodeId = togglePreviewCategoryForSelection(selectedPreviewNodes, category);
+    if (nextTabsByNodeId.size === 0) {
+      return;
+    }
+    setNodes((current) => {
+      const next = current.map((node) => {
+        const nextTabs = nextTabsByNodeId.get(node.id);
+        if (!nextTabs) {
+          return node;
+        }
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            model: {
+              ...node.data.model,
+              uiState: {
+                ...(node.data.model.uiState ?? {}),
+                activePreviewTab: null,
+                openPreviewTabs: nextTabs,
+              },
+            },
+          },
+        };
+      });
+      persistSoon(next, edgesRef.current);
+      return next;
+    });
+  }, [persistSoon, selectedPreviewNodes, setNodes]);
 
   const deleteSelected = useCallback(() => {
     const selectedNodeIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
@@ -2808,6 +2858,26 @@ function WorkspaceCanvas() {
                   <button type="button" onClick={() => setSelectedEdgeBuffering("unbuffered")}>unbuffered</button>
                   <button type="button" onClick={() => setSelectedEdgeBuffering("line_or_1024")}>line or 1024</button>
                   <button type="button" onClick={() => setSelectedEdgeBuffering("on_complete")}>on complete</button>
+                </div>
+              )}
+            </div>
+            <div className="selection-actions-item selection-actions-item-has-submenu">
+              <button type="button" disabled={selectedNodes.length === 0} title={selectedNodes.length === 0 ? "select nodes first" : "toggle preview tabs"}>
+                <span className="selection-actions-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false">
+                    <path d="M2.5 4.5h11" />
+                    <path d="M2.5 8h11" />
+                    <path d="M2.5 11.5h11" />
+                  </svg>
+                </span>
+                <span>toggle tabs</span>
+              </button>
+              {selectedNodes.length > 0 && (
+                <div className="selection-actions-submenu">
+                  <button type="button" disabled={!canToggleSelectedPreviewTabs.stdin} onClick={() => toggleSelectedPreviewTabs("stdin")}>stdin</button>
+                  <button type="button" disabled={!canToggleSelectedPreviewTabs.stdout} onClick={() => toggleSelectedPreviewTabs("stdout")}>stdout</button>
+                  <button type="button" disabled={!canToggleSelectedPreviewTabs.stderr} onClick={() => toggleSelectedPreviewTabs("stderr")}>stderr</button>
+                  <button type="button" disabled={!canToggleSelectedPreviewTabs.argv} onClick={() => toggleSelectedPreviewTabs("argv")}>argv</button>
                 </div>
               )}
             </div>
