@@ -228,7 +228,7 @@ textarea {
 .sidebar-field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .sidebar-label {
@@ -963,26 +963,26 @@ textarea {
   border-bottom: 1px solid color-mix(in srgb, var(--selection) 48%, transparent);
   background: transparent;
   color: color-mix(in srgb, var(--selection) 78%, white 22%);
-  padding: 4px 8px;
-  font-size: 9px;
+  padding: 5px 9px;
+  font-size: 12px;
   letter-spacing: 0.08em;
 }
 
 .selection-actions-icon {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 12px;
+  flex: 0 0 14px;
 }
 
 .selection-actions-icon svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.2;
+  stroke-width: 1.35;
   stroke-linecap: round;
   stroke-linejoin: round;
 }

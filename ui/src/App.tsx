@@ -2981,28 +2981,39 @@ function WorkspaceCanvas() {
               </span>
               <span>duplicate</span>
             </button>
-            <button type="button" onClick={clearSelectedMaterialized} disabled={selectedNodes.length === 0}>
-              <span className="selection-actions-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" focusable="false">
-                  <path d="M4 4l8 8" />
-                  <path d="M12 4 4 12" />
-                </svg>
-              </span>
-              <span>reset materialized</span>
-            </button>
-            <button type="button" onClick={deleteSelected}>
-              <span className="selection-actions-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" focusable="false">
-                  <path d="M3.5 4.5h9" />
-                  <path d="M6 4.5V3.2h4V4.5" />
-                  <path d="M5.2 4.5v7.3" />
-                  <path d="M8 4.5v7.3" />
-                  <path d="M10.8 4.5v7.3" />
-                  <path d="M4.2 4.5l.5 8.3h6.6l.5-8.3" />
-                </svg>
-              </span>
-              <span>delete</span>
-            </button>
+            <div className="selection-actions-item selection-actions-item-has-submenu">
+              <button
+                type="button"
+                onClick={() => moveSelectionToTuckspace()}
+                disabled={!canTuckSelection}
+                title={canTuckSelection ? "Move subgraph into tuckspace" : "Only closed subgraphs can be moved into tuckspace"}
+              >
+                <span className="selection-actions-icon" aria-hidden="true">
+                  <svg viewBox="0 0 16 16" focusable="false">
+                    <path d="M2.5 5.5h11" />
+                    <path d="M3.5 5.5v6h9v-6" />
+                    <path d="M6 5.5V4h4v1.5" />
+                    <path d="M8 2.5v7" />
+                    <path d="M5.5 7 8 9.5 10.5 7" />
+                  </svg>
+                </span>
+                <span>move to tuckspace</span>
+              </button>
+              {canTuckSelection && tuckspaceShells.length > 0 && (
+                <div className="selection-actions-submenu">
+                  {tuckspaceShells.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      title={`Move subgraph into ${item.name}`}
+                      onClick={() => moveSelectionToTuckspace(item.id)}
+                    >
+                      {item.name}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
             <button type="button" onClick={runLayout} disabled={selectedNodes.length < 2} title={selectedNodes.length < 2 ? "select at least two nodes" : "organize selected nodes"}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
@@ -3057,39 +3068,28 @@ function WorkspaceCanvas() {
                 </div>
               )}
             </div>
-            <div className="selection-actions-item selection-actions-item-has-submenu">
-              <button
-                type="button"
-                onClick={() => moveSelectionToTuckspace()}
-                disabled={!canTuckSelection}
-                title={canTuckSelection ? "Move subgraph into tuckspace" : "Only closed subgraphs can be moved into tuckspace"}
-              >
-                <span className="selection-actions-icon" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" focusable="false">
-                    <path d="M2.5 5.5h11" />
-                    <path d="M3.5 5.5v6h9v-6" />
-                    <path d="M6 5.5V4h4v1.5" />
-                    <path d="M8 2.5v7" />
-                    <path d="M5.5 7 8 9.5 10.5 7" />
-                  </svg>
-                </span>
-                <span>move to tuckspace</span>
-              </button>
-              {canTuckSelection && tuckspaceShells.length > 0 && (
-                <div className="selection-actions-submenu">
-                  {tuckspaceShells.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      title={`Move subgraph into ${item.name}`}
-                      onClick={() => moveSelectionToTuckspace(item.id)}
-                    >
-                      {item.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <button type="button" onClick={clearSelectedMaterialized} disabled={selectedNodes.length === 0}>
+              <span className="selection-actions-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <path d="M4 4l8 8" />
+                  <path d="M12 4 4 12" />
+                </svg>
+              </span>
+              <span>reset materialized</span>
+            </button>
+            <button type="button" onClick={deleteSelected}>
+              <span className="selection-actions-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <path d="M3.5 4.5h9" />
+                  <path d="M6 4.5V3.2h4V4.5" />
+                  <path d="M5.2 4.5v7.3" />
+                  <path d="M8 4.5v7.3" />
+                  <path d="M10.8 4.5v7.3" />
+                  <path d="M4.2 4.5l.5 8.3h6.6l.5-8.3" />
+                </svg>
+              </span>
+              <span>delete</span>
+            </button>
           </div>
         )}
         {toast && <div className="toast">{toast}</div>}
