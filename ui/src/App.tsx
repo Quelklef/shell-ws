@@ -2610,7 +2610,11 @@ function WorkspaceCanvas() {
           const selectedCount = nodes.filter((node) => node.selected).length;
           if (selectedCount > 0) {
             event.preventDefault();
-            setContextMenu({ x: event.clientX, y: event.clientY });
+            const canvasRect = canvasRef.current?.getBoundingClientRect();
+            setContextMenu({
+              x: canvasRect ? event.clientX - canvasRect.left : event.clientX,
+              y: canvasRect ? event.clientY - canvasRect.top : event.clientY,
+            });
           }
         }}
       >
