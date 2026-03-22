@@ -2361,6 +2361,17 @@ function WorkspaceCanvas() {
     persistWorkspaceSnapshot(nodesRef.current, edgesRef.current, nextTuckspace);
   }, [persistWorkspaceSnapshot]);
 
+  const clearSelection = useCallback(() => {
+    setNodes((current) => {
+      const next = current.map((node) => (node.selected ? { ...node, selected: false } : node));
+      return next;
+    });
+    setEdges((current) => {
+      const next = current.map((edge) => (edge.selected ? { ...edge, selected: false } : edge));
+      return next;
+    });
+  }, [setEdges, setNodes]);
+
   const visibleTuckspace = useMemo(() => {
     const query = tuckspaceQuery.trim().toLowerCase();
     if (!query) {
@@ -2887,6 +2898,7 @@ function WorkspaceCanvas() {
               true,
             )
           }
+          onPaneClick={clearSelection}
           onSelectionStart={beginSelectionGesture}
           onSelectionEnd={endSelectionGesture}
         >
