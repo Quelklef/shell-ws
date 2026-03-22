@@ -93,6 +93,8 @@ const edgeTypes = {
   workspace: WorkspaceEdgeView,
 };
 
+const PAN_ON_DRAG_BUTTONS = [1, 2] as const;
+const SELECTION_DRAG_BUTTON = 0;
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {
   const previewOpenByDefault = kind === "formula" || kind === "text" ? [] : ["stdout"];
@@ -732,6 +734,54 @@ function WorkspaceCanvas() {
   useEffect(() => {
     materializedOutputStoreRef.current = materializedOutputStore;
   }, [materializedOutputStore]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return;
+    }
+
+    const forwardPanMouseDown = (event: MouseEvent) => {
+      const selectionRect = (event.target as HTMLElement | null)?.closest(".react-flow__nodesselection-rect") as HTMLElement | null;
+      if (!selectionRect) {
+        return;
+      }
+      if (event.button === SELECTION_DRAG_BUTTON || !PAN_ON_DRAG_BUTTONS.includes(event.button as 1 | 2)) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      selectionRect.style.pointerEvents = "none";
+      const underlying = document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null;
+      selectionRect.style.pointerEvents = "";
+      if (!underlying) {
+        return;
+      }
+
+      underlying.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+          button: event.button,
+          buttons: event.buttons,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          metaKey: event.metaKey,
+        }),
+      );
+    };
+
+    canvas.addEventListener("mousedown", forwardPanMouseDown, true);
+    return () => {
+      canvas.removeEventListener("mousedown", forwardPanMouseDown, true);
+    };
+  }, []);
 
   useEffect(() => {
     tuckspaceRef.current = tuckspace;
@@ -2479,11 +2529,17 @@ function WorkspaceCanvas() {
     if (!element) {
       return;
     }
-    const next = { width: element.offsetWidth, height: element.offsetHeight };
-    setSelectionActionsSize((current) =>
-      current.width === next.width && current.height === next.height ? current : next,
-    );
-  });
+    const updateSize = () => {
+      const next = { width: element.offsetWidth, height: element.offsetHeight };
+      setSelectionActionsSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [selectedNodes.length, selectedEdges.length]);
 
   const canToggleSelectedPreviewTabs = useMemo(
     () => ({
@@ -3088,7 +3144,7 @@ function WorkspaceCanvas() {
           deleteKeyCode={null}
           zoomOnScroll
           panOnScroll={false}
-          panOnDrag={[1, 2]}
+          panOnDrag={PAN_ON_DRAG_BUTTONS as unknown as number[]}
           minZoom={0.01}
           maxZoom={64}
           colorMode="dark"
