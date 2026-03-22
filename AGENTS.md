@@ -7,6 +7,7 @@ This repository hosts `shell-ws`, an interactive 2D shell workspace. The UI is a
 ## Working Rules
 
 - Do not modify files outside `/per/dev/shell-ws`.
+- NEVER read from, write to, move, delete, or otherwise touch paths outside `/per/dev/shell-ws` without explicit user consent. This includes exploratory searches, cleanup, migration, and recovery attempts.
 - Keep the UI and kernel loosely coupled over explicit HTTP and WebSocket interfaces.
 - Preserve JSON workspace compatibility where reasonable.
 - Prefer small, testable pieces over large framework-heavy indirection.
