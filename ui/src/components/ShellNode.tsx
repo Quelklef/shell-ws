@@ -25,6 +25,7 @@ import { clamp } from "../lib/utils";
 const PORT_SPACING = 30;
 const PORT_STACK_TOP = 48;
 const PREVIEW_WIDTH_SAMPLE = "MMMMMMMMMM";
+const PREVIEW_SCROLLBAR_BUFFER = 16;
 
 function tabExpandedLength(line: string, tabSize: number) {
   let width = 0;
@@ -286,7 +287,7 @@ export default function ShellNode({ data }: NodeProps) {
         const charWidth = measureMonospaceCharWidth(preElement);
         const desiredPreWidth = Math.ceil(longestLineColumns * charWidth);
         const widthChrome = Math.max(24, paneElement.getBoundingClientRect().width - preElement.getBoundingClientRect().width);
-        nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(desiredPreWidth + widthChrome)));
+        nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(desiredPreWidth + widthChrome + PREVIEW_SCROLLBAR_BUFFER)));
       }
       const nextHeight = Math.min(maxHeight, Math.max(96, Math.ceil(bodyElement.scrollHeight + headerHeight + heightChrome)));
       typedData.onResizePaneWidth(model.id, paneId, nextWidth);
