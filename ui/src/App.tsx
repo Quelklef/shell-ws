@@ -1901,8 +1901,13 @@ function WorkspaceCanvas() {
     cancelPendingWorkspaceSaves();
     const nextWorkspace = buildWorkspace();
     if (nextWorkspace) {
-      await saveWorkspace(nextWorkspace);
+      await Promise.all([
+        saveWorkspace(nextWorkspace),
+        saveMaterializedOutputs(materializedOutputStoreRef.current),
+      ]);
+      return;
     }
+    await saveMaterializedOutputs(materializedOutputStoreRef.current);
   }, [buildWorkspace, cancelPendingWorkspaceSaves]);
 
   const applyLoadedWorkspace = useCallback((loaded: Workspace, store: MaterializedOutputStore = materializedOutputStoreRef.current) => {
