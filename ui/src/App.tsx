@@ -654,6 +654,8 @@ function WorkspaceCanvas() {
   const tuckItemRefs = useRef(new Map<string, HTMLElement>());
   const runningStartedAtRef = useRef<Record<string, number>>({});
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
+  const selectionGestureActiveRef = useRef(false);
+  const selectionGestureClearTimerRef = useRef<number | null>(null);
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
   const userSelectionRect = useStore((store) => store.userSelectionRect);
@@ -737,6 +739,9 @@ function WorkspaceCanvas() {
     }
     if (layoutPersistTimerRef.current !== null) {
       window.clearTimeout(layoutPersistTimerRef.current);
+    }
+    if (selectionGestureClearTimerRef.current !== null) {
+      window.clearTimeout(selectionGestureClearTimerRef.current);
     }
   }, []);
 
@@ -976,6 +981,25 @@ function WorkspaceCanvas() {
       window.clearTimeout(timerId);
       runningClearTimersRef.current.delete(nodeId);
     }
+  }, []);
+
+  const beginSelectionGesture = useCallback(() => {
+    if (selectionGestureClearTimerRef.current !== null) {
+      window.clearTimeout(selectionGestureClearTimerRef.current);
+      selectionGestureClearTimerRef.current = null;
+    }
+    selectionGestureActiveRef.current = true;
+  }, []);
+
+  const endSelectionGesture = useCallback(() => {
+    if (selectionGestureClearTimerRef.current !== null) {
+      window.clearTimeout(selectionGestureClearTimerRef.current);
+    }
+    // React Flow can deliver the final select changes just after selection-end fires.
+    selectionGestureClearTimerRef.current = window.setTimeout(() => {
+      selectionGestureActiveRef.current = false;
+      selectionGestureClearTimerRef.current = null;
+    }, 0);
   }, []);
 
   // Keep nodes visually active for a short minimum duration so fast runs do not flicker.
@@ -1558,15 +1582,21 @@ function WorkspaceCanvas() {
 
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
+      const filteredChanges = changes.filter((change) =>
+        change.type !== "select" || selectionGestureActiveRef.current,
+      );
+      if (filteredChanges.length === 0) {
+        return;
+      }
       setNodes((current) => {
-        const next = applyNodeChanges(changes, current);
-        const shouldPersistImmediately = changes.some((change) => {
+        const next = applyNodeChanges(filteredChanges, current);
+        const shouldPersistImmediately = filteredChanges.some((change) => {
           if (change.type === "position") {
             return !change.dragging;
           }
           return change.type !== "select" && change.type !== "dimensions";
         });
-        const shouldPersistLayout = changes.some(
+        const shouldPersistLayout = filteredChanges.some(
           (change) => change.type === "dimensions" && !change.resizing,
         );
         if (shouldPersistImmediately) {
@@ -1583,12 +1613,18 @@ function WorkspaceCanvas() {
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<FlowEdge>[]) => {
+      const filteredChanges = changes.filter((change) =>
+        change.type !== "select" || selectionGestureActiveRef.current,
+      );
+      if (filteredChanges.length === 0) {
+        return;
+      }
       setEdges((current) => {
-        const next = applyEdgeChanges(changes, current);
+        const next = applyEdgeChanges(filteredChanges, current);
         setNodes((nodesCurrent) =>
           syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
         );
-        const shouldPersist = changes.some(
+        const shouldPersist = filteredChanges.some(
           (change) => change.type !== "select",
         );
         if (shouldPersist) {
@@ -2777,6 +2813,8 @@ function WorkspaceCanvas() {
               true,
             )
           }
+          onSelectionStart={beginSelectionGesture}
+          onSelectionEnd={endSelectionGesture}
         >
           <MiniMap pannable zoomable className="minimap" />
           <Controls position="bottom-left">
