@@ -2612,7 +2612,7 @@ function WorkspaceCanvas() {
             event.preventDefault();
             const canvasRect = canvasRef.current?.getBoundingClientRect();
             setContextMenu({
-              x: canvasRect ? event.clientX - canvasRect.left : event.clientX,
+              x: (canvasRect ? event.clientX - canvasRect.left : event.clientX) + 16,
               y: canvasRect ? event.clientY - canvasRect.top : event.clientY,
             });
           }
