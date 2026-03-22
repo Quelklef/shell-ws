@@ -2867,7 +2867,7 @@ function WorkspaceCanvas() {
               </span>
               <span>delete</span>
             </button>
-            <button type="button" onClick={runLayout}>
+            <button type="button" onClick={runLayout} disabled={selectedNodes.length < 2} title={selectedNodes.length < 2 ? "select at least two nodes" : "organize selected nodes"}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
                   <path d="M2.5 4.5h11" />
