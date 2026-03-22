@@ -36,6 +36,8 @@ export default function ResizablePane({
   const widthCommitTimerRef = useRef<number | null>(null);
   const widthSettleTimerRef = useRef<number | null>(null);
   const layoutFrameRef = useRef<number | null>(null);
+  const propResizeFrameRef = useRef<number | null>(null);
+  const nativeResizeSettleTimerRef = useRef<number | null>(null);
   const observedHeightRef = useRef(height);
   const observedWidthRef = useRef(width);
   const stableNodeWidthRef = useRef(width);
@@ -47,6 +49,8 @@ export default function ResizablePane({
   const latestOnWidthChangeRef = useRef(onWidthChange);
   const latestOnHeightChangeRef = useRef(onHeightChange);
   const latestOnLayoutChangeRef = useRef(onLayoutChange);
+  const applyingPropResizeRef = useRef(false);
+  const nativeResizeActiveRef = useRef(false);
 
   useEffect(() => {
     latestWidthRef.current = width;
@@ -60,19 +64,39 @@ export default function ResizablePane({
 
   useLayoutEffect(() => {
     const element = elementRef.current;
-    if (!element) {
+    if (!element || nativeResizeActiveRef.current) {
       return;
     }
+
+    let wrotePropSize = false;
     const expectedHeight = `${height}px`;
-    if (Math.abs(observedHeightRef.current - height) < 1 && element.style.height !== expectedHeight) {
+    if (element.style.height !== expectedHeight) {
       element.style.height = expectedHeight;
+      wrotePropSize = true;
     }
     if (widthBehavior === "pane") {
       const expectedWidth = `${width}px`;
-      if (Math.abs(observedWidthRef.current - width) < 1 && element.style.width !== expectedWidth) {
+      if (element.style.width !== expectedWidth) {
         element.style.width = expectedWidth;
+        wrotePropSize = true;
       }
     }
+
+    if (!wrotePropSize) {
+      return;
+    }
+
+    // Prop-driven size changes like fit/minimize should update the DOM immediately. The only
+    // time we suppress these writes is during an active native resize gesture, where the browser
+    // owns the element size and React state is just catching up.
+    applyingPropResizeRef.current = true;
+    if (propResizeFrameRef.current !== null) {
+      window.cancelAnimationFrame(propResizeFrameRef.current);
+    }
+    propResizeFrameRef.current = window.requestAnimationFrame(() => {
+      applyingPropResizeRef.current = false;
+      propResizeFrameRef.current = null;
+    });
   }, [height, width, widthBehavior]);
 
   useEffect(() => {
@@ -100,6 +124,17 @@ export default function ResizablePane({
       observedHeightRef.current = heightFromDom;
       observedWidthRef.current = widthFromDom;
       notifyLayout();
+
+      if (!applyingPropResizeRef.current && (element.style.width || element.style.height)) {
+        nativeResizeActiveRef.current = true;
+        if (nativeResizeSettleTimerRef.current !== null) {
+          window.clearTimeout(nativeResizeSettleTimerRef.current);
+        }
+        nativeResizeSettleTimerRef.current = window.setTimeout(() => {
+          nativeResizeActiveRef.current = false;
+          nativeResizeSettleTimerRef.current = null;
+        }, 140);
+      }
 
       if (latestWidthBehaviorRef.current === "node") {
         if (!element.style.width) {
@@ -175,6 +210,12 @@ export default function ResizablePane({
       }
       if (layoutFrameRef.current !== null) {
         window.cancelAnimationFrame(layoutFrameRef.current);
+      }
+      if (propResizeFrameRef.current !== null) {
+        window.cancelAnimationFrame(propResizeFrameRef.current);
+      }
+      if (nativeResizeSettleTimerRef.current !== null) {
+        window.clearTimeout(nativeResizeSettleTimerRef.current);
       }
     };
   }, [minWidth]);
