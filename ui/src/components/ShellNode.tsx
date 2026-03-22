@@ -725,18 +725,6 @@ export default function ShellNode({ data }: NodeProps) {
           >
             auto
           </button>
-          <button
-            type="button"
-            className="nodrag nopan node-action-button"
-            title="clear materialized values"
-            aria-label="clear materialized values"
-            onClick={() => typedData.onClearMaterialized(model.id)}
-          >
-            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-              <path d="M4 4l8 8" />
-              <path d="M12 4 4 12" />
-            </svg>
-          </button>
         </div>
 
         {model.uiState?.showAutoControls && (

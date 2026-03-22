@@ -2269,6 +2269,27 @@ function WorkspaceCanvas() {
     untuckSubgraph(tuckId);
   }, [tuckReorder, untuckSubgraph]);
 
+  const clearSelectedMaterialized = useCallback(() => {
+    const selectedNodeIds = nodesRef.current
+      .filter((node) => node.selected)
+      .map((node) => node.id);
+    if (selectedNodeIds.length === 0) {
+      return;
+    }
+    setRuntime((current) => {
+      const next = { ...current };
+      for (const nodeId of selectedNodeIds) {
+        next[nodeId] = {
+          ...(next[nodeId] ?? { running: false, portActivity: {} }),
+          previews: {},
+          livePreviews: undefined,
+        };
+      }
+      return next;
+    });
+    persistRuntimeSoon();
+  }, [persistRuntimeSoon]);
+
   const duplicateSelected = useCallback(() => {
     const selectedNodes = nodesRef.current.filter((node) => node.selected);
     if (selectedNodes.length === 0) {
@@ -2703,6 +2724,15 @@ function WorkspaceCanvas() {
                 </svg>
               </span>
               <span>duplicate</span>
+            </button>
+            <button type="button" onClick={clearSelectedMaterialized} disabled={selectedNodes.length === 0}>
+              <span className="selection-actions-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <path d="M4 4l8 8" />
+                  <path d="M12 4 4 12" />
+                </svg>
+              </span>
+              <span>reset materialized</span>
             </button>
             <button type="button" onClick={deleteSelected}>
               <span className="selection-actions-icon" aria-hidden="true">
