@@ -303,7 +303,6 @@ export default function ShellNode({ data }: NodeProps) {
         minHeight={96}
         className="resizable-pane port-preview-pane port-preview-floating-pane nodrag nopan"
         widthBehavior="pane"
-        customResizeHandles
         onWidthChange={handlePaneWidthChange}
         onHeightChange={handlePaneHeightChange}
         onLayoutChange={handleLayoutChange}
