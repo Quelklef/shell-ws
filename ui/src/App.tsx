@@ -626,6 +626,7 @@ function WorkspaceCanvas() {
   const socketRef = useRef<ReturnType<typeof connectKernel> | null>(null);
   const canvasRef = useRef<HTMLElement | null>(null);
   const suppressContextMenuUntilRef = useRef(0);
+  const viewportMoveActiveRef = useRef(false);
   const rightDragRef = useRef<{
     pointerId: number | null;
     startX: number;
@@ -2599,7 +2600,7 @@ function WorkspaceCanvas() {
           };
         }}
         onContextMenuCapture={(event) => {
-          if (rightDragRef.current.moved || Date.now() < suppressContextMenuUntilRef.current) {
+          if (rightDragRef.current.moved || viewportMoveActiveRef.current || Date.now() < suppressContextMenuUntilRef.current) {
             event.preventDefault();
             rightDragRef.current = {
               pointerId: null,
@@ -2642,7 +2643,12 @@ function WorkspaceCanvas() {
           maxZoom={64}
           colorMode="dark"
           connectionLineType={ConnectionLineType.SmoothStep}
-          onMoveEnd={(_, viewport) =>
+          onMoveStart={() => {
+            viewportMoveActiveRef.current = true;
+          }}
+          onMoveEnd={(_, viewport) => {
+            viewportMoveActiveRef.current = false;
+            suppressContextMenuUntilRef.current = Date.now() + 250;
             updateWorkspaceUi(
               (ui) => ({
                 ...ui,
@@ -2651,8 +2657,8 @@ function WorkspaceCanvas() {
                 zoom: viewport.zoom,
               }),
               true,
-            )
-          }
+            );
+          }}
         >
           <MiniMap pannable zoomable className="minimap" />
           <Controls position="bottom-left">
