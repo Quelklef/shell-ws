@@ -303,6 +303,7 @@ function toFlowEdge(
     target: edge.to.nodeId,
     targetHandle: formatHandleId(edge.to.port, edge.to.slot),
     type: "workspace",
+    selectable: true,
     animated: edge.buffering === "unbuffered",
     data: { buffering: edge.buffering, onDelete, onCycle },
     label: edge.buffering.replaceAll("_", " "),
