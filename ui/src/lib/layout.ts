@@ -1,5 +1,8 @@
 import type { WorkspaceEdge, WorkspaceNode } from "./types";
 
+const COLUMN_GAP = 140;
+const ROW_GAP = 40;
+
 function boundsCenter(nodes: WorkspaceNode[], positions?: Map<string, { x: number; y: number }>) {
   const left = Math.min(
     ...nodes.map((node) => positions?.get(node.id)?.x ?? node.position.x),
@@ -83,14 +86,20 @@ export function layoutSelectedNodes(
   }
 
   const nextPositions = new Map<string, { x: number; y: number }>();
-  for (const [columnIndex, columnNodes] of [...columns.entries()].sort((a, b) => a[0] - b[0])) {
+  let currentX = 140;
+  for (const [, columnNodes] of [...columns.entries()].sort((a, b) => a[0] - b[0])) {
     columnNodes.sort((left, right) => left.position.y - right.position.y);
-    columnNodes.forEach((node, rowIndex) => {
+    let currentY = 100;
+    let maxColumnWidth = 0;
+    for (const node of columnNodes) {
       nextPositions.set(node.id, {
-        x: 140 + columnIndex * 360,
-        y: 100 + rowIndex * 260,
+        x: currentX,
+        y: currentY,
       });
-    });
+      currentY += node.size.height + ROW_GAP;
+      maxColumnWidth = Math.max(maxColumnWidth, node.size.width);
+    }
+    currentX += maxColumnWidth + COLUMN_GAP;
   }
 
   const originalCenter = boundsCenter(selectedNodes);
