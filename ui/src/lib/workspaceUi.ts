@@ -1,4 +1,4 @@
-import type { Workspace } from "./types";
+import type { PreviewControlsLocation, Workspace } from "./types";
 
 const SIDEBAR_STORAGE_KEY = "shell-ws.sidebar-ui";
 
@@ -54,12 +54,13 @@ export function saveGlobalSidebarState(sidebars: WorkspaceSidebars) {
   window.localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify(sidebars));
 }
 
-export function normalizeWorkspaceUi(ui: { viewportX?: number; viewportY?: number; zoom?: number; sidebars?: Partial<WorkspaceSidebars> } | undefined): Workspace["ui"] {
+export function normalizeWorkspaceUi(ui: { viewportX?: number; viewportY?: number; zoom?: number; sidebars?: Partial<WorkspaceSidebars>; previewControlsLocation?: PreviewControlsLocation } | undefined): Workspace["ui"] {
   return {
     viewportX: typeof ui?.viewportX === "number" ? ui.viewportX : 0,
     viewportY: typeof ui?.viewportY === "number" ? ui.viewportY : 0,
     zoom: typeof ui?.zoom === "number" ? ui.zoom : 1,
     sidebars: normalizeWorkspaceSidebars(ui?.sidebars),
+    previewControlsLocation: normalizePreviewControlsLocation(ui?.previewControlsLocation),
   };
 }
 
@@ -82,4 +83,8 @@ function normalizeSidebarState(
     width: Math.max(SIDEBAR_MIN_WIDTH[id], Math.round(state?.width ?? SIDEBAR_DEFAULTS[id].width)),
     collapsed: state?.collapsed ?? SIDEBAR_DEFAULTS[id].collapsed,
   };
+}
+
+export function normalizePreviewControlsLocation(value: PreviewControlsLocation | undefined): PreviewControlsLocation {
+  return value === "floating" ? "floating" : "node";
 }

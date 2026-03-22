@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MIN_RESIZABLE_PANE_WIDTH, defaultPaneHeight, nextPaneSizes, paneHeight, previewPaneId } from "./paneLayout";
+import { MIN_RESIZABLE_PANE_WIDTH, defaultPaneHeight, nextPaneSizes, paneHeight, paneWidth, previewPaneId } from "./paneLayout";
 
 describe("paneLayout", () => {
   it("exposes a minimum resizable pane width", () => {
@@ -19,8 +19,14 @@ describe("paneLayout", () => {
   });
 
   it("reads and writes persisted pane heights", () => {
-    const uiState = nextPaneSizes(undefined, "script", 180);
+    const uiState = nextPaneSizes(undefined, "script", { height: 180 });
     expect(uiState.paneSizes?.script?.height).toBe(180);
     expect(paneHeight(uiState, "script")).toBe(180);
   });
+});
+
+
+it("persists pane widths independently", () => {
+  const ui = nextPaneSizes(undefined, "preview-stdout", { width: 240 });
+  expect(paneWidth(ui, "preview-stdout", 180)).toBe(240);
 });

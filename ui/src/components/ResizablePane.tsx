@@ -9,8 +9,10 @@ type ResizablePaneProps = {
   height: number;
   minHeight?: number;
   width: number;
+  minWidth?: number;
   className?: string;
-  onWidthChange: (width: number) => void;
+  widthBehavior?: "node" | "pane";
+  onWidthChange?: ((width: number) => void) | ((paneId: string, width: number) => void);
   onHeightChange: (paneId: string, height: number) => void;
   onLayoutChange?: () => void;
   children: ReactNode;
@@ -21,7 +23,9 @@ export default function ResizablePane({
   height,
   minHeight = 72,
   width,
+  minWidth = MIN_RESIZABLE_PANE_WIDTH,
   className,
+  widthBehavior = "node",
   onWidthChange,
   onHeightChange,
   onLayoutChange,
@@ -29,14 +33,17 @@ export default function ResizablePane({
 }: ResizablePaneProps) {
   const elementRef = useRef<HTMLDivElement | null>(null);
   const heightCommitTimerRef = useRef<number | null>(null);
+  const widthCommitTimerRef = useRef<number | null>(null);
   const widthSettleTimerRef = useRef<number | null>(null);
   const layoutFrameRef = useRef<number | null>(null);
   const observedHeightRef = useRef(height);
+  const observedWidthRef = useRef(width);
   const stableNodeWidthRef = useRef(width);
   const stablePaneWidthRef = useRef(width);
   const latestWidthRef = useRef(width);
   const latestHeightRef = useRef(height);
   const latestPaneIdRef = useRef(paneId);
+  const latestWidthBehaviorRef = useRef(widthBehavior);
   const latestOnWidthChangeRef = useRef(onWidthChange);
   const latestOnHeightChangeRef = useRef(onHeightChange);
   const latestOnLayoutChangeRef = useRef(onLayoutChange);
@@ -45,10 +52,11 @@ export default function ResizablePane({
     latestWidthRef.current = width;
     latestHeightRef.current = height;
     latestPaneIdRef.current = paneId;
+    latestWidthBehaviorRef.current = widthBehavior;
     latestOnWidthChangeRef.current = onWidthChange;
     latestOnHeightChangeRef.current = onHeightChange;
     latestOnLayoutChangeRef.current = onLayoutChange;
-  }, [height, onHeightChange, onLayoutChange, onWidthChange, paneId, width]);
+  }, [height, onHeightChange, onLayoutChange, onWidthChange, paneId, width, widthBehavior]);
 
   useLayoutEffect(() => {
     const element = elementRef.current;
@@ -56,12 +64,16 @@ export default function ResizablePane({
       return;
     }
     const expectedHeight = `${height}px`;
-    // Height is DOM-owned during a live resize. Only push React state back into the
-    // element once the persisted pane height catches up to what the browser already sized.
     if (Math.abs(observedHeightRef.current - height) < 1 && element.style.height !== expectedHeight) {
       element.style.height = expectedHeight;
     }
-  }, [height]);
+    if (widthBehavior === "pane") {
+      const expectedWidth = `${width}px`;
+      if (Math.abs(observedWidthRef.current - width) < 1 && element.style.width !== expectedWidth) {
+        element.style.width = expectedWidth;
+      }
+    }
+  }, [height, width, widthBehavior]);
 
   useEffect(() => {
     const element = elementRef.current;
@@ -80,42 +92,52 @@ export default function ResizablePane({
     };
 
     const observer = new ResizeObserver(() => {
-      // Native CSS resizing happens in the node's layout space, while React Flow zoom applies a
-      // transform afterward. Read offset sizes here so persisted pane/node dimensions stay in the
-      // same unscaled coordinate system as `node.size.width` and pane heights.
       const widthFromDom = Math.round(element.offsetWidth);
       const heightFromDom = Math.round(element.offsetHeight);
       const nodeWidthFromDom = Math.round(
         (element.closest(".react-flow__node") as HTMLElement | null)?.offsetWidth ?? latestWidthRef.current,
       );
       observedHeightRef.current = heightFromDom;
+      observedWidthRef.current = widthFromDom;
       notifyLayout();
 
-      if (!element.style.width) {
-        stableNodeWidthRef.current = nodeWidthFromDom;
-        stablePaneWidthRef.current = widthFromDom;
-      }
-
-      // Capture the width delta from the last stable, non-resizing layout and replay that delta
-      // during the native resize. Reading the live node width here would be wrong because the
-      // pane resizes immediately in the browser while the React-controlled node width still lags.
-      if (element.style.width) {
-        const paneWidth = Math.max(MIN_RESIZABLE_PANE_WIDTH, widthFromDom);
-        const nextWidth =
-          stableNodeWidthRef.current + (paneWidth - stablePaneWidthRef.current);
-        if (Math.abs(nextWidth - latestWidthRef.current) >= 1) {
-          latestOnWidthChangeRef.current(nextWidth);
+      if (latestWidthBehaviorRef.current === "node") {
+        if (!element.style.width) {
+          stableNodeWidthRef.current = nodeWidthFromDom;
+          stablePaneWidthRef.current = widthFromDom;
         }
-        if (widthSettleTimerRef.current !== null) {
-          window.clearTimeout(widthSettleTimerRef.current);
-        }
-        widthSettleTimerRef.current = window.setTimeout(() => {
-          if (elementRef.current) {
-            elementRef.current.style.width = "";
+        if (element.style.width) {
+          const paneWidth = Math.max(minWidth, widthFromDom);
+          const nextWidth = stableNodeWidthRef.current + (paneWidth - stablePaneWidthRef.current);
+          if (Math.abs(nextWidth - latestWidthRef.current) >= 1) {
+            (latestOnWidthChangeRef.current as ((width: number) => void) | undefined)?.(nextWidth);
           }
-          notifyLayout();
-          widthSettleTimerRef.current = null;
-        }, 140);
+          if (widthSettleTimerRef.current !== null) {
+            window.clearTimeout(widthSettleTimerRef.current);
+          }
+          widthSettleTimerRef.current = window.setTimeout(() => {
+            if (elementRef.current) {
+              elementRef.current.style.width = "";
+            }
+            notifyLayout();
+            widthSettleTimerRef.current = null;
+          }, 140);
+        }
+      } else {
+        const inlineWidth = Math.round(parseFloat(element.style.width || "0"));
+        const browserOwnsWidth = Math.abs(inlineWidth - latestWidthRef.current) >= 1;
+        if (browserOwnsWidth && Math.abs(widthFromDom - latestWidthRef.current) >= 1) {
+          if (widthCommitTimerRef.current !== null) {
+            window.clearTimeout(widthCommitTimerRef.current);
+          }
+          widthCommitTimerRef.current = window.setTimeout(() => {
+            (latestOnWidthChangeRef.current as ((paneId: string, width: number) => void) | undefined)?.(
+              latestPaneIdRef.current,
+              Math.max(minWidth, widthFromDom),
+            );
+            widthCommitTimerRef.current = null;
+          }, 140);
+        }
       }
 
       const inlineHeight = Math.round(parseFloat(element.style.height || "0"));
@@ -125,9 +147,6 @@ export default function ResizablePane({
           window.clearTimeout(heightCommitTimerRef.current);
         }
         heightCommitTimerRef.current = window.setTimeout(() => {
-          // Only persist heights when the browser wrote an inline size from an actual pane resize.
-          // Ordinary layout growth (preview toggles, flex sizing, CodeMirror settling) must not
-          // rewrite pane state or the observer will ratchet the node taller forever.
           if (heightFromDom > MAX_OBSERVED_PANE_HEIGHT) {
             console.error(
               `[ResizablePane] refusing to persist runaway height for ${latestPaneIdRef.current}: ${heightFromDom}px`,
@@ -148,6 +167,9 @@ export default function ResizablePane({
       if (heightCommitTimerRef.current !== null) {
         window.clearTimeout(heightCommitTimerRef.current);
       }
+      if (widthCommitTimerRef.current !== null) {
+        window.clearTimeout(widthCommitTimerRef.current);
+      }
       if (widthSettleTimerRef.current !== null) {
         window.clearTimeout(widthSettleTimerRef.current);
       }
@@ -155,13 +177,13 @@ export default function ResizablePane({
         window.cancelAnimationFrame(layoutFrameRef.current);
       }
     };
-  }, []);
+  }, [minWidth]);
 
   return (
     <div
       ref={elementRef}
       className={className}
-      style={{ minHeight, minWidth: MIN_RESIZABLE_PANE_WIDTH }}
+      style={{ minHeight, minWidth }}
       onWheelCapture={(event) => event.stopPropagation()}
     >
       {children}

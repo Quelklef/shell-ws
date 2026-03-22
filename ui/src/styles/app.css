@@ -1758,16 +1758,34 @@ textarea {
 }
 
 
-.port-preview-shell {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin-top: 2px;
-}
-
 .port-preview-tabs {
   display: flex;
   gap: 4px;
+  width: fit-content;
+  flex-wrap: wrap;
+}
+
+.port-preview-floating-shell {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  pointer-events: none;
+}
+
+.port-preview-floating-shell > * {
+  pointer-events: auto;
+}
+
+.port-preview-floating-panes {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 
 .port-preview-tab {
@@ -1852,6 +1870,10 @@ textarea {
   gap: 6px;
   padding: 10px;
   border-radius: 7px;
+}
+
+.port-preview-floating-pane {
+  width: auto;
 }
 
 .port-preview-body {

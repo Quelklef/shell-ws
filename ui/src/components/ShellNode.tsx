@@ -13,7 +13,7 @@ import { renderDisplay } from "../lib/format";
 import { ACTIONS } from "../lib/actionIcons";
 import { outputPortsForKind } from "../lib/portSchema";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
-import { paneHeight, previewPaneId } from "../lib/paneLayout";
+import { paneHeight, paneWidth, previewPaneId } from "../lib/paneLayout";
 import type {
   AutoRunConfig,
   ExecutionAction,
@@ -117,6 +117,7 @@ export default function ShellNode({ data }: NodeProps) {
   const [isEditingComment, setIsEditingComment] = useState(false);
   const [showFormulaHelp, setShowFormulaHelp] = useState(false);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
+  const previewControlsLocation = typedData.previewControlsLocation ?? "node";
   const getVisiblePreview = (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port];
   const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
@@ -129,11 +130,14 @@ export default function ShellNode({ data }: NodeProps) {
   const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
   const execArgs = model.args ?? [];
   const paneSizeSignature = useMemo(() => JSON.stringify(model.uiState?.paneSizes ?? {}), [model.uiState?.paneSizes]);
-  const handlePaneWidthChange = useCallback((width: number) => {
+  const handleNodePaneWidthChange = useCallback((width: number) => {
     typedData.onResizeWidth(model.id, width);
   }, [model.id, typedData]);
   const handlePaneHeightChange = useCallback((paneId: string, height: number) => {
     typedData.onResizePaneHeight(model.id, paneId, height);
+  }, [model.id, typedData]);
+  const handlePaneWidthChange = useCallback((paneId: string, width: number) => {
+    typedData.onResizePaneWidth(model.id, paneId, width);
   }, [model.id, typedData]);
   const handleLayoutChange = useCallback(() => {
     refreshNodeInternals(model.id);
@@ -145,13 +149,13 @@ export default function ShellNode({ data }: NodeProps) {
       height={paneHeight(model.uiState, paneId)}
       minHeight={minHeight}
       className={className}
-      onWidthChange={handlePaneWidthChange}
+      onWidthChange={handleNodePaneWidthChange}
       onHeightChange={handlePaneHeightChange}
       onLayoutChange={handleLayoutChange}
     >
       {children}
     </ResizablePane>
-  ), [handleLayoutChange, handlePaneHeightChange, handlePaneWidthChange, model.size.width, model.uiState]);
+  ), [handleLayoutChange, handleNodePaneWidthChange, handlePaneHeightChange, model.size.width, model.uiState]);
   const leftPorts = useMemo(() => {
     const ports: Array<{ key: string; port: PortKind; slot?: number; activeAt?: number }> = [];
     if (nodeHasInputPort(model.kind)) {
@@ -168,6 +172,86 @@ export default function ShellNode({ data }: NodeProps) {
     () => outputPortsForKind(model.kind).map((port) => ({ key: port, port, activeAt: runtime.portActivity[port] })),
     [model.kind, runtime.portActivity],
   );
+
+  const previewButtons = (
+    <div className="port-preview-tabs">
+      {previewTabs.map((port) => {
+        const isOpen = openPreviewTabs.includes(port);
+        const previewState = runtime.livePreviews?.[port] ?? runtime.previews?.[port];
+        const hasData = (previewState?.bytes.length ?? 0) > 0;
+        const portClass = port.startsWith("argv-") ? "argv" : port;
+        return (
+          <button
+            key={port}
+            type="button"
+            className={`port-preview-tab port-preview-tab-${portClass} nodrag nopan ${
+              isOpen ? "is-active" : ""
+            }`}
+            onClick={() => {
+              const nextTabs = isOpen
+                ? openPreviewTabs.filter((entry) => entry !== port)
+                : [...openPreviewTabs, port];
+              typedData.onUpdate(model.id, {
+                uiState: {
+                  ...(model.uiState ?? {}),
+                  activePreviewTab: null,
+                  openPreviewTabs: nextTabs,
+                },
+              });
+            }}
+          >
+            <span>{port}</span>
+            {hasData && <span className={`port-preview-dot port-preview-dot-${portClass}`} />}
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const floatingPreviewPanes = orderedOpenPreviewTabs.map((port) => {
+    const preview = getVisiblePreview(port);
+    const renderedPreview = preview
+      ? renderDisplay(preview.bytes)
+      : {
+          label: port,
+          content: <div className="display-empty">no materialized {port}</div>,
+        };
+    const paneId = previewPaneId(port);
+    return (
+      <ResizablePane
+        key={port}
+        paneId={paneId}
+        width={paneWidth(model.uiState, paneId, model.size.width)}
+        height={paneHeight(model.uiState, paneId)}
+        minWidth={180}
+        minHeight={96}
+        className="resizable-pane port-preview-pane port-preview-floating-pane nodrag nopan"
+        widthBehavior="pane"
+        onWidthChange={handlePaneWidthChange}
+        onHeightChange={handlePaneHeightChange}
+        onLayoutChange={handleLayoutChange}
+      >
+        <div className="port-preview-header">
+          <div className="display-label">
+            {port} · {renderedPreview.label}
+          </div>
+          <button
+            type="button"
+            className="port-preview-copy nodrag nopan"
+            title={`copy ${port}`}
+            aria-label={`copy ${port}`}
+            onClick={() => {
+              const text = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
+              void navigator.clipboard?.writeText(text);
+            }}
+          >
+            copy
+          </button>
+        </div>
+        <div className="port-preview-body">{renderedPreview.content}</div>
+      </ResizablePane>
+    );
+  });
 
   useLayoutEffect(() => {
     const element = commentRef.current;
@@ -613,82 +697,17 @@ export default function ShellNode({ data }: NodeProps) {
           <AutoRunControls config={autoRun} onChange={(next) => typedData.onToggleAutorun(model.id, next)} />
         )}
 
-        <div className="port-preview-shell">
-          <div className="port-preview-tabs">
-            {previewTabs.map((port) => {
-              const isOpen = openPreviewTabs.includes(port);
-              const previewState = runtime.livePreviews?.[port] ?? runtime.previews?.[port];
-              const hasData = (previewState?.bytes.length ?? 0) > 0;
-              const portClass = port.startsWith("argv-") ? "argv" : port;
-              return (
-                <button
-                  key={port}
-                  type="button"
-                  className={`port-preview-tab port-preview-tab-${portClass} nodrag nopan ${
-                    isOpen ? "is-active" : ""
-                  }`}
-                  onClick={() => {
-                    const nextTabs = isOpen
-                      ? openPreviewTabs.filter((entry) => entry !== port)
-                      : [...openPreviewTabs, port];
-                    typedData.onUpdate(model.id, {
-                      uiState: {
-                        ...(model.uiState ?? {}),
-                        activePreviewTab: null,
-                        openPreviewTabs: nextTabs,
-                      },
-                    });
-                  }}
-                >
-                  <span>{port}</span>
-                  {hasData && <span className={`port-preview-dot port-preview-dot-${portClass}`} />}
-                </button>
-              );
-            })}
-          </div>
-          {orderedOpenPreviewTabs.map((port) => {
-            const preview = getVisiblePreview(port);
-            const renderedPreview = preview
-              ? renderDisplay(preview.bytes)
-              : {
-                  label: port,
-                  content: <div className="display-empty">no materialized {port}</div>,
-                };
-            return (
-              <ResizablePane
-                key={port}
-                paneId={previewPaneId(port)}
-                width={model.size.width}
-                height={paneHeight(model.uiState, previewPaneId(port))}
-                minHeight={96}
-                className="resizable-pane port-preview-pane nodrag nopan"
-                onWidthChange={handlePaneWidthChange}
-                onHeightChange={handlePaneHeightChange}
-                onLayoutChange={handleLayoutChange}
-              >
-                <div className="port-preview-header">
-                  <div className="display-label">
-                    {port} · {renderedPreview.label}
-                  </div>
-                  <button
-                    type="button"
-                    className="port-preview-copy nodrag nopan"
-                    title={`copy ${port}`}
-                    aria-label={`copy ${port}`}
-                    onClick={() => {
-                      const text = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
-                      void navigator.clipboard?.writeText(text);
-                    }}
-                  >
-                    copy
-                  </button>
-                </div>
-                <div className="port-preview-body">{renderedPreview.content}</div>
-              </ResizablePane>
-            );
-          })}
-        </div>
+        {previewControlsLocation === "node" && previewButtons}
       </div>
+
+      {(previewControlsLocation === "floating" || floatingPreviewPanes.length > 0) && (
+        <div className="port-preview-floating-shell">
+          {previewControlsLocation === "floating" && previewButtons}
+          {floatingPreviewPanes.length > 0 && (
+            <div className="port-preview-floating-panes">{floatingPreviewPanes}</div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

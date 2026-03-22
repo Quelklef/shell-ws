@@ -328,6 +328,7 @@ pub struct NodeUiState {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PaneSizeState {
+    pub width: Option<f64>,
     pub height: Option<f64>,
 }
 
@@ -363,6 +364,8 @@ pub struct WorkspaceUi {
     pub zoom: f64,
     #[serde(default)]
     pub sidebars: WorkspaceSidebars,
+    #[serde(default)]
+    pub preview_controls_location: PreviewControlsLocation,
 }
 
 impl Default for WorkspaceUi {
@@ -372,8 +375,17 @@ impl Default for WorkspaceUi {
             viewport_y: 0.0,
             zoom: default_zoom(),
             sidebars: WorkspaceSidebars::default(),
+            preview_controls_location: PreviewControlsLocation::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PreviewControlsLocation {
+    #[default]
+    Node,
+    Floating,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -705,6 +717,7 @@ mod tests {
 
         assert_eq!(workspace.ui.sidebars.workspaces.width, 220.0);
         assert!(!workspace.ui.sidebars.tuckspace.collapsed);
+        assert_eq!(workspace.ui.preview_controls_location, super::PreviewControlsLocation::Node);
     }
 
     #[test]

@@ -21,6 +21,14 @@ export function defaultPaneHeight(paneId: string) {
   return DEFAULT_PANE_HEIGHTS[paneId] ?? 112;
 }
 
+export function paneWidth(uiState: NodeUiState | null | undefined, paneId: string, fallback: number) {
+  const persisted = uiState?.paneSizes?.[paneId]?.width;
+  if (typeof persisted === "number" && Number.isFinite(persisted) && persisted > 0) {
+    return Math.round(Math.max(MIN_RESIZABLE_PANE_WIDTH, persisted));
+  }
+  return Math.round(Math.max(MIN_RESIZABLE_PANE_WIDTH, fallback));
+}
+
 export function paneHeight(uiState: NodeUiState | null | undefined, paneId: string) {
   const persisted = uiState?.paneSizes?.[paneId]?.height;
   if (typeof persisted === "number" && Number.isFinite(persisted) && persisted > 0) {
@@ -32,7 +40,7 @@ export function paneHeight(uiState: NodeUiState | null | undefined, paneId: stri
 export function nextPaneSizes(
   uiState: NodeUiState | null | undefined,
   paneId: string,
-  height: number,
+  size: { width?: number; height?: number },
 ): NodeUiState {
   return {
     ...(uiState ?? {}),
@@ -40,7 +48,8 @@ export function nextPaneSizes(
       ...(uiState?.paneSizes ?? {}),
       [paneId]: {
         ...(uiState?.paneSizes?.[paneId] ?? {}),
-        height,
+        ...(typeof size.width === "number" ? { width: size.width } : {}),
+        ...(typeof size.height === "number" ? { height: size.height } : {}),
       },
     },
   };

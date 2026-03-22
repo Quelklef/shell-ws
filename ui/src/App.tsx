@@ -77,6 +77,7 @@ import { missingConnectedInputs, missingOutputs, runtimePreviewsFromNode, materi
 import { outputPortsForKind, previewOutputPortsForKind } from "./lib/portSchema";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
+import { normalizePreviewControlsLocation } from "./lib/workspaceUi";
 import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
@@ -214,6 +215,7 @@ function syncNodeData(
   generation: Record<string, AiGenerationState>,
   handlers: ShellNodeActions,
   edges: FlowEdge[],
+  previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
 ) {
   return current.map((node) => ({
     ...node,
@@ -225,6 +227,7 @@ function syncNodeData(
       selectionPreview: false,
       argvSlots: computeArgvSlots(node.id, node.data.model.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.data.model.kind, edges),
+      previewControlsLocation,
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
       getActionReason: handlers.getActionReason,
@@ -236,6 +239,7 @@ function syncNodeData(
       onConvertKind: handlers.onConvertKind,
       onResizeWidth: handlers.onResizeWidth,
       onResizePaneHeight: handlers.onResizePaneHeight,
+      onResizePaneWidth: handlers.onResizePaneWidth,
     },
   }));
 }
@@ -246,9 +250,10 @@ function toFlowNode(
   generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight"
+    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
   >,
   edges: FlowEdge[],
+  previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
 ): FlowNode {
   return {
     id: node.id,
@@ -261,6 +266,7 @@ function toFlowNode(
       selectionPreview: false,
       argvSlots: computeArgvSlots(node.id, node.kind, edges),
       previewTabs: computePreviewTabs(node.id, node.kind, edges),
+      previewControlsLocation,
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
       getActionReason: handlers.getActionReason,
@@ -272,6 +278,7 @@ function toFlowNode(
       onConvertKind: handlers.onConvertKind,
       onResizeWidth: handlers.onResizeWidth,
       onResizePaneHeight: handlers.onResizePaneHeight,
+      onResizePaneWidth: handlers.onResizePaneWidth,
     },
     // Width stays explicit so the important panes can share one horizontal source of truth.
     // Height is DOM-owned and persisted later from React Flow's measured snapshot.
@@ -358,6 +365,7 @@ type ShellNodeActions = {
   onConvertKind: (nodeId: string, kind: Extract<NodeKind, "display" | "passthru">) => void;
   onResizeWidth: (nodeId: string, width: number) => void;
   onResizePaneHeight: (nodeId: string, paneId: string, height: number) => void;
+  onResizePaneWidth: (nodeId: string, paneId: string, width: number) => void;
 };
 
 type AutorunHandle = {
@@ -1206,7 +1214,27 @@ function WorkspaceCanvas() {
                     ...node.data,
                     model: {
                       ...node.data.model,
-                      uiState: nextPaneSizes(node.data.model.uiState, paneId, height),
+                      uiState: nextPaneSizes(node.data.model.uiState, paneId, { height }),
+                    },
+                  },
+                }
+              : node,
+          );
+          persistLayoutSoon(next, edgesRef.current);
+          return next;
+        });
+      },
+      onResizePaneWidth: (nodeId, paneId, width) => {
+        setNodes((current) => {
+          const next = current.map((node) =>
+            node.id === nodeId
+              ? {
+                  ...node,
+                  data: {
+                    ...node.data,
+                    model: {
+                      ...node.data.model,
+                      uiState: nextPaneSizes(node.data.model.uiState, paneId, { width }),
                     },
                   },
                 }
@@ -1273,7 +1301,7 @@ function WorkspaceCanvas() {
 
   useEffect(() => {
     setNodes((current) =>
-      syncNodeData(current, runtime, generationRef.current, handlers, edgesRef.current),
+      syncNodeData(current, runtime, generationRef.current, handlers, edgesRef.current, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
     );
   }, [edges, generation, handlers, runtime, setNodes]);
 
@@ -1567,7 +1595,7 @@ function WorkspaceCanvas() {
       setEdges((current) => {
         const next = applyEdgeChanges(changes, current);
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
         );
         const shouldPersist = changes.some(
           (change) => change.type !== "select",
@@ -1586,7 +1614,7 @@ function WorkspaceCanvas() {
       setEdges((current) => {
         const next = current.filter((edge) => edge.id !== edgeId);
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
         );
         persistSoon(nodesRef.current, next);
         return next;
@@ -1624,7 +1652,7 @@ function WorkspaceCanvas() {
           };
         });
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
         );
         persistSoon(nodesRef.current, next);
         return next;
@@ -1687,7 +1715,7 @@ function WorkspaceCanvas() {
       toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
     );
     const loadedNodes = loaded.nodes.map((node) =>
-      toFlowNode(node, loadedRuntime, {}, handlers, loadedEdges),
+      toFlowNode(node, loadedRuntime, {}, handlers, loadedEdges, loaded.ui.previewControlsLocation),
     );
 
     for (const handle of autorunRef.current.values()) {
@@ -1974,7 +2002,7 @@ function WorkspaceCanvas() {
           current,
         ) as FlowEdge[];
         setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next),
+          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
         );
         persistSoon(nodesRef.current, next);
         return next;
@@ -2012,6 +2040,7 @@ function WorkspaceCanvas() {
           generationRef.current,
           handlers,
           edgesRef.current,
+          workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
         );
         const next = [...current, nextNode];
         persistSoon(next, edgesRef.current);
@@ -2102,7 +2131,7 @@ function WorkspaceCanvas() {
     const nextEdges = [...edgesRef.current, ...restoredEdges];
     const preservedNodes = nodesRef.current.map((node) => ({ ...node, selected: false }));
     const restoredNodes = restoredModels.map((node) => ({
-      ...toFlowNode(node, nextRuntime, generationRef.current, handlers, nextEdges),
+      ...toFlowNode(node, nextRuntime, generationRef.current, handlers, nextEdges, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
       selected: true,
     }));
     const nextNodes = [...preservedNodes, ...restoredNodes];
@@ -2464,6 +2493,26 @@ function WorkspaceCanvas() {
                   <EyeIcon />
                 </button>
               </div>
+            </label>
+            <label className="sidebar-field">
+              <span className="sidebar-label">preview controls</span>
+              <select
+                className="sidebar-input"
+                value={workspaceMeta.ui.previewControlsLocation}
+                onChange={(event) =>
+                  updateWorkspaceUi(
+                    (ui) => ({
+                      ...ui,
+                      previewControlsLocation: normalizePreviewControlsLocation(event.target.value as any),
+                    }),
+                    true,
+                  )
+                }
+                disabled={workspaceSwitching}
+              >
+                <option value="node">buttons in node</option>
+                <option value="floating">buttons floating</option>
+              </select>
             </label>
           </section>
         </div>

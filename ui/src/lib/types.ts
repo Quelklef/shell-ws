@@ -35,6 +35,7 @@ export interface LegacyPersistedDisplayState {
 }
 
 export interface PaneSizeState {
+  width?: number;
   height?: number;
 }
 
@@ -71,6 +72,8 @@ export interface TuckedSubgraph {
   };
 }
 
+export type PreviewControlsLocation = "node" | "floating";
+
 export interface Workspace {
   id: string;
   name: string;
@@ -86,6 +89,7 @@ export interface Workspace {
     viewportY: number;
     zoom: number;
     sidebars: WorkspaceSidebars;
+    previewControlsLocation: PreviewControlsLocation;
   };
 }
 
@@ -235,6 +239,7 @@ export interface ShellNodeData extends Record<string, unknown> {
   runtime: NodeRuntimeState;
   argvSlots?: number[];
   previewTabs?: string[];
+  previewControlsLocation?: PreviewControlsLocation;
   generation?: AiGenerationState;
   selectionPreview?: boolean;
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
@@ -248,6 +253,7 @@ export interface ShellNodeData extends Record<string, unknown> {
   onConvertKind: (nodeId: string, kind: Extract<NodeKind, "display" | "passthru">) => void;
   onResizeWidth: (nodeId: string, width: number) => void;
   onResizePaneHeight: (nodeId: string, paneId: string, height: number) => void;
+  onResizePaneWidth: (nodeId: string, paneId: string, width: number) => void;
 }
 
 export interface FlowEdgeData extends Record<string, unknown> {

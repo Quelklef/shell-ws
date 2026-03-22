@@ -4,7 +4,9 @@ import { COLLAPSED_SIDEBAR_WIDTH, SIDEBAR_DEFAULTS, loadGlobalSidebarState, norm
 
 describe("workspaceUi", () => {
   it("fills in default sidebars", () => {
-    expect(normalizeWorkspaceUi({ viewportX: 1, viewportY: 2, zoom: 3 }).sidebars).toEqual(SIDEBAR_DEFAULTS);
+    const ui = normalizeWorkspaceUi({ viewportX: 1, viewportY: 2, zoom: 3 });
+    expect(ui.sidebars).toEqual(SIDEBAR_DEFAULTS);
+    expect(ui.previewControlsLocation).toBe("node");
   });
 
   it("clamps sidebar widths and preserves collapse state", () => {
