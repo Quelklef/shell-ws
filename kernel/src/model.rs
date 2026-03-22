@@ -41,8 +41,12 @@ impl Workspace {
     }
 
     pub fn example() -> Self {
+        let workspace_id = crate::id::encode_workspace_id();
+        let text_id = crate::id::encode_node_id(&NodeKind::Text);
+        let passthru_id = crate::id::encode_node_id(&NodeKind::Passthru);
+        let edge_id = crate::id::encode_edge_id();
         Self {
-            id: "default".to_string(),
+            id: workspace_id,
             name: "Shell WS".to_string(),
             created_at: 0,
             sort_order: 0,
@@ -50,7 +54,7 @@ impl Workspace {
             openai_api_key: Some(String::new()),
             nodes: vec![
                 Node {
-                    id: "text-1".to_string(),
+                    id: text_id.clone(),
                     kind: NodeKind::Text,
                     title: String::new(),
                     comment: String::new(),
@@ -72,7 +76,7 @@ impl Workspace {
                     ui_state: NodeUiState::default(),
                 },
                 Node {
-                    id: "passthru-1".to_string(),
+                    id: passthru_id.clone(),
                     kind: NodeKind::Passthru,
                     title: String::new(),
                     comment: String::new(),
@@ -95,14 +99,14 @@ impl Workspace {
                 },
             ],
             edges: vec![Edge {
-                id: "edge-1".to_string(),
+                id: edge_id,
                 from: PortRef {
-                    node_id: "text-1".to_string(),
+                    node_id: text_id,
                     port: PortKind::Stdout,
                     slot: None,
                 },
                 to: PortRef {
-                    node_id: "passthru-1".to_string(),
+                    node_id: passthru_id,
                     port: PortKind::Stdin,
                     slot: None,
                 },
@@ -183,7 +187,7 @@ pub struct Node {
     pub formula: Option<String>,
     #[serde(default)]
     pub materialized: NodeMaterialized,
-    #[serde(default, alias = "auto_run")]
+    #[serde(default)]
     pub auto_run: Option<AutoRunConfig>,
     #[serde(default)]
     pub ui_state: NodeUiState,
@@ -230,18 +234,14 @@ pub struct NodeMaterialized {
     pub outputs: HashMap<String, String>,
     #[serde(default)]
     pub last_exit_code: Option<i32>,
-    #[serde(default, rename = "values", skip_serializing)]
-    pub legacy_values: HashMap<String, MaterializedValue>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeKind {
-    #[serde(alias = "process")]
     Script,
     AiScript,
     Exec,
-    #[serde(alias = "cat")]
     File,
     Display,
     Passthru,
@@ -251,30 +251,22 @@ pub enum NodeKind {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
+#[serde(tag = "source", rename_all = "snake_case")]
 pub enum ExecArg {
-    LegacyLiteral(String),
-    Configured(ExecArgConfig),
+    Literal { value: String },
+    Argv { slot: usize },
 }
 
 impl ExecArg {
     pub fn resolve(&self, argv: &[String]) -> Result<String, String> {
         match self {
-            Self::LegacyLiteral(value) => Ok(value.clone()),
-            Self::Configured(ExecArgConfig::Literal { value }) => Ok(value.clone()),
-            Self::Configured(ExecArgConfig::Argv { slot }) => argv
+            Self::Literal { value } => Ok(value.clone()),
+            Self::Argv { slot } => argv
                 .get(slot.saturating_sub(1))
                 .cloned()
                 .ok_or_else(|| format!("missing argv-{slot} for exec argument")),
         }
     }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(tag = "source", rename_all = "snake_case")]
-pub enum ExecArgConfig {
-    Literal { value: String },
-    Argv { slot: usize },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -310,7 +302,7 @@ pub enum PortKind {
 #[serde(rename_all = "snake_case")]
 pub enum BufferingMode {
     Unbuffered,
-    #[serde(rename = "line_or_1024", alias = "line_or1024")]
+    #[serde(rename = "line_or_1024")]
     LineOr1024,
     OnComplete,
 }
@@ -325,10 +317,8 @@ impl Default for BufferingMode {
 #[serde(rename_all = "snake_case")]
 pub enum ExecutionAction {
     PullInputs,
-    #[serde(alias = "pull")]
     PullRun,
     Rerun,
-    #[serde(alias = "push")]
     RerunPush,
     Repush,
 }
@@ -343,23 +333,13 @@ pub struct AutoRunConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
-pub struct MaterializedValue {
-    pub data_base64: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
 pub struct NodeUiState {
-    #[serde(default)]
-    pub active_preview_tab: Option<String>,
     #[serde(default)]
     pub open_preview_tabs: Vec<String>,
     #[serde(default)]
     pub show_auto_controls: bool,
     #[serde(default)]
     pub editor_heights: HashMap<String, f64>,
-    #[serde(default)]
-    pub previews: HashMap<String, LegacyPersistedDisplayState>,
     #[serde(default)]
     pub pane_sizes: HashMap<String, PaneSizeState>,
 }
@@ -369,14 +349,6 @@ pub struct NodeUiState {
 pub struct PaneSizeState {
     pub width: Option<f64>,
     pub height: Option<f64>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct LegacyPersistedDisplayState {
-    pub data_base64: String,
-    #[serde(default)]
-    pub completed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -422,7 +394,7 @@ impl Default for WorkspaceUi {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewControlsLocation {
-        Node,
+    Node,
     #[default]
     Floating,
 }
@@ -552,142 +524,6 @@ pub struct WorkspaceSummary {
     pub sort_order: u64,
 }
 
-pub fn sanitize_workspace_json_value(value: &mut serde_json::Value) {
-    let Some(obj) = value.as_object_mut() else {
-        return;
-    };
-    sanitize_graph_container(obj);
-    if let Some(tuckspace) = obj.get_mut("tuckspace") {
-        sanitize_tuckspace_json_value(tuckspace);
-    }
-}
-
-pub fn sanitize_tuckspace_json_value(value: &mut serde_json::Value) {
-    if let Some(tuckspace) = value.as_array_mut() {
-        for item in tuckspace.iter_mut() {
-            if let Some(item_obj) = item.as_object_mut() {
-                sanitize_graph_container(item_obj);
-            }
-        }
-    }
-}
-
-fn sanitize_graph_container(obj: &mut serde_json::Map<String, serde_json::Value>) {
-    const REMOVED: &[&str] = &[
-        "tee",
-        "merge_concat",
-        "merge_line",
-        "merge_byte",
-        "merge_shell",
-    ];
-    let mut removed_ids = std::collections::HashSet::new();
-    if let Some(nodes) = obj
-        .get_mut("nodes")
-        .and_then(serde_json::Value::as_array_mut)
-    {
-        for node in nodes.iter_mut() {
-            if let Some(node_obj) = node.as_object_mut() {
-                merge_legacy_materialized_values(node_obj);
-            }
-        }
-        nodes.retain(|node| {
-            let Some(kind) = node.get("kind").and_then(serde_json::Value::as_str) else {
-                return true;
-            };
-            if REMOVED.contains(&kind) {
-                if let Some(id) = node.get("id").and_then(serde_json::Value::as_str) {
-                    removed_ids.insert(id.to_string());
-                }
-                return false;
-            }
-            true
-        });
-    }
-    if let Some(edges) = obj
-        .get_mut("edges")
-        .and_then(serde_json::Value::as_array_mut)
-    {
-        edges.retain(|edge| {
-            let from = edge
-                .get("from")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|port| port.get("nodeId").or_else(|| port.get("node_id")))
-                .and_then(serde_json::Value::as_str);
-            let to = edge
-                .get("to")
-                .and_then(serde_json::Value::as_object)
-                .and_then(|port| port.get("nodeId").or_else(|| port.get("node_id")))
-                .and_then(serde_json::Value::as_str);
-            let is_legacy_unslotted_argv = edge
-                .get("to")
-                .and_then(serde_json::Value::as_object)
-                .map(|port| {
-                    port.get("port").and_then(serde_json::Value::as_str) == Some("argv")
-                        && !port.contains_key("slot")
-                })
-                .unwrap_or(false);
-            match (from, to) {
-                (Some(from), Some(to)) => {
-                    !is_legacy_unslotted_argv
-                        && !removed_ids.contains(from)
-                        && !removed_ids.contains(to)
-                }
-                _ => true,
-            }
-        });
-    }
-}
-
-fn merge_legacy_materialized_values(node: &mut serde_json::Map<String, serde_json::Value>) {
-    let mut materialized = node
-        .remove("materialized")
-        .and_then(|value| value.as_object().cloned())
-        .unwrap_or_default();
-
-    let mut merged = materialized
-        .remove("values")
-        .and_then(|value| value.as_object().cloned())
-        .unwrap_or_default();
-
-    if let Some(values) = node
-        .remove("materializedValues")
-        .and_then(|value| value.as_object().cloned())
-    {
-        merged.extend(values);
-    }
-
-    for legacy_key in ["materializedInputs", "materialized_inputs"] {
-        if let Some(values) = node
-            .remove(legacy_key)
-            .and_then(|value| value.as_object().cloned())
-        {
-            merged.extend(values);
-        }
-    }
-    for legacy_key in ["materializedOutputs", "materialized_outputs"] {
-        if let Some(values) = node
-            .remove(legacy_key)
-            .and_then(|value| value.as_object().cloned())
-        {
-            merged.extend(values);
-        }
-    }
-
-    let last_exit_code = materialized
-        .remove("lastExitCode")
-        .or_else(|| node.remove("lastExitCode"));
-
-    if !merged.is_empty() {
-        materialized.insert("values".to_string(), serde_json::Value::Object(merged));
-    }
-    if let Some(last_exit_code) = last_exit_code {
-        materialized.insert("lastExitCode".to_string(), last_exit_code);
-    }
-    if !materialized.is_empty() {
-        node.insert("materialized".to_string(), serde_json::Value::Object(materialized));
-    }
-}
-
 pub fn default_shell() -> String {
     "bash".to_string()
 }
@@ -747,22 +583,8 @@ mod tests {
         assert_eq!(value, "\"line_or_1024\"");
 
         let parsed: super::BufferingMode =
-            serde_json::from_str("\"line_or1024\"").expect("deserialize legacy mode");
+            serde_json::from_str("\"line_or_1024\"").expect("deserialize mode");
         assert_eq!(parsed, super::BufferingMode::LineOr1024);
-    }
-
-    #[test]
-    fn legacy_process_kind_deserializes_as_script() {
-        let kind: super::NodeKind =
-            serde_json::from_str("\"process\"").expect("deserialize legacy process kind");
-        assert_eq!(kind, super::NodeKind::Script);
-    }
-
-    #[test]
-    fn legacy_cat_kind_deserializes_as_file() {
-        let kind: super::NodeKind =
-            serde_json::from_str("\"cat\"").expect("deserialize legacy cat kind");
-        assert_eq!(kind, super::NodeKind::File);
     }
 
     #[test]
@@ -785,7 +607,10 @@ mod tests {
 
         assert_eq!(workspace.ui.sidebars.workspaces.width, 220.0);
         assert!(!workspace.ui.sidebars.tuckspace.collapsed);
-        assert_eq!(workspace.ui.preview_controls_location, super::PreviewControlsLocation::Floating);
+        assert_eq!(
+            workspace.ui.preview_controls_location,
+            super::PreviewControlsLocation::Floating
+        );
     }
 
     #[test]
@@ -801,71 +626,6 @@ mod tests {
 
         assert_eq!(workspace.cwd, default_cwd());
         assert_eq!(workspace.openai_api_key.unwrap_or_default(), "");
-    }
-
-    #[test]
-    fn sanitize_workspace_json_merges_legacy_materialized_maps() {
-        let mut value = serde_json::json!({
-            "id": "w",
-            "name": "w",
-            "cwd": "/tmp",
-            "nodes": [
-                {
-                    "id": "script-1",
-                    "kind": "script",
-                    "title": "",
-                    "comment": "",
-                    "position": {"x": 0, "y": 0},
-                    "size": {"width": 1, "height": 1},
-                    "materializedInputs": {"stdin": {"dataBase64": "aGVsbG8="}},
-                    "materialized_outputs": {"stdout": {"dataBase64": "d29ybGQ="}}
-                }
-            ],
-            "edges": [],
-            "ui": {}
-        });
-        super::sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace =
-            serde_json::from_value(value).expect("deserialize sanitized workspace");
-        assert_eq!(
-            workspace.nodes[0]
-                .materialized
-                .legacy_values
-                .get("stdin")
-                .map(|value| value.data_base64.as_str()),
-            Some("aGVsbG8=")
-        );
-        assert_eq!(
-            workspace.nodes[0]
-                .materialized
-                .legacy_values
-                .get("stdout")
-                .map(|value| value.data_base64.as_str()),
-            Some("d29ybGQ=")
-        );
-    }
-
-    #[test]
-    fn sanitize_workspace_json_drops_removed_node_kinds() {
-        let mut value = serde_json::json!({
-            "id": "w",
-            "name": "w",
-            "cwd": "/tmp",
-            "nodes": [
-                { "id": "tee-1", "kind": "tee", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1} },
-                { "id": "text-1", "kind": "text", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1}, "text": "" }
-            ],
-            "edges": [
-                { "id": "e1", "from": {"nodeId": "text-1", "port": "stdout"}, "to": {"nodeId": "tee-1", "port": "stdin"}, "buffering": "line_or_1024" }
-            ],
-            "ui": {}
-        });
-        super::sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace =
-            serde_json::from_value(value).expect("deserialize sanitized workspace");
-        assert_eq!(workspace.nodes.len(), 1);
-        assert_eq!(workspace.nodes[0].id, "text-1");
-        assert!(workspace.edges.is_empty());
     }
 
     #[test]
@@ -902,13 +662,6 @@ mod tests {
                 .get("text")
                 .and_then(|value| value.height),
             Some(381.0)
-        );
-
-        let serialized =
-            serde_json::to_value(&workspace).expect("serialize workspace with pane sizes");
-        assert_eq!(
-            serialized["nodes"][0]["uiState"]["paneSizes"]["text"]["height"],
-            serde_json::json!(381.0)
         );
     }
 
@@ -950,86 +703,6 @@ mod tests {
         assert_eq!(workspace.tuckspace.len(), 1);
         assert_eq!(workspace.tuckspace[0].name, "Saved");
         assert!(workspace.tuckspace[0].user_named);
-        let serialized =
-            serde_json::to_value(&workspace).expect("serialize workspace with tuckspace");
-        assert_eq!(
-            serialized["tuckspace"][0]["name"],
-            serde_json::json!("Saved")
-        );
-    }
-
-    #[test]
-    fn sanitize_tuckspace_json_sanitizes_tucked_graphs() {
-        let mut value = serde_json::json!([
-            {
-                "id": "saved-1",
-                "name": "Saved",
-                "nodes": [
-                    {
-                        "id": "cat-1",
-                        "kind": "cat",
-                        "title": "",
-                        "comment": "",
-                        "position": { "x": 0.0, "y": 0.0 },
-                        "size": { "width": 100.0, "height": 100.0 }
-                    },
-                    {
-                        "id": "tee-1",
-                        "kind": "tee",
-                        "title": "",
-                        "comment": "",
-                        "position": { "x": 0.0, "y": 0.0 },
-                        "size": { "width": 100.0, "height": 100.0 }
-                    }
-                ],
-                "edges": [
-                    {
-                        "id": "edge-1",
-                        "from": { "nodeId": "cat-1", "port": "stdout" },
-                        "to": { "nodeId": "tee-1", "port": "stdin" }
-                    }
-                ]
-            }
-        ]);
-
-        super::sanitize_tuckspace_json_value(&mut value);
-        let tuckspace: Vec<super::TuckedSubgraph> =
-            serde_json::from_value(value).expect("deserialize sanitized tuckspace");
-        assert_eq!(tuckspace[0].nodes.len(), 1);
-        assert_eq!(tuckspace[0].nodes[0].kind, super::NodeKind::File);
-        assert!(tuckspace[0].edges.is_empty());
-    }
-
-    #[test]
-    fn sanitize_workspace_json_sanitizes_tuckspace_graphs() {
-        let mut value = serde_json::json!({
-            "id": "w",
-            "name": "w",
-            "cwd": "/tmp",
-            "nodes": [],
-            "edges": [],
-            "tuckspace": [
-                {
-                    "id": "t1",
-                    "name": "Saved",
-                    "nodes": [
-                        { "id": "tee-1", "kind": "tee", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1} },
-                        { "id": "cat-1", "kind": "cat", "title": "", "comment": "", "position": {"x":0,"y":0}, "size": {"width":1,"height":1}, "text": "" }
-                    ],
-                    "edges": [
-                        { "id": "e1", "from": {"nodeId": "cat-1", "port": "stdout"}, "to": {"nodeId": "tee-1", "port": "stdin"}, "buffering": "line_or_1024" }
-                    ],
-                    "topologyPreview": {"nodes": [], "edges": []}
-                }
-            ],
-            "ui": {}
-        });
-        super::sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace =
-            serde_json::from_value(value).expect("deserialize sanitized tuckspace workspace");
-        assert_eq!(workspace.tuckspace[0].nodes.len(), 1);
-        assert_eq!(workspace.tuckspace[0].nodes[0].kind, super::NodeKind::File);
-        assert!(workspace.tuckspace[0].edges.is_empty());
     }
 
     #[test]
@@ -1044,18 +717,8 @@ mod tests {
 
         let event: ClientEvent = serde_json::from_value(payload).expect("deserialize run event");
         match event {
-            ClientEvent::RunNode {
-                workspace,
-                materialized_output_store,
-                node_id,
-                action,
-            } => {
-                assert!(materialized_output_store.is_empty());
-                assert_eq!(workspace.id, "default");
-                assert_eq!(node_id, "text-1");
-                assert_eq!(action, ExecutionAction::RerunPush);
-            }
-            _ => panic!("expected run_node event"),
+            ClientEvent::RunNode { action, .. } => assert_eq!(action, ExecutionAction::RerunPush),
+            _ => panic!("unexpected client event"),
         }
     }
 }

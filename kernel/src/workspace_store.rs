@@ -2,15 +2,12 @@ use std::path::{Path, PathBuf};
 
 use tokio::fs;
 
-use crate::id::normalize_workspace_ids;
-use crate::model::{sanitize_workspace_json_value, Workspace, WorkspaceSummary};
+use crate::model::{Workspace, WorkspaceSummary};
 
 #[derive(Clone)]
 pub struct WorkspaceStore {
     base_dir: PathBuf,
 }
-
-const RESERVED_FILENAMES: &[&str] = &["tuckspace.json"];
 
 impl WorkspaceStore {
     pub async fn new(base_dir: impl AsRef<Path>) -> Result<Self, std::io::Error> {
@@ -21,39 +18,7 @@ impl WorkspaceStore {
             let workspace = Workspace::example();
             store.save(&workspace.id, &workspace).await?;
         }
-        store.migrate_ids().await?;
         Ok(store)
-    }
-
-    async fn migrate_ids(&self) -> Result<(), std::io::Error> {
-        let mut entries = fs::read_dir(&self.base_dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json")
-                || path.file_name().and_then(|name| name.to_str()).is_some_and(|name| RESERVED_FILENAMES.contains(&name))
-            {
-                continue;
-            }
-            let content = fs::read(&path).await?;
-            let mut value: serde_json::Value = serde_json::from_slice(&content).map_err(std::io::Error::other)?;
-            sanitize_workspace_json_value(&mut value);
-            let mut workspace: Workspace = serde_json::from_value(value).map_err(std::io::Error::other)?;
-            let original_id = workspace.id.clone();
-            let changed = normalize_workspace_ids(&mut workspace);
-            let file_id = path.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default().to_string();
-            if changed || workspace.id != file_id {
-                self.save(&workspace.id, &workspace).await?;
-                if file_id != workspace.id && fs::try_exists(&path).await? {
-                    fs::remove_file(&path).await?;
-                }
-            } else if original_id != file_id {
-                self.save(&workspace.id, &workspace).await?;
-                if fs::try_exists(&path).await? {
-                    fs::remove_file(&path).await?;
-                }
-            }
-        }
-        Ok(())
     }
 
     pub async fn list(&self) -> Result<Vec<WorkspaceSummary>, std::io::Error> {
@@ -61,19 +26,12 @@ impl WorkspaceStore {
         let mut workspaces = Vec::new();
         while let Some(entry) = entries.next_entry().await? {
             let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("json")
-                || path.file_name().and_then(|name| name.to_str()).is_some_and(|name| RESERVED_FILENAMES.contains(&name))
-            {
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                 continue;
             }
             let content = fs::read(&path).await?;
-            let mut value: serde_json::Value =
-                serde_json::from_slice(&content).unwrap_or_else(|_| {
-                    serde_json::to_value(Workspace::example()).expect("workspace example json")
-                });
-            sanitize_workspace_json_value(&mut value);
             let workspace: Workspace =
-                serde_json::from_value(value).unwrap_or_else(|_| Workspace::example());
+                serde_json::from_slice(&content).map_err(std::io::Error::other)?;
             workspaces.push(WorkspaceSummary {
                 id: workspace.id,
                 name: workspace.name,
@@ -81,10 +39,14 @@ impl WorkspaceStore {
                 sort_order: workspace.sort_order,
             });
         }
-        workspaces.sort_by(|left, right| left.sort_order.cmp(&right.sort_order).then_with(|| left.created_at.cmp(&right.created_at)).then_with(|| left.name.cmp(&right.name)));
+        workspaces.sort_by(|left, right| {
+            left.sort_order
+                .cmp(&right.sort_order)
+                .then_with(|| left.created_at.cmp(&right.created_at))
+                .then_with(|| left.name.cmp(&right.name))
+        });
         Ok(workspaces)
     }
-
 
     pub async fn load_all(&self) -> Result<Vec<Workspace>, std::io::Error> {
         let summaries = self.list().await?;
@@ -98,11 +60,7 @@ impl WorkspaceStore {
     pub async fn load(&self, id: &str) -> Result<Workspace, std::io::Error> {
         let path = self.path_for(id);
         let content = fs::read(path).await?;
-        let mut value: serde_json::Value =
-            serde_json::from_slice(&content).map_err(std::io::Error::other)?;
-        sanitize_workspace_json_value(&mut value);
-        let workspace: Workspace = serde_json::from_value(value).map_err(std::io::Error::other)?;
-        Ok(workspace)
+        serde_json::from_slice(&content).map_err(std::io::Error::other)
     }
 
     pub async fn save(&self, id: &str, workspace: &Workspace) -> Result<(), std::io::Error> {
@@ -139,7 +97,12 @@ impl WorkspaceStore {
             .enumerate()
             .map(|(index, id)| (id.as_str(), index))
             .collect::<std::collections::HashMap<_, _>>();
-        workspaces.sort_by_key(|workspace| index_by_id.get(workspace.id.as_str()).copied().unwrap_or(usize::MAX));
+        workspaces.sort_by_key(|workspace| {
+            index_by_id
+                .get(workspace.id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         for (index, workspace) in workspaces.iter_mut().enumerate() {
             workspace.sort_order = index as u64;
             self.save(&workspace.id, workspace).await?;

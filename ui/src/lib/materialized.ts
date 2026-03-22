@@ -1,14 +1,12 @@
 import type {
   DisplayState,
   FlowEdge,
-  MaterializedValue,
   MaterializedOutputStore,
   NodeRuntimeState,
   PortKind,
   WorkspaceNode,
 } from "./types";
 import { outputPortsForKind } from "./portSchema";
-import { fromBase64, toBase64 } from "./utils";
 import { resolveNodeMaterializedValue } from "./materializedOutputs";
 
 export function isInputPreviewKey(key: string) {
@@ -19,41 +17,16 @@ export function isOutputPreviewKey(key: string) {
   return key === "stdout" || key === "stderr";
 }
 
-export function deserializeMaterializedValue(value?: MaterializedValue | null): DisplayState | undefined {
-  if (!value) {
-    return undefined;
-  }
-  return {
-    bytes: fromBase64(value.dataBase64),
-    completed: true,
-  };
-}
-
-export function serializeMaterializedValue(state?: { bytes: Uint8Array }): MaterializedValue | undefined {
-  if (!state) {
-    return undefined;
-  }
-  return {
-    dataBase64: toBase64(state.bytes),
-  };
-}
-
 export function runtimePreviewsFromNode(node: WorkspaceNode, store: MaterializedOutputStore) {
   const previews: Record<string, DisplayState> = {};
   const keys = new Set<string>([
     ...Object.keys(node.materialized?.inputs ?? {}),
     ...Object.keys(node.materialized?.outputs ?? {}),
-    ...Object.keys(node.materialized?.values ?? {}),
   ]);
   for (const key of keys) {
     const resolved = resolveNodeMaterializedValue(node, key, store);
     if (resolved) {
       previews[key] = { bytes: resolved, completed: true };
-      continue;
-    }
-    const legacy = deserializeMaterializedValue(node.materialized?.values?.[key]);
-    if (legacy) {
-      previews[key] = legacy;
     }
   }
   return Object.keys(previews).length > 0 ? previews : undefined;

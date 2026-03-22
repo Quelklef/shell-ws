@@ -171,56 +171,6 @@ export function resolveNodeMaterializedValue(node: WorkspaceNode, key: string, s
 }
 
 
-export function migrateLegacyNodeMaterialized(node: WorkspaceNode, store: MaterializedOutputStore) {
-  const legacyValues = node.materialized?.values ?? {};
-  if (Object.keys(legacyValues).length === 0) {
-    return { node, store, changed: false };
-  }
-  let nextStore = store;
-  let nextNode: WorkspaceNode = {
-    ...node,
-    materialized: emptyNodeMaterialized(node.materialized),
-  };
-  let changed = false;
-  for (const port of ["stdout", "stderr"] as const) {
-    if (nextNode.materialized?.outputs?.[port]) {
-      continue;
-    }
-    const value = legacyValues[port];
-    if (!value) {
-      continue;
-    }
-    const entry = createMatOutEntry(fromBase64(value.dataBase64), {
-      execId: `migrated-${node.id}`,
-      nodeId: node.id,
-      port,
-    }, { nodeId: node.id, key: port });
-    nextStore = {
-      ...nextStore,
-      [entry.id]: entry.entry,
-    };
-    nextNode = {
-      ...nextNode,
-      materialized: {
-        ...(nextNode.materialized ?? emptyNodeMaterialized()),
-        outputs: {
-          ...(nextNode.materialized?.outputs ?? {}),
-          [port]: entry.id,
-        },
-      },
-    };
-    changed = true;
-  }
-  nextNode = {
-    ...nextNode,
-    materialized: {
-      ...(nextNode.materialized ?? emptyNodeMaterialized()),
-      values: undefined,
-    },
-  };
-  return { node: nextNode, store: nextStore, changed: changed || Object.keys(legacyValues).length > 0 };
-}
-
 export function createMatOutEntry(
   bytes: Uint8Array,
   producedBy: MatOutEntry["producedBy"],

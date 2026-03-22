@@ -11,7 +11,6 @@ async fn workspace_store_bootstraps_default_workspace() {
     assert!(workspace.id.starts_with("workspace-"));
 }
 
-
 #[tokio::test]
 async fn workspace_store_lists_and_reorders_by_sort_order() {
     let temp_dir = tempfile::tempdir().expect("tempdir");
@@ -31,22 +30,29 @@ async fn workspace_store_lists_and_reorders_by_sort_order() {
 
     let listed = store.list().await.expect("list before reorder");
     let bootstrapped_id = listed[0].id.clone();
-    assert_eq!(listed.iter().map(|workspace| workspace.id.as_str()).collect::<Vec<_>>(), vec![bootstrapped_id.as_str(), "alpha", "beta"]);
+    assert_eq!(
+        listed
+            .iter()
+            .map(|workspace| workspace.id.as_str())
+            .collect::<Vec<_>>(),
+        vec![bootstrapped_id.as_str(), "alpha", "beta"]
+    );
 
     store
-        .reorder(&["beta".to_string(), bootstrapped_id.clone(), "alpha".to_string()])
+        .reorder(&[
+            "beta".to_string(),
+            bootstrapped_id.clone(),
+            "alpha".to_string(),
+        ])
         .await
         .expect("reorder workspaces");
 
     let reordered = store.list().await.expect("list after reorder");
-    assert_eq!(reordered.iter().map(|workspace| workspace.id.as_str()).collect::<Vec<_>>(), vec!["beta", bootstrapped_id.as_str(), "alpha"]);
-}
-
-#[tokio::test]
-async fn workspace_store_ignores_reserved_json_files() {
-    let temp_dir = tempfile::tempdir().expect("tempdir");
-    std::fs::write(temp_dir.path().join("tuckspace.json"), "[]").expect("write tuckspace");
-    let store = WorkspaceStore::new(temp_dir.path()).await.expect("store");
-    let workspaces = store.list().await.expect("list");
-    assert_eq!(workspaces.len(), 1);
+    assert_eq!(
+        reordered
+            .iter()
+            .map(|workspace| workspace.id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["beta", bootstrapped_id.as_str(), "alpha"]
+    );
 }

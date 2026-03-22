@@ -110,9 +110,7 @@ export default function ShellNode({ data }: NodeProps) {
     mode: "rerun_push" as const,
     intervalMs: 1000,
   };
-  const openPreviewTabs =
-    model.uiState?.openPreviewTabs ??
-    (model.uiState?.activePreviewTab ? [model.uiState.activePreviewTab] : []);
+  const openPreviewTabs = model.uiState?.openPreviewTabs ?? [];
   const commentRef = useRef<HTMLTextAreaElement | null>(null);
   const [isEditingComment, setIsEditingComment] = useState(false);
   const [showFormulaHelp, setShowFormulaHelp] = useState(false);
@@ -194,7 +192,6 @@ export default function ShellNode({ data }: NodeProps) {
               typedData.onUpdate(model.id, {
                 uiState: {
                   ...(model.uiState ?? {}),
-                  activePreviewTab: null,
                   openPreviewTabs: nextTabs,
                 },
               });

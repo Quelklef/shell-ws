@@ -17,9 +17,19 @@ pub enum Expr {
     Number(f64),
     Variable(String),
     Argv(usize),
-    Unary { op: UnaryOp, expr: Box<Expr> },
-    Binary { left: Box<Expr>, op: BinaryOp, right: Box<Expr> },
-    Call { name: String, args: Vec<Expr> },
+    Unary {
+        op: UnaryOp,
+        expr: Box<Expr>,
+    },
+    Binary {
+        left: Box<Expr>,
+        op: BinaryOp,
+        right: Box<Expr>,
+    },
+    Call {
+        name: String,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,7 +72,11 @@ fn eval_program(program: &Program, argv: &[String]) -> Result<f64, FormulaError>
     eval_expr(&program.body, argv, &env)
 }
 
-fn eval_expr(expr: &Expr, argv: &[String], env: &HashMap<String, f64>) -> Result<f64, FormulaError> {
+fn eval_expr(
+    expr: &Expr,
+    argv: &[String],
+    env: &HashMap<String, f64>,
+) -> Result<f64, FormulaError> {
     match expr {
         Expr::Number(value) => Ok(*value),
         Expr::Variable(name) => env
@@ -111,7 +125,12 @@ fn eval_expr(expr: &Expr, argv: &[String], env: &HashMap<String, f64>) -> Result
     }
 }
 
-fn eval_call(name: &str, args: &[Expr], argv: &[String], env: &HashMap<String, f64>) -> Result<f64, FormulaError> {
+fn eval_call(
+    name: &str,
+    args: &[Expr],
+    argv: &[String],
+    env: &HashMap<String, f64>,
+) -> Result<f64, FormulaError> {
     let values = args
         .iter()
         .map(|expr| eval_expr(expr, argv, env))
@@ -125,7 +144,9 @@ fn eval_call(name: &str, args: &[Expr], argv: &[String], env: &HashMap<String, f
         }
         ("nrt", [value, degree]) => {
             if *degree == 0.0 {
-                return Err(FormulaError::Message("nrt() requires a non-zero degree".to_string()));
+                return Err(FormulaError::Message(
+                    "nrt() requires a non-zero degree".to_string(),
+                ));
             }
             value.powf(1.0 / degree)
         }
@@ -162,7 +183,9 @@ fn ensure_finite(value: f64) -> Result<f64, FormulaError> {
     if value.is_finite() {
         Ok(value)
     } else {
-        Err(FormulaError::Message("expression produced a non-finite value".to_string()))
+        Err(FormulaError::Message(
+            "expression produced a non-finite value".to_string(),
+        ))
     }
 }
 
@@ -227,7 +250,7 @@ impl<'a> Parser<'a> {
             loop {
                 let name = match &self.current {
                     TokenKind::Ident(name) => name.clone(),
-                    _ => return self.error("expected binding name after `let`")
+                    _ => return self.error("expected binding name after `let`"),
                 };
                 self.bump()?;
                 self.expect(TokenKind::Equal, "expected `=` in let binding")?;
@@ -393,16 +416,46 @@ impl<'a> Parser<'a> {
         let mut chars = rest.char_indices();
         let (_, ch) = chars.next().expect("char");
         self.current = match ch {
-            '+' => { self.cursor += 1; TokenKind::Plus }
-            '-' => { self.cursor += 1; TokenKind::Minus }
-            '*' => { self.cursor += 1; TokenKind::Star }
-            '/' => { self.cursor += 1; TokenKind::Slash }
-            '^' => { self.cursor += 1; TokenKind::Caret }
-            '(' => { self.cursor += 1; TokenKind::LParen }
-            ')' => { self.cursor += 1; TokenKind::RParen }
-            ',' => { self.cursor += 1; TokenKind::Comma }
-            ';' => { self.cursor += 1; TokenKind::Semi }
-            '=' => { self.cursor += 1; TokenKind::Equal }
+            '+' => {
+                self.cursor += 1;
+                TokenKind::Plus
+            }
+            '-' => {
+                self.cursor += 1;
+                TokenKind::Minus
+            }
+            '*' => {
+                self.cursor += 1;
+                TokenKind::Star
+            }
+            '/' => {
+                self.cursor += 1;
+                TokenKind::Slash
+            }
+            '^' => {
+                self.cursor += 1;
+                TokenKind::Caret
+            }
+            '(' => {
+                self.cursor += 1;
+                TokenKind::LParen
+            }
+            ')' => {
+                self.cursor += 1;
+                TokenKind::RParen
+            }
+            ',' => {
+                self.cursor += 1;
+                TokenKind::Comma
+            }
+            ';' => {
+                self.cursor += 1;
+                TokenKind::Semi
+            }
+            '=' => {
+                self.cursor += 1;
+                TokenKind::Equal
+            }
             '$' => {
                 self.cursor += 1;
                 let digits = self.consume_while(|c| c.is_ascii_digit());
@@ -514,12 +567,18 @@ mod tests {
 
     #[test]
     fn evaluates_argv_inputs() {
-        assert_eq!(evaluate("$1 + $2", &["4".to_string(), "5.5".to_string()]).expect("eval"), "9.5");
+        assert_eq!(
+            evaluate("$1 + $2", &["4".to_string(), "5.5".to_string()]).expect("eval"),
+            "9.5"
+        );
     }
 
     #[test]
     fn reports_invalid_argv() {
         let error = evaluate("$2", &["1".to_string()]).expect_err("missing argv should fail");
-        assert_eq!(error, FormulaError::Message("missing argument $2".to_string()));
+        assert_eq!(
+            error,
+            FormulaError::Message("missing argument $2".to_string())
+        );
     }
 }

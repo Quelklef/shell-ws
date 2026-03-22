@@ -21,10 +21,6 @@ export type ExecutionAction =
   | "rerun_push"
   | "repush";
 
-export interface MaterializedValue {
-  dataBase64: string;
-}
-
 export type MaterializedOutputPort = "stdout" | "stderr";
 export type MatOutId = string;
 
@@ -51,17 +47,11 @@ export interface NodeMaterialized {
   inputs?: Record<string, MatOutId> | null;
   outputs?: Partial<Record<MaterializedOutputPort, MatOutId>> | null;
   lastExitCode?: number | null;
-  values?: Record<string, MaterializedValue> | null;
 }
 
 export type ExecArg =
   | { source: "literal"; value: string }
   | { source: "argv"; slot: number };
-
-export interface LegacyPersistedDisplayState {
-  dataBase64: string;
-  completed?: boolean;
-}
 
 export interface PaneSizeState {
   width?: number;
@@ -69,10 +59,8 @@ export interface PaneSizeState {
 }
 
 export interface NodeUiState {
-  activePreviewTab?: string | null;
   openPreviewTabs?: string[];
   showAutoControls?: boolean;
-  previews?: Record<string, LegacyPersistedDisplayState>;
   paneSizes?: Record<string, PaneSizeState>;
 }
 

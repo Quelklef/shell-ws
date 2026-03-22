@@ -81,13 +81,15 @@ pub async fn generate_script(
         .nodes
         .iter()
         .find(|node| node.id == request.node_id)
-        .ok_or_else(|| format!("Node {} was not found in the provided workspace", request.node_id))?;
+        .ok_or_else(|| {
+            format!(
+                "Node {} was not found in the provided workspace",
+                request.node_id
+            )
+        })?;
 
     if node.kind != NodeKind::AiScript {
-        return Err(format!(
-            "Node {} is not an ai_script node",
-            request.node_id
-        ));
+        return Err(format!("Node {} is not an ai_script node", request.node_id));
     }
 
     let api_key = request
@@ -177,11 +179,16 @@ fn build_messages(
 
     let current_script = node.script.clone().unwrap_or_default();
     if !current_script.trim().is_empty() {
-        user_sections.push(format!("Current script to replace or revise:\n{current_script}"));
+        user_sections.push(format!(
+            "Current script to replace or revise:\n{current_script}"
+        ));
     }
 
     if node.include_sample_inputs.unwrap_or(false) {
-        if let Some(stdin) = stdin_sample.as_ref().filter(|sample| !sample.trim().is_empty()) {
+        if let Some(stdin) = stdin_sample
+            .as_ref()
+            .filter(|sample| !sample.trim().is_empty())
+        {
             user_sections.push(format!(
                 "Previous stdin sample:\n{}",
                 truncate_sample(stdin)
@@ -191,13 +198,7 @@ fn build_messages(
         if !argv_samples.is_empty() {
             let formatted = argv_samples
                 .iter()
-                .map(|sample| {
-                    format!(
-                        "argv-{}:\n{}",
-                        sample.slot,
-                        truncate_sample(&sample.value)
-                    )
-                })
+                .map(|sample| format!("argv-{}:\n{}", sample.slot, truncate_sample(&sample.value)))
                 .collect::<Vec<_>>()
                 .join("\n\n");
             user_sections.push(format!("Previous argv samples:\n{formatted}"));
@@ -239,7 +240,10 @@ fn strip_markdown_fences(text: &str) -> String {
     }
 
     let mut lines = trimmed.lines().collect::<Vec<_>>();
-    if lines.first().is_some_and(|line| line.trim_start().starts_with("```")) {
+    if lines
+        .first()
+        .is_some_and(|line| line.trim_start().starts_with("```"))
+    {
         lines.remove(0);
     }
     if lines.last().is_some_and(|line| line.trim() == "```") {

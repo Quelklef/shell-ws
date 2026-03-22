@@ -1,135 +1,31 @@
-import type { AutoRunConfig, ExecArg, MaterializedValue, NodeMaterialized, TuckedSubgraph, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
+import type { NodeMaterialized, TuckedSubgraph, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
 import { normalizeWorkspaceUi } from "./workspaceUi";
 
-type LegacyMaterializedNode = WorkspaceNode & {
-  materializedInputs?: Record<string, MaterializedValue> | null;
-  materializedOutputs?: Record<string, MaterializedValue> | null;
-  materializedValues?: Record<string, MaterializedValue> | null;
-  lastExitCode?: number | null;
-};
-
-const REMOVED_NODE_KINDS = new Set([
-  "tee",
-  "merge_concat",
-  "merge_line",
-  "merge_byte",
-  "merge_shell",
-]);
-
-const INPUT_PORT_KEYS = new Set(["stdin"]);
-
-function isOutputKey(key: string) {
-  return key === "stdout" || key === "stderr";
-}
-
-function isInputKey(key: string) {
-  return INPUT_PORT_KEYS.has(key) || /^argv-\d+$/.test(key);
-}
-
-function normalizeExecArgs(args: unknown): ExecArg[] | null | undefined {
-  if (args == null) {
-    return args as null | undefined;
-  }
-  if (!Array.isArray(args)) {
-    return [];
-  }
-  return args.map((arg) => {
-    if (typeof arg === "string") {
-      return { source: "literal", value: arg } satisfies ExecArg;
-    }
-    if (arg && typeof arg === "object" && "source" in arg) {
-      const candidate = arg as { source?: unknown; value?: unknown; slot?: unknown };
-      if (candidate.source === "argv") {
-        return {
-          source: "argv",
-          slot: Math.max(1, Number(candidate.slot) || 1),
-        } satisfies ExecArg;
-      }
-      return {
-        source: "literal",
-        value: typeof candidate.value === "string" ? candidate.value : "",
-      } satisfies ExecArg;
-    }
-    return { source: "literal", value: "" } satisfies ExecArg;
-  });
-}
-
-
-function normalizeAutoRun(autoRun: WorkspaceNode["autoRun"]): AutoRunConfig | null | undefined {
-  if (!autoRun) {
-    return autoRun;
-  }
-  if (autoRun.mode === ("push" as never)) {
-    return { ...autoRun, mode: "rerun_push" };
-  }
-  if (autoRun.mode === ("pull" as never)) {
-    return { ...autoRun, mode: "pull_run" };
-  }
-  return autoRun;
-}
-
-function migrateLegacyPreviews(previews?: Record<string, { dataBase64: string }> | null) {
-  const materializedValues: Record<string, MaterializedValue> = {};
-  for (const [key, value] of Object.entries(previews ?? {})) {
-    if (isInputKey(key) || isOutputKey(key)) {
-      materializedValues[key] = { dataBase64: value.dataBase64 };
-    }
-  }
-  return materializedValues;
+function sanitizeNodeMaterialized(materialized: WorkspaceNode["materialized"]): NodeMaterialized {
+  return {
+    inputs: { ...(materialized?.inputs ?? {}) },
+    outputs: { ...(materialized?.outputs ?? {}) },
+    lastExitCode: materialized?.lastExitCode ?? null,
+  };
 }
 
 function sanitizeNodesAndEdges(nodesInput: WorkspaceNode[], edgesInput: WorkspaceEdge[]) {
-  const nodes = nodesInput
-    .map((node) => ({
-      ...node,
-      kind:
-        node.kind === ("cat" as typeof node.kind)
-          ? "file"
-          : node.kind,
-    }))
-    .filter((node) => !REMOVED_NODE_KINDS.has(node.kind as string));
-  const validNodeIds = new Set(nodes.map((node) => node.id));
+  const validNodeIds = new Set(nodesInput.map((node) => node.id));
 
   return {
-    nodes: nodes.map((node) => {
-      const migrated = migrateLegacyPreviews(node.uiState?.previews);
-      // Older workspaces persisted materialized inputs and outputs separately.
-      const legacyNode = node as LegacyMaterializedNode;
-      const materialized = ({
-        inputs: { ...(node.materialized?.inputs ?? {}) },
-        outputs: { ...(node.materialized?.outputs ?? {}) },
-        values:
-          node.materialized?.values && Object.keys(node.materialized.values).length > 0
-            ? node.materialized.values
-            : legacyNode.materializedValues && Object.keys(legacyNode.materializedValues).length > 0
-              ? legacyNode.materializedValues
-              : {
-                  ...(legacyNode.materializedInputs ?? {}),
-                  ...(legacyNode.materializedOutputs ?? {}),
-                  ...migrated,
-                },
-        lastExitCode: node.materialized?.lastExitCode ?? legacyNode.lastExitCode ?? null,
-      } satisfies NodeMaterialized);
-      return {
-        ...node,
-        autoRun: normalizeAutoRun(node.autoRun),
-        args: normalizeExecArgs(node.args),
-        materialized,
-        uiState: node.uiState
-          ? {
-              ...node.uiState,
-              openPreviewTabs:
-                node.uiState.openPreviewTabs ??
-                (node.uiState.activePreviewTab ? [node.uiState.activePreviewTab] : []),
-            }
-          : node.uiState,
-      };
-    }),
+    nodes: nodesInput.map((node) => ({
+      ...node,
+      materialized: sanitizeNodeMaterialized(node.materialized),
+      uiState: node.uiState
+        ? {
+            ...node.uiState,
+            openPreviewTabs: [...(node.uiState.openPreviewTabs ?? [])],
+            paneSizes: { ...(node.uiState.paneSizes ?? {}) },
+          }
+        : node.uiState,
+    })),
     edges: edgesInput.filter(
-      (edge) =>
-        !(edge.to.port === "argv" && edge.to.slot == null) &&
-        validNodeIds.has(edge.from.nodeId) &&
-        validNodeIds.has(edge.to.nodeId),
+      (edge) => validNodeIds.has(edge.from.nodeId) && validNodeIds.has(edge.to.nodeId),
     ),
   };
 }

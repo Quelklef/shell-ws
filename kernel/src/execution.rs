@@ -19,12 +19,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::error;
 
 use crate::formula;
-use crate::materialized_outputs::{create_output_entries, decode_entry_bytes, set_node_input_ref, MaterializedMutation};
-use crate::port_schema::node_port_schema;
-use crate::model::{
-    default_cwd, BufferingMode, Edge, ExecutionAction, LegacyPersistedDisplayState, MaterializedOutputStore, MaterializedValue,
-    Node, NodeKind, NodeMaterialized, PortKind, ServerEvent, Workspace,
+use crate::materialized_outputs::{
+    create_output_entries, decode_entry_bytes, set_node_input_ref, MaterializedMutation,
 };
+use crate::model::{
+    default_cwd, BufferingMode, Edge, ExecutionAction, MaterializedOutputStore, Node, NodeKind,
+    NodeMaterialized, PortKind, ServerEvent, Workspace,
+};
+use crate::port_schema::node_port_schema;
 
 fn node_label(node: &Node) -> &str {
     if node.title.trim().is_empty() {
@@ -66,20 +68,8 @@ fn input_key(port: PortKind, slot: Option<usize>) -> String {
     }
 }
 
-fn decode_materialized_value(value: &MaterializedValue) -> Vec<u8> {
-    BASE64.decode(&value.data_base64).unwrap_or_default()
-}
-
-fn decode_legacy_preview(value: &LegacyPersistedDisplayState) -> Vec<u8> {
-    BASE64.decode(&value.data_base64).unwrap_or_default()
-}
-
 fn encode_bytes(bytes: &[u8]) -> String {
     BASE64.encode(bytes)
-}
-
-fn is_legacy_unslotted_argv_edge(edge: &Edge) -> bool {
-    edge.to.port == PortKind::Argv && edge.to.slot.is_none()
 }
 
 const PROCESS_OUTPUT_READ_CHUNK_SIZE: usize = 1024;
@@ -104,7 +94,13 @@ impl ExecutionManager {
         }
     }
 
-    pub fn run(&self, workspace: Workspace, materialized_output_store: MaterializedOutputStore, node_id: String, action: ExecutionAction) -> String {
+    pub fn run(
+        &self,
+        workspace: Workspace,
+        materialized_output_store: MaterializedOutputStore,
+        node_id: String,
+        action: ExecutionAction,
+    ) -> String {
         let exec_id = crate::id::encode_exec_id();
         let cancel = CancellationToken::new();
         let manager = self.clone();
@@ -221,14 +217,12 @@ struct ExecutionContext {
 impl ExecutionContext {
     fn new(
         exec_id: String,
-        mut workspace: Workspace,
+        workspace: Workspace,
         materialized_output_store: MaterializedOutputStore,
         action: ExecutionAction,
         broadcaster: broadcast::Sender<ServerEvent>,
         cancel: CancellationToken,
     ) -> Result<Self, String> {
-        workspace.edges.retain(|edge| !is_legacy_unslotted_argv_edge(edge));
-
         let nodes: HashMap<String, Node> = workspace
             .nodes
             .iter()
@@ -242,22 +236,39 @@ impl ExecutionContext {
             if !nodes.contains_key(&edge.from.node_id) || !nodes.contains_key(&edge.to.node_id) {
                 return Err(format!("Edge {} references a missing node", edge.id));
             }
-            outgoing.entry(edge.from.node_id.clone()).or_default().push(edge.clone());
-            incoming.entry(edge.to.node_id.clone()).or_default().push(edge.clone());
+            outgoing
+                .entry(edge.from.node_id.clone())
+                .or_default()
+                .push(edge.clone());
+            incoming
+                .entry(edge.to.node_id.clone())
+                .or_default()
+                .push(edge.clone());
         }
 
         for node in workspace.nodes.iter() {
             let edges = incoming.get(&node.id).cloned().unwrap_or_default();
             if node_accepts_argv(&node.kind) {
-                let stdin_count = edges.iter().filter(|edge| edge.to.port == PortKind::Stdin).count();
+                let stdin_count = edges
+                    .iter()
+                    .filter(|edge| edge.to.port == PortKind::Stdin)
+                    .count();
                 let max_stdin = usize::from(node_accepts_stdin(&node.kind));
                 if stdin_count > max_stdin {
-                    return Err(format!("Node {} accepts at most {} stdin wire{}.", node_label(node), max_stdin, if max_stdin == 1 { "" } else { "s" }));
+                    return Err(format!(
+                        "Node {} accepts at most {} stdin wire{}.",
+                        node_label(node),
+                        max_stdin,
+                        if max_stdin == 1 { "" } else { "s" }
+                    ));
                 }
                 let mut argv_slots = HashSet::new();
                 for edge in edges.iter().filter(|edge| edge.to.port == PortKind::Argv) {
                     let Some(slot) = edge.to.slot else {
-                        return Err(format!("Node {} has an argv wire without a target slot.", node_label(node)));
+                        return Err(format!(
+                            "Node {} has an argv wire without a target slot.",
+                            node_label(node)
+                        ));
                     };
                     if !argv_slots.insert(slot) {
                         return Err(format!(
@@ -276,14 +287,22 @@ impl ExecutionContext {
                     ));
                 }
             } else if !edges.is_empty() {
-                return Err(format!("Node {} does not accept input wires.", node_label(node)));
+                return Err(format!(
+                    "Node {} does not accept input wires.",
+                    node_label(node)
+                ));
             }
         }
 
         let materialized_values = workspace
             .nodes
             .iter()
-            .map(|node| (node.id.clone(), materialized_value_map(node, &materialized_output_store)))
+            .map(|node| {
+                (
+                    node.id.clone(),
+                    materialized_value_map(node, &materialized_output_store),
+                )
+            })
             .collect();
         let materialized_nodes = workspace
             .nodes
@@ -430,7 +449,6 @@ impl ExecutionContext {
         }
     }
 
-
     fn compute_streaming_push_plan(&self, node_id: &str) -> StreamingExecutionPlan {
         StreamingExecutionPlan {
             scope: self.compute_forward_scope(node_id),
@@ -489,7 +507,10 @@ impl ExecutionContext {
         };
 
         if seeds.is_empty() {
-            if run_target && scope.contains(target_node_id) && root_ids.contains(&target_node_id.to_string()) {
+            if run_target
+                && scope.contains(target_node_id)
+                && root_ids.contains(&target_node_id.to_string())
+            {
                 seeds.push(StreamingSeed {
                     node_id: target_node_id.to_string(),
                     seed: StreamingSeedMode::Execute,
@@ -559,7 +580,10 @@ impl ExecutionContext {
 
     // Keep planning separate from execution so every action can share one forward engine.
     // A central controller owns scheduling, propagation, and completion; worker tasks only emit facts.
-    async fn execute_streaming_plan(self: Arc<Self>, plan: StreamingExecutionPlan) -> Result<(), String> {
+    async fn execute_streaming_plan(
+        self: Arc<Self>,
+        plan: StreamingExecutionPlan,
+    ) -> Result<(), String> {
         RunController::new(self, plan).run().await
     }
 
@@ -631,7 +655,13 @@ impl ExecutionContext {
         });
     }
 
-    fn set_materialized_input_ref(&self, node_id: &str, key: &str, bytes: Vec<u8>, matout_id: Option<String>) {
+    fn set_materialized_input_ref(
+        &self,
+        node_id: &str,
+        key: &str,
+        bytes: Vec<u8>,
+        matout_id: Option<String>,
+    ) {
         self.set_materialized_input_bytes(node_id, key, bytes);
         let mut nodes = self.materialized_nodes.lock();
         let mut store = self.materialized_output_store.lock();
@@ -648,9 +678,16 @@ impl ExecutionContext {
         self.emit_materialized_state(node_id, mutation);
     }
 
-    fn replace_materialized_outputs(&self, node_id: &str, outputs: HashMap<String, Vec<u8>>, exit_code: Option<i32>) {
+    fn replace_materialized_outputs(
+        &self,
+        node_id: &str,
+        outputs: HashMap<String, Vec<u8>>,
+        exit_code: Option<i32>,
+    ) {
         self.replace_materialized_output_bytes(node_id, outputs.clone());
-        self.last_exit_codes.lock().insert(node_id.to_string(), exit_code);
+        self.last_exit_codes
+            .lock()
+            .insert(node_id.to_string(), exit_code);
         let mut nodes = self.materialized_nodes.lock();
         let mut store = self.materialized_output_store.lock();
         let Some(node) = self.nodes.get(node_id) else {
@@ -696,9 +733,7 @@ impl ExecutionContext {
             timestamp: now_ms(),
         });
     }
-
 }
-
 
 enum ControllerEvent {
     NodeOutputChunk {
@@ -772,7 +807,10 @@ impl RunController {
             if self.context.cancel.is_cancelled() {
                 break;
             }
-            if self.active_external_tasks == 0 && self.events_rx.is_empty() && self.ready_deliveries.values().all(BTreeMap::is_empty) {
+            if self.active_external_tasks == 0
+                && self.events_rx.is_empty()
+                && self.ready_deliveries.values().all(BTreeMap::is_empty)
+            {
                 break;
             }
             let Some(event) = (tokio::select! {
@@ -791,7 +829,8 @@ impl RunController {
         *self.context.execution_scope.lock() = self.plan.scope.clone();
         *self.context.blocked_nodes.lock() = self.plan.blocked_nodes.clone();
         for edge in self.context.workspace.edges.iter().filter(|edge| {
-            self.plan.scope.contains(&edge.from.node_id) && self.plan.scope.contains(&edge.to.node_id)
+            self.plan.scope.contains(&edge.from.node_id)
+                && self.plan.scope.contains(&edge.to.node_id)
         }) {
             self.edge_buffers.insert(
                 edge.id.clone(),
@@ -807,15 +846,19 @@ impl RunController {
     async fn start_seed(&mut self, seed: StreamingSeed) -> Result<(), String> {
         match seed.seed {
             StreamingSeedMode::Execute => self.start_node_execute(seed.node_id).await,
-            StreamingSeedMode::MaterializedOutputs => self.start_materialized_seed(seed.node_id).await,
+            StreamingSeedMode::MaterializedOutputs => {
+                self.start_materialized_seed(seed.node_id).await
+            }
         }
     }
 
     async fn handle_event(&mut self, event: ControllerEvent) -> Result<(), String> {
         match event {
-            ControllerEvent::NodeOutputChunk { node_id, port, chunk } => {
-                self.handle_output_chunk(&node_id, port, chunk).await
-            }
+            ControllerEvent::NodeOutputChunk {
+                node_id,
+                port,
+                chunk,
+            } => self.handle_output_chunk(&node_id, port, chunk).await,
             ControllerEvent::NodeExited { node_id, exit_code } => {
                 self.active_external_tasks = self.active_external_tasks.saturating_sub(1);
                 self.handle_node_exit(&node_id, exit_code).await
@@ -837,7 +880,11 @@ impl RunController {
 
     async fn drain_ready_deliveries(&mut self, edge_id: &str) -> Result<(), String> {
         loop {
-            let next_sequence = self.next_delivery_to_process.get(edge_id).copied().unwrap_or(0);
+            let next_sequence = self
+                .next_delivery_to_process
+                .get(edge_id)
+                .copied()
+                .unwrap_or(0);
             let Some(delivery) = self
                 .ready_deliveries
                 .get_mut(edge_id)
@@ -917,8 +964,11 @@ impl RunController {
             .get(node_id)
             .and_then(|inputs| inputs.get(key).cloned())
             .unwrap_or_default();
-        let matout_id = self.context.node_output_matout_id(&edge.from.node_id, edge.from.port);
-        self.context.set_materialized_input_ref(node_id, key, bytes, matout_id);
+        let matout_id = self
+            .context
+            .node_output_matout_id(&edge.from.node_id, edge.from.port);
+        self.context
+            .set_materialized_input_ref(node_id, key, bytes, matout_id);
     }
 
     fn discard_live_input(&mut self, node_id: &str, key: &str) {
@@ -935,13 +985,17 @@ impl RunController {
             let key = output_key(*port).to_string();
             next.insert(key.clone(), outputs.get(&key).cloned().unwrap_or_default());
         }
-        self.context.replace_materialized_outputs(node_id, next, exit_code);
+        self.context
+            .replace_materialized_outputs(node_id, next, exit_code);
     }
 
     fn has_fresh_stdin_edge(&self, node_id: &str) -> bool {
-        self.context.connected_input_edges(node_id).into_iter().any(|edge| {
-            edge.to.port == PortKind::Stdin && self.plan.scope.contains(&edge.from.node_id)
-        })
+        self.context
+            .connected_input_edges(node_id)
+            .into_iter()
+            .any(|edge| {
+                edge.to.port == PortKind::Stdin && self.plan.scope.contains(&edge.from.node_id)
+            })
     }
 
     fn streaming_command_ready(&self, node_id: &str) -> bool {
@@ -988,7 +1042,12 @@ impl RunController {
         argv_edges.sort_by_key(|edge| edge.to.slot.unwrap_or(usize::MAX));
         let fresh_argv_edges = argv_edges
             .iter()
-            .map(|edge| (edge.id.clone(), self.plan.scope.contains(&edge.from.node_id)))
+            .map(|edge| {
+                (
+                    edge.id.clone(),
+                    self.plan.scope.contains(&edge.from.node_id),
+                )
+            })
             .collect::<HashMap<_, _>>();
 
         let use_fresh_stdin = self.has_fresh_stdin_edge(node_id);
@@ -1086,7 +1145,8 @@ impl RunController {
         }
         // Repush replays the materialized result, including its exit status, so downstream
         // propagation follows the same success/failure rules as a fresh execution.
-        self.handle_node_exit(&node.id, self.context.node_last_exit_code(&node.id)).await
+        self.handle_node_exit(&node.id, self.context.node_last_exit_code(&node.id))
+            .await
     }
 
     fn begin_node(&mut self, node_id: &str) {
@@ -1101,8 +1161,12 @@ impl RunController {
 
     async fn run_text_node(&mut self, node: Node) -> Result<(), String> {
         self.begin_node(&node.id);
-        self.handle_output_chunk(&node.id, PortKind::Stdout, node.text.clone().unwrap_or_default().into_bytes())
-            .await?;
+        self.handle_output_chunk(
+            &node.id,
+            PortKind::Stdout,
+            node.text.clone().unwrap_or_default().into_bytes(),
+        )
+        .await?;
         self.handle_node_exit(&node.id, Some(0)).await
     }
 
@@ -1116,7 +1180,8 @@ impl RunController {
         } else {
             Vec::new()
         };
-        self.handle_output_chunk(&node.id, PortKind::Stdout, stdin).await?;
+        self.handle_output_chunk(&node.id, PortKind::Stdout, stdin)
+            .await?;
         self.handle_node_exit(&node.id, Some(0)).await
     }
 
@@ -1139,13 +1204,22 @@ impl RunController {
         let resolved_path = self.context.resolve_workspace_path(&path);
         let exit_code = match tokio::fs::read(&resolved_path).await {
             Ok(data) => {
-                self.handle_output_chunk(&node.id, PortKind::Stdout, data).await?;
+                self.handle_output_chunk(&node.id, PortKind::Stdout, data)
+                    .await?;
                 Some(0)
             }
             Err(error) => {
-                self.handle_output_chunk(&node.id, PortKind::Stderr, format!("file {}: {error}
-", path).into_bytes())
-                    .await?;
+                self.handle_output_chunk(
+                    &node.id,
+                    PortKind::Stderr,
+                    format!(
+                        "file {}: {error}
+",
+                        path
+                    )
+                    .into_bytes(),
+                )
+                .await?;
                 Some(1)
             }
         };
@@ -1161,13 +1235,21 @@ impl RunController {
             .ok_or_else(|| format!("{} is missing a formula", node_label(&node)))?;
         let exit_code = match formula::evaluate(&source, &argv) {
             Ok(output) => {
-                self.handle_output_chunk(&node.id, PortKind::Stdout, output.into_bytes()).await?;
+                self.handle_output_chunk(&node.id, PortKind::Stdout, output.into_bytes())
+                    .await?;
                 Some(0)
             }
             Err(error) => {
-                self.handle_output_chunk(&node.id, PortKind::Stderr, format!("{error}
-").into_bytes())
-                    .await?;
+                self.handle_output_chunk(
+                    &node.id,
+                    PortKind::Stderr,
+                    format!(
+                        "{error}
+"
+                    )
+                    .into_bytes(),
+                )
+                .await?;
                 Some(1)
             }
         };
@@ -1189,7 +1271,10 @@ impl RunController {
 
         let mut command = if shell_script {
             let mut command = Command::new(node.shell_value());
-            command.arg("-c").arg(node.script.clone().unwrap_or_default()).arg("--");
+            command
+                .arg("-c")
+                .arg(node.script.clone().unwrap_or_default())
+                .arg("--");
             for arg in argv {
                 command.arg(arg);
             }
@@ -1312,7 +1397,8 @@ impl RunController {
         chunk: Vec<u8>,
     ) -> Result<(), String> {
         if !chunk.is_empty() {
-            self.context.emit_port_activity(from_node_id, port, chunk.len());
+            self.context
+                .emit_port_activity(from_node_id, port, chunk.len());
             self.append_live_output(from_node_id, port, &chunk);
             // The first chunk for a port resets the UI preview; later chunks append onto it.
             let reset = self.state_mut(from_node_id).output_resets.insert(port);
@@ -1350,7 +1436,11 @@ impl RunController {
         Ok(())
     }
 
-    async fn handle_node_exit(&mut self, node_id: &str, exit_code: Option<i32>) -> Result<(), String> {
+    async fn handle_node_exit(
+        &mut self,
+        node_id: &str,
+        exit_code: Option<i32>,
+    ) -> Result<(), String> {
         let (tainted, replaying_materialized) = self
             .stream_states
             .get(node_id)
@@ -1394,7 +1484,14 @@ impl RunController {
             };
             let delivered_payload = !flushed.is_empty();
             for (reset, payload) in flushed {
-                self.schedule_delivery(edge.clone(), edge.from.port, payload, reset, true, propagation_success);
+                self.schedule_delivery(
+                    edge.clone(),
+                    edge.from.port,
+                    payload,
+                    reset,
+                    true,
+                    propagation_success,
+                );
             }
             if !delivered_payload {
                 let reset = self
@@ -1402,11 +1499,19 @@ impl RunController {
                     .get(&edge.id)
                     .map(|state| !state.sent_any)
                     .unwrap_or(true);
-                self.schedule_delivery(edge.clone(), edge.from.port, Vec::new(), reset, true, propagation_success);
+                self.schedule_delivery(
+                    edge.clone(),
+                    edge.from.port,
+                    Vec::new(),
+                    reset,
+                    true,
+                    propagation_success,
+                );
             }
         }
 
-        self.pending_finish_events.insert(node_id.to_string(), (exit_code, materialized));
+        self.pending_finish_events
+            .insert(node_id.to_string(), (exit_code, materialized));
         self.finish_node_if_delivery_drained(node_id);
         Ok(())
     }
@@ -1414,7 +1519,13 @@ impl RunController {
     fn finish_node_if_delivery_drained(&mut self, node_id: &str) {
         // A node is not fully finished until every delayed delivery sourced from it has drained.
         // Otherwise pull-style runs can return before a blocked target commits its final input.
-        if self.pending_delivery_counts.get(node_id).copied().unwrap_or(0) != 0 {
+        if self
+            .pending_delivery_counts
+            .get(node_id)
+            .copied()
+            .unwrap_or(0)
+            != 0
+        {
             return;
         }
         if let Some((exit_code, materialized)) = self.pending_finish_events.remove(node_id) {
@@ -1433,12 +1544,18 @@ impl RunController {
     ) {
         let events_tx = self.events_tx.clone();
         let sequence = {
-            let next = self.next_delivery_sequence.entry(edge.id.clone()).or_default();
+            let next = self
+                .next_delivery_sequence
+                .entry(edge.id.clone())
+                .or_default();
             let sequence = *next;
             *next += 1;
             sequence
         };
-        *self.pending_delivery_counts.entry(edge.from.node_id.clone()).or_default() += 1;
+        *self
+            .pending_delivery_counts
+            .entry(edge.from.node_id.clone())
+            .or_default() += 1;
         self.active_external_tasks += 1;
         tokio::spawn(async move {
             sleep(Duration::from_millis(250)).await;
@@ -1474,7 +1591,8 @@ impl RunController {
         let key = input_key(edge.to.port, edge.to.slot);
 
         if !payload.is_empty() {
-            self.context.emit_port_activity(&target.id, edge.to.port, payload.len());
+            self.context
+                .emit_port_activity(&target.id, edge.to.port, payload.len());
             self.append_live_input(&target.id, &key, &payload);
         } else if completed {
             self.live_inputs
@@ -1506,7 +1624,8 @@ impl RunController {
                     true
                 };
                 if started || !payload.is_empty() {
-                    self.handle_output_chunk(&target.id, PortKind::Stdout, payload).await?;
+                    self.handle_output_chunk(&target.id, PortKind::Stdout, payload)
+                        .await?;
                 }
                 if completed {
                     self.handle_node_exit(&target.id, Some(0)).await?;
@@ -1525,48 +1644,54 @@ impl RunController {
                     self.handle_node_exit(&target.id, Some(0)).await?;
                 }
             }
-            NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Formula => match edge.to.port {
-                PortKind::Argv => {
-                    let state = self.state_mut(&target.id);
-                    state.argv_inputs.entry(edge.id.clone()).or_default().extend_from_slice(&payload);
-                    if completed {
-                        state.argv_completed.insert(edge.id.clone());
-                    }
-                    if !success {
-                        state.tainted = true;
-                    }
-                    if completed && self.streaming_command_ready(&target.id) {
-                        self.start_node_execute(target.id.clone()).await?;
-                    }
-                }
-                PortKind::Stdin => {
-                    let existing_writer = {
+            NodeKind::Script | NodeKind::AiScript | NodeKind::Exec | NodeKind::Formula => {
+                match edge.to.port {
+                    PortKind::Argv => {
                         let state = self.state_mut(&target.id);
-                        if !payload.is_empty() {
-                            state.buffered_stdin.extend_from_slice(&payload);
-                            state.stdin_seen = true;
-                        }
+                        state
+                            .argv_inputs
+                            .entry(edge.id.clone())
+                            .or_default()
+                            .extend_from_slice(&payload);
                         if completed {
-                            state.buffered_stdin_closed = true;
+                            state.argv_completed.insert(edge.id.clone());
                         }
                         if !success {
                             state.tainted = true;
                         }
-                        state.stdin_writer.clone()
-                    };
-                    if let Some(writer) = existing_writer {
-                        if !payload.is_empty() {
-                            let _ = writer.send(StdinMessage::Chunk(payload));
+                        if completed && self.streaming_command_ready(&target.id) {
+                            self.start_node_execute(target.id.clone()).await?;
                         }
-                        if completed {
-                            let _ = writer.send(StdinMessage::Close);
-                        }
-                    } else if self.streaming_command_ready(&target.id) {
-                        self.start_node_execute(target.id.clone()).await?;
                     }
+                    PortKind::Stdin => {
+                        let existing_writer = {
+                            let state = self.state_mut(&target.id);
+                            if !payload.is_empty() {
+                                state.buffered_stdin.extend_from_slice(&payload);
+                                state.stdin_seen = true;
+                            }
+                            if completed {
+                                state.buffered_stdin_closed = true;
+                            }
+                            if !success {
+                                state.tainted = true;
+                            }
+                            state.stdin_writer.clone()
+                        };
+                        if let Some(writer) = existing_writer {
+                            if !payload.is_empty() {
+                                let _ = writer.send(StdinMessage::Chunk(payload));
+                            }
+                            if completed {
+                                let _ = writer.send(StdinMessage::Close);
+                            }
+                        } else if self.streaming_command_ready(&target.id) {
+                            self.start_node_execute(target.id.clone()).await?;
+                        }
+                    }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             NodeKind::Text | NodeKind::File => {}
         }
 
@@ -1669,7 +1794,10 @@ enum StdinMessage {
     Close,
 }
 
-fn materialized_value_map(node: &Node, store: &MaterializedOutputStore) -> HashMap<String, Vec<u8>> {
+fn materialized_value_map(
+    node: &Node,
+    store: &MaterializedOutputStore,
+) -> HashMap<String, Vec<u8>> {
     let mut values: HashMap<String, Vec<u8>> = HashMap::new();
     for (key, id) in &node.materialized.inputs {
         if let Some(entry) = store.get(id) {
@@ -1679,19 +1807,6 @@ fn materialized_value_map(node: &Node, store: &MaterializedOutputStore) -> HashM
     for (key, id) in &node.materialized.outputs {
         if let Some(entry) = store.get(id) {
             values.insert(key.clone(), decode_entry_bytes(entry));
-        }
-    }
-    if values.is_empty() {
-        values.extend(
-            node.materialized
-                .legacy_values
-                .iter()
-                .map(|(key, value)| (key.clone(), decode_materialized_value(value))),
-        );
-    }
-    if values.is_empty() {
-        for (key, value) in &node.ui_state.previews {
-            values.insert(key.clone(), decode_legacy_preview(value));
         }
     }
     values
@@ -1707,7 +1822,10 @@ fn now_ms() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::model::{AutoRunConfig, Position, Size, WorkspaceUi};
+    use crate::model::{
+        AutoRunConfig, MatOutEntry, MaterializedReferrer, PortKind as ModelPortKind, Position,
+        ProducedBy, Size, WorkspaceUi,
+    };
     use tokio::time::{timeout, Duration};
 
     fn node(kind: NodeKind, id: &str) -> Node {
@@ -1729,7 +1847,11 @@ mod tests {
             args: None,
             text: None,
             formula: None,
-            materialized: crate::model::NodeMaterialized { inputs: HashMap::new(), outputs: HashMap::new(), last_exit_code: Some(0), legacy_values: HashMap::new() },
+            materialized: crate::model::NodeMaterialized {
+                inputs: HashMap::new(),
+                outputs: HashMap::new(),
+                last_exit_code: Some(0),
+            },
             auto_run: Some(AutoRunConfig {
                 enabled: false,
                 mode: ExecutionAction::RerunPush,
@@ -1739,7 +1861,14 @@ mod tests {
         }
     }
 
-    fn edge(id: &str, from: &str, from_port: PortKind, to: &str, to_port: PortKind, slot: Option<usize>) -> Edge {
+    fn edge(
+        id: &str,
+        from: &str,
+        from_port: PortKind,
+        to: &str,
+        to_port: PortKind,
+        slot: Option<usize>,
+    ) -> Edge {
         Edge {
             id: id.to_string(),
             from: crate::model::PortRef {
@@ -1771,13 +1900,38 @@ mod tests {
         }
     }
 
-    fn seed_materialized_text(node: &mut Node, key: &str, value: &str) {
-        node.materialized.legacy_values.insert(
-            key.to_string(),
-            MaterializedValue {
+    fn seed_materialized_text(
+        node: &mut Node,
+        store: &mut MaterializedOutputStore,
+        key: &str,
+        value: &str,
+    ) {
+        let port = if key == "stderr" {
+            ModelPortKind::Stderr
+        } else {
+            ModelPortKind::Stdout
+        };
+        let id = crate::id::encode_matout_id();
+        store.insert(
+            id.clone(),
+            MatOutEntry {
                 data_base64: encode_bytes(value.as_bytes()),
+                produced_by: ProducedBy {
+                    exec_id: "seed".to_string(),
+                    node_id: node.id.clone(),
+                    port,
+                },
+                referrers: vec![MaterializedReferrer {
+                    node_id: node.id.clone(),
+                    key: key.to_string(),
+                }],
             },
         );
+        if key == "stdout" || key == "stderr" {
+            node.materialized.outputs.insert(key.to_string(), id);
+        } else {
+            node.materialized.inputs.insert(key.to_string(), id);
+        }
     }
 
     fn materialized_text(context: &ExecutionContext, node_id: &str, key: &str) -> String {
@@ -1791,13 +1945,23 @@ mod tests {
         String::from_utf8(bytes).expect("materialized utf8")
     }
 
-    async fn wait_for_finish(rx: &mut broadcast::Receiver<ServerEvent>, exec_id: &str, node_id: &str) -> Option<i32> {
+    async fn wait_for_finish(
+        rx: &mut broadcast::Receiver<ServerEvent>,
+        exec_id: &str,
+        node_id: &str,
+    ) -> Option<i32> {
         timeout(Duration::from_secs(3), async {
             loop {
                 match rx.recv().await {
-                    Ok(ServerEvent::ExecFinished { exec_id: seen, node_id: seen_node, exit_code, .. })
-                        if seen == exec_id && seen_node == node_id => return exit_code,
-                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen,
+                        node_id: seen_node,
+                        exit_code,
+                        ..
+                    }) if seen == exec_id && seen_node == node_id => return exit_code,
+                    Ok(ServerEvent::Error { message, .. }) => {
+                        panic!("unexpected execution error: {message}")
+                    }
                     Ok(_) => {}
                     Err(error) => panic!("event stream closed: {error}"),
                 }
@@ -1806,7 +1970,6 @@ mod tests {
         .await
         .expect("execution never completed")
     }
-
 
     mod argv {
         use super::*;
@@ -1821,7 +1984,14 @@ mod tests {
                     "argv-exec".to_string(),
                     workspace(
                         vec![source, target],
-                        vec![edge("edge-ab", "a", PortKind::Stdout, "b", PortKind::Argv, Some(1))],
+                        vec![edge(
+                            "edge-ab",
+                            "a",
+                            PortKind::Stdout,
+                            "b",
+                            PortKind::Argv,
+                            Some(1),
+                        )],
                     ),
                     HashMap::new(),
                     action,
@@ -1867,7 +2037,8 @@ mod tests {
                     edge,
                     port: PortKind::Stdout,
                     payload: b"testing
-".to_vec(),
+"
+                    .to_vec(),
                     reset: true,
                     completed: false,
                     success: true,
@@ -1901,10 +2072,26 @@ mod tests {
                 let context = argv_context(ExecutionAction::RerunPush);
                 context.clone().run("a".to_string()).await.expect("run");
 
-                assert_eq!(materialized_text(&context, "a", "stdout"), "testing\n", "iteration {iteration}: source stdout");
-                assert_eq!(materialized_text(&context, "b", "argv-1"), "testing\n", "iteration {iteration}: target argv-1");
-                assert_eq!(materialized_text(&context, "b", "stdout"), "testing", "iteration {iteration}: target stdout");
-                assert_eq!(materialized_text(&context, "b", "stderr"), "", "iteration {iteration}: target stderr");
+                assert_eq!(
+                    materialized_text(&context, "a", "stdout"),
+                    "testing\n",
+                    "iteration {iteration}: source stdout"
+                );
+                assert_eq!(
+                    materialized_text(&context, "b", "argv-1"),
+                    "testing\n",
+                    "iteration {iteration}: target argv-1"
+                );
+                assert_eq!(
+                    materialized_text(&context, "b", "stdout"),
+                    "testing",
+                    "iteration {iteration}: target stdout"
+                );
+                assert_eq!(
+                    materialized_text(&context, "b", "stderr"),
+                    "",
+                    "iteration {iteration}: target stderr"
+                );
             }
         }
 
@@ -1915,20 +2102,27 @@ mod tests {
             let mut target = node(NodeKind::Exec, "b");
             target.path = Some("printf".to_string());
             target.args = Some(vec![
-                crate::model::ExecArg::Configured(crate::model::ExecArgConfig::Literal {
+                crate::model::ExecArg::Literal {
                     value: "%s|%s".to_string(),
-                }),
-                crate::model::ExecArg::Configured(crate::model::ExecArgConfig::Argv { slot: 1 }),
-                crate::model::ExecArg::Configured(crate::model::ExecArgConfig::Literal {
+                },
+                crate::model::ExecArg::Argv { slot: 1 },
+                crate::model::ExecArg::Literal {
                     value: "fixed".to_string(),
-                }),
+                },
             ]);
             let context = Arc::new(
                 ExecutionContext::new(
                     "exec-configured-args".to_string(),
                     workspace(
                         vec![source, target],
-                        vec![edge("edge-ab", "a", PortKind::Stdout, "b", PortKind::Argv, Some(1))],
+                        vec![edge(
+                            "edge-ab",
+                            "a",
+                            PortKind::Stdout,
+                            "b",
+                            PortKind::Argv,
+                            Some(1),
+                        )],
                     ),
                     HashMap::new(),
                     ExecutionAction::PullRun,
@@ -1945,19 +2139,10 @@ mod tests {
 
         #[tokio::test]
         async fn argv_test_repush() {
+            let mut store = HashMap::new();
             let mut source = node(NodeKind::Script, "a");
-            source.materialized.legacy_values.insert(
-                "stdout".to_string(),
-                MaterializedValue {
-                    data_base64: encode_bytes(b"testing\n"),
-                },
-            );
-            source.materialized.legacy_values.insert(
-                "stderr".to_string(),
-                MaterializedValue {
-                    data_base64: encode_bytes(b""),
-                },
-            );
+            seed_materialized_text(&mut source, &mut store, "stdout", "testing\n");
+            seed_materialized_text(&mut source, &mut store, "stderr", "");
             let mut target = node(NodeKind::Script, "b");
             target.script = Some("printf '%s' \"$1\"".to_string());
             let context = Arc::new(
@@ -1965,9 +2150,16 @@ mod tests {
                     "argv-repush".to_string(),
                     workspace(
                         vec![source, target],
-                        vec![edge("edge-ab", "a", PortKind::Stdout, "b", PortKind::Argv, Some(1))],
+                        vec![edge(
+                            "edge-ab",
+                            "a",
+                            PortKind::Stdout,
+                            "b",
+                            PortKind::Argv,
+                            Some(1),
+                        )],
                     ),
-                    HashMap::new(),
+                    store,
                     ExecutionAction::Repush,
                     broadcast::channel(64).0,
                     CancellationToken::new(),
@@ -1983,8 +2175,8 @@ mod tests {
         }
     }
 
-
     mod smoke {
+
         use super::*;
         use std::collections::{BTreeMap, BTreeSet};
         use tempfile::tempdir;
@@ -2001,13 +2193,8 @@ mod tests {
             edge(id, from, PortKind::Stdout, to, PortKind::Stdin, None)
         }
 
-        fn seed(node: &mut Node, key: &str, value: &str) {
-            node.materialized.legacy_values.insert(
-                key.to_string(),
-                MaterializedValue {
-                    data_base64: encode_bytes(value.as_bytes()),
-                },
-            );
+        fn seed(node: &mut Node, store: &mut MaterializedOutputStore, key: &str, value: &str) {
+            seed_materialized_text(node, store, key, value);
         }
 
         fn seeded_snapshot() -> Snapshot {
@@ -2038,8 +2225,11 @@ mod tests {
             ])
         }
 
-        fn build_smoke_context(action: ExecutionAction) -> (Arc<ExecutionContext>, tempfile::TempDir, Snapshot) {
+        fn build_smoke_context(
+            action: ExecutionAction,
+        ) -> (Arc<ExecutionContext>, tempfile::TempDir, Snapshot) {
             let tempdir = tempdir().expect("tempdir");
+            let mut store = HashMap::new();
             let mut a = smoke_script("a", "printf 'A' >> trace.log; printf 'a'");
             let mut b = smoke_script(
                 "b",
@@ -2050,25 +2240,28 @@ mod tests {
                 r#"printf 'C' >> trace.log; input=$(cat); printf '%s c' "$input""#,
             );
 
-            seed(&mut a, "stdout", "old-a");
-            seed(&mut a, "stderr", "old-a-err");
-            seed(&mut b, "stdin", "old-b-in");
-            seed(&mut b, "stdout", "old-b-out");
-            seed(&mut b, "stderr", "old-b-err");
-            seed(&mut c, "stdin", "old-c-in");
-            seed(&mut c, "stdout", "old-c-out");
-            seed(&mut c, "stderr", "old-c-err");
+            seed(&mut a, &mut store, "stdout", "old-a");
+            seed(&mut a, &mut store, "stderr", "old-a-err");
+            seed(&mut b, &mut store, "stdin", "old-b-in");
+            seed(&mut b, &mut store, "stdout", "old-b-out");
+            seed(&mut b, &mut store, "stderr", "old-b-err");
+            seed(&mut c, &mut store, "stdin", "old-c-in");
+            seed(&mut c, &mut store, "stdout", "old-c-out");
+            seed(&mut c, &mut store, "stderr", "old-c-err");
 
             let mut ws = workspace(
                 vec![a, b, c],
-                vec![smoke_edge("edge-ab", "a", "b"), smoke_edge("edge-bc", "b", "c")],
+                vec![
+                    smoke_edge("edge-ab", "a", "b"),
+                    smoke_edge("edge-bc", "b", "c"),
+                ],
             );
             ws.cwd = tempdir.path().to_string_lossy().into_owned();
             let context = Arc::new(
                 ExecutionContext::new(
                     "smoke-exec".to_string(),
                     ws,
-                    HashMap::new(),
+                    store,
                     action,
                     broadcast::channel(64).0,
                     CancellationToken::new(),
@@ -2079,8 +2272,10 @@ mod tests {
         }
 
         fn trace_recomputed_nodes(tempdir: &tempfile::TempDir) -> BTreeSet<String> {
-            let trace = std::fs::read_to_string(tempdir.path().join("trace.log")).unwrap_or_default();
-            trace.chars()
+            let trace =
+                std::fs::read_to_string(tempdir.path().join("trace.log")).unwrap_or_default();
+            trace
+                .chars()
                 .filter_map(|marker| match marker {
                     'A' => Some("a".to_string()),
                     'B' => Some("b".to_string()),
@@ -2145,17 +2340,27 @@ mod tests {
 
             assert_eq!(
                 recomputed,
-                expected_recomputed.iter().map(|node| (*node).to_string()).collect(),
+                expected_recomputed
+                    .iter()
+                    .map(|node| (*node).to_string())
+                    .collect(),
                 "unexpected recomputed nodes for {:?}",
                 action
             );
             assert_eq!(
                 rematerialized,
-                expected_rematerialized.iter().map(|port| (*port).to_string()).collect(),
+                expected_rematerialized
+                    .iter()
+                    .map(|port| (*port).to_string())
+                    .collect(),
                 "unexpected rematerialized ports for {:?}",
                 action
             );
-            assert_eq!(final_values, expected_snapshot, "unexpected final snapshot for {:?}", action);
+            assert_eq!(
+                final_values, expected_snapshot,
+                "unexpected final snapshot for {:?}",
+                action
+            );
         }
 
         #[tokio::test]
@@ -2334,7 +2539,6 @@ mod tests {
         }
     }
 
-
     #[tokio::test]
     async fn pull_inputs_runs_shared_dependencies_once() {
         let (tx, _) = broadcast::channel(256);
@@ -2349,23 +2553,66 @@ mod tests {
         let workspace = workspace(
             vec![source, passthru_a, passthru_b, target],
             vec![
-                edge("edge-source-a", "source", PortKind::Stdout, "pass-a", PortKind::Stdin, None),
-                edge("edge-source-b", "source", PortKind::Stdout, "pass-b", PortKind::Stdin, None),
-                edge("edge-a-target", "pass-a", PortKind::Stdout, "target", PortKind::Stdin, None),
-                edge("edge-b-target", "pass-b", PortKind::Stdout, "target", PortKind::Argv, Some(1)),
+                edge(
+                    "edge-source-a",
+                    "source",
+                    PortKind::Stdout,
+                    "pass-a",
+                    PortKind::Stdin,
+                    None,
+                ),
+                edge(
+                    "edge-source-b",
+                    "source",
+                    PortKind::Stdout,
+                    "pass-b",
+                    PortKind::Stdin,
+                    None,
+                ),
+                edge(
+                    "edge-a-target",
+                    "pass-a",
+                    PortKind::Stdout,
+                    "target",
+                    PortKind::Stdin,
+                    None,
+                ),
+                edge(
+                    "edge-b-target",
+                    "pass-b",
+                    PortKind::Stdout,
+                    "target",
+                    PortKind::Argv,
+                    Some(1),
+                ),
             ],
         );
 
-        let exec_id = manager.run(workspace, HashMap::new(), "target".to_string(), ExecutionAction::PullInputs);
+        let exec_id = manager.run(
+            workspace,
+            HashMap::new(),
+            "target".to_string(),
+            ExecutionAction::PullInputs,
+        );
         let mut source_starts = 0;
         timeout(Duration::from_secs(3), async {
             loop {
                 match rx.recv().await {
-                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "source" => {
+                    Ok(ServerEvent::ExecStarted {
+                        exec_id: seen,
+                        node_id,
+                        ..
+                    }) if seen == exec_id && node_id == "source" => {
                         source_starts += 1;
                     }
-                    Ok(ServerEvent::ExecFinished { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "pass-b" => break,
-                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen,
+                        node_id,
+                        ..
+                    }) if seen == exec_id && node_id == "pass-b" => break,
+                    Ok(ServerEvent::Error { message, .. }) => {
+                        panic!("unexpected execution error: {message}")
+                    }
                     Ok(_) => {}
                     Err(error) => panic!("event stream closed: {error}"),
                 }
@@ -2374,7 +2621,10 @@ mod tests {
         .await
         .expect("pull_inputs execution did not finish");
 
-        assert_eq!(source_starts, 1, "shared dependency should execute once per pull_inputs run");
+        assert_eq!(
+            source_starts, 1,
+            "shared dependency should execute once per pull_inputs run"
+        );
     }
 
     #[tokio::test]
@@ -2391,23 +2641,66 @@ mod tests {
         let workspace = workspace(
             vec![source, passthru_a, passthru_b, target],
             vec![
-                edge("edge-source-a", "source", PortKind::Stdout, "pass-a", PortKind::Stdin, None),
-                edge("edge-source-b", "source", PortKind::Stdout, "pass-b", PortKind::Stdin, None),
-                edge("edge-a-target", "pass-a", PortKind::Stdout, "target", PortKind::Stdin, None),
-                edge("edge-b-target", "pass-b", PortKind::Stdout, "target", PortKind::Argv, Some(1)),
+                edge(
+                    "edge-source-a",
+                    "source",
+                    PortKind::Stdout,
+                    "pass-a",
+                    PortKind::Stdin,
+                    None,
+                ),
+                edge(
+                    "edge-source-b",
+                    "source",
+                    PortKind::Stdout,
+                    "pass-b",
+                    PortKind::Stdin,
+                    None,
+                ),
+                edge(
+                    "edge-a-target",
+                    "pass-a",
+                    PortKind::Stdout,
+                    "target",
+                    PortKind::Stdin,
+                    None,
+                ),
+                edge(
+                    "edge-b-target",
+                    "pass-b",
+                    PortKind::Stdout,
+                    "target",
+                    PortKind::Argv,
+                    Some(1),
+                ),
             ],
         );
 
-        let exec_id = manager.run(workspace, HashMap::new(), "target".to_string(), ExecutionAction::PullRun);
+        let exec_id = manager.run(
+            workspace,
+            HashMap::new(),
+            "target".to_string(),
+            ExecutionAction::PullRun,
+        );
         let mut source_starts = 0;
         timeout(Duration::from_secs(3), async {
             loop {
                 match rx.recv().await {
-                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "source" => {
+                    Ok(ServerEvent::ExecStarted {
+                        exec_id: seen,
+                        node_id,
+                        ..
+                    }) if seen == exec_id && node_id == "source" => {
                         source_starts += 1;
                     }
-                    Ok(ServerEvent::ExecFinished { exec_id: seen, node_id, .. }) if seen == exec_id && node_id == "target" => break,
-                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen,
+                        node_id,
+                        ..
+                    }) if seen == exec_id && node_id == "target" => break,
+                    Ok(ServerEvent::Error { message, .. }) => {
+                        panic!("unexpected execution error: {message}")
+                    }
                     Ok(_) => {}
                     Err(error) => panic!("event stream closed: {error}"),
                 }
@@ -2416,35 +2709,55 @@ mod tests {
         .await
         .expect("pull_run execution did not finish");
 
-        assert_eq!(source_starts, 1, "shared dependency should execute once per pull_run");
+        assert_eq!(
+            source_starts, 1,
+            "shared dependency should execute once per pull_run"
+        );
     }
-
 
     #[tokio::test]
     async fn rerun_push_reuses_cached_sibling_inputs() {
         let (tx, _) = broadcast::channel(128);
         let manager = ExecutionManager::new(tx.clone());
         let mut rx = tx.subscribe();
+        let mut store = HashMap::new();
         let mut text = node(NodeKind::Text, "text-1");
         text.text = Some("hello\n".to_string());
         let mut script = node(NodeKind::Script, "script-1");
         script.script = Some("printf '%s %s\n' \"$1\" \"$(cat)\"".to_string());
-        script.materialized.legacy_values.insert(
-            "argv-1".to_string(),
-            MaterializedValue {
-                data_base64: encode_bytes(b"world\n"),
-            },
-        );
+        seed_materialized_text(&mut script, &mut store, "argv-1", "world\n");
         let workspace = workspace(
             vec![text, script],
             vec![
-                edge("edge-1", "text-1", PortKind::Stdout, "script-1", PortKind::Stdin, None),
-                edge("edge-2", "text-1", PortKind::Stdout, "script-1", PortKind::Argv, Some(1)),
+                edge(
+                    "edge-1",
+                    "text-1",
+                    PortKind::Stdout,
+                    "script-1",
+                    PortKind::Stdin,
+                    None,
+                ),
+                edge(
+                    "edge-2",
+                    "text-1",
+                    PortKind::Stdout,
+                    "script-1",
+                    PortKind::Argv,
+                    Some(1),
+                ),
             ],
         );
 
-        let exec_id = manager.run(workspace, HashMap::new(), "text-1".to_string(), ExecutionAction::RerunPush);
-        assert_eq!(wait_for_finish(&mut rx, &exec_id, "script-1").await, Some(0));
+        let exec_id = manager.run(
+            workspace,
+            store,
+            "text-1".to_string(),
+            ExecutionAction::RerunPush,
+        );
+        assert_eq!(
+            wait_for_finish(&mut rx, &exec_id, "script-1").await,
+            Some(0)
+        );
     }
 
     #[tokio::test]
@@ -2458,30 +2771,51 @@ mod tests {
         sink.script = Some("cat >/dev/null".to_string());
         let workspace = workspace(
             vec![source, sink],
-            vec![edge("edge-1", "script-1", PortKind::Stdout, "script-2", PortKind::Stdin, None)],
+            vec![edge(
+                "edge-1",
+                "script-1",
+                PortKind::Stdout,
+                "script-2",
+                PortKind::Stdin,
+                None,
+            )],
         );
 
-        let exec_id = manager.run(workspace, HashMap::new(), "script-1".to_string(), ExecutionAction::RerunPush);
+        let exec_id = manager.run(
+            workspace,
+            HashMap::new(),
+            "script-1".to_string(),
+            ExecutionAction::RerunPush,
+        );
         let mut source_finished_at = None;
         let mut sink_started_at = None;
         timeout(Duration::from_secs(3), async {
             loop {
                 match rx.recv().await {
-                    Ok(ServerEvent::ExecStarted { exec_id: seen, node_id, timestamp })
-                        if seen == exec_id && node_id == "script-2" => {
-                            sink_started_at = Some(timestamp);
-                            if source_finished_at.is_some() {
-                                break;
-                            }
+                    Ok(ServerEvent::ExecStarted {
+                        exec_id: seen,
+                        node_id,
+                        timestamp,
+                    }) if seen == exec_id && node_id == "script-2" => {
+                        sink_started_at = Some(timestamp);
+                        if source_finished_at.is_some() {
+                            break;
                         }
-                    Ok(ServerEvent::ExecFinished { exec_id: seen, node_id, timestamp, .. })
-                        if seen == exec_id && node_id == "script-1" => {
-                            source_finished_at = Some(timestamp);
-                            if sink_started_at.is_some() {
-                                break;
-                            }
+                    }
+                    Ok(ServerEvent::ExecFinished {
+                        exec_id: seen,
+                        node_id,
+                        timestamp,
+                        ..
+                    }) if seen == exec_id && node_id == "script-1" => {
+                        source_finished_at = Some(timestamp);
+                        if sink_started_at.is_some() {
+                            break;
                         }
-                    Ok(ServerEvent::Error { message, .. }) => panic!("unexpected execution error: {message}"),
+                    }
+                    Ok(ServerEvent::Error { message, .. }) => {
+                        panic!("unexpected execution error: {message}")
+                    }
                     Ok(_) => {}
                     Err(error) => panic!("event stream closed: {error}"),
                 }
@@ -2501,35 +2835,28 @@ mod tests {
     #[tokio::test]
     async fn failed_rerun_push_commits_source_outputs_but_not_downstream() {
         let (tx, _) = broadcast::channel(256);
+        let mut store = HashMap::new();
+        let mut source = node(NodeKind::Script, "script-1");
+        source.script = Some("printf 'fresh\n'; exit 1".to_string());
+        seed_materialized_text(&mut source, &mut store, "stdout", "old-output\n");
+        let mut sink = node(NodeKind::Script, "script-2");
+        sink.script = Some("cat >/dev/null".to_string());
+        seed_materialized_text(&mut sink, &mut store, "stdin", "old-input\n");
         let context = Arc::new(
             ExecutionContext::new(
                 "exec-test".to_string(),
                 workspace(
-                    {
-                        let mut source = node(NodeKind::Script, "script-1");
-                        source.script = Some("printf 'fresh
-'; exit 1".to_string());
-                        source.materialized.legacy_values.insert(
-                            "stdout".to_string(),
-                            MaterializedValue {
-                                data_base64: encode_bytes(b"old-output
-"),
-                            },
-                        );
-                        let mut sink = node(NodeKind::Script, "script-2");
-                        sink.script = Some("cat >/dev/null".to_string());
-                        sink.materialized.legacy_values.insert(
-                            "stdin".to_string(),
-                            MaterializedValue {
-                                data_base64: encode_bytes(b"old-input
-"),
-                            },
-                        );
-                        vec![source, sink]
-                    },
-                    vec![edge("edge-1", "script-1", PortKind::Stdout, "script-2", PortKind::Stdin, None)],
+                    vec![source, sink],
+                    vec![edge(
+                        "edge-1",
+                        "script-1",
+                        PortKind::Stdout,
+                        "script-2",
+                        PortKind::Stdin,
+                        None,
+                    )],
                 ),
-                HashMap::new(),
+                store,
                 ExecutionAction::RerunPush,
                 tx,
                 CancellationToken::new(),
@@ -2537,7 +2864,11 @@ mod tests {
             .expect("context"),
         );
 
-        context.clone().run("script-1".to_string()).await.expect("run");
+        context
+            .clone()
+            .run("script-1".to_string())
+            .await
+            .expect("run");
 
         assert_eq!(
             context
@@ -2546,8 +2877,7 @@ mod tests {
                 .get("script-1")
                 .and_then(|ports| ports.get("stdout"))
                 .cloned(),
-            Some(b"fresh
-".to_vec())
+            Some(b"fresh\n".to_vec())
         );
         assert_eq!(context.node_last_exit_code("script-1"), Some(1));
         assert_eq!(
@@ -2557,35 +2887,27 @@ mod tests {
                 .get("script-2")
                 .and_then(|ports| ports.get("stdin"))
                 .cloned(),
-            Some(b"old-input
-".to_vec())
+            Some(b"old-input\n".to_vec())
         );
     }
-
-
-
 
     #[tokio::test]
     async fn materialized_empty_outputs_still_allow_repush() {
         let (tx, _) = broadcast::channel(64);
         let manager = ExecutionManager::new(tx.clone());
         let mut rx = tx.subscribe();
+        let mut store = HashMap::new();
         let mut file = node(NodeKind::File, "file-1");
-        file.materialized.legacy_values.insert(
-            "stdout".to_string(),
-            MaterializedValue {
-                data_base64: encode_bytes(b""),
-            },
-        );
-        file.materialized.legacy_values.insert(
-            "stderr".to_string(),
-            MaterializedValue {
-                data_base64: encode_bytes(b""),
-            },
-        );
+        seed_materialized_text(&mut file, &mut store, "stdout", "");
+        seed_materialized_text(&mut file, &mut store, "stderr", "");
         let workspace = workspace(vec![file], vec![]);
 
-        let exec_id = manager.run(workspace, HashMap::new(), "file-1".to_string(), ExecutionAction::Repush);
+        let exec_id = manager.run(
+            workspace,
+            store,
+            "file-1".to_string(),
+            ExecutionAction::Repush,
+        );
         assert_eq!(wait_for_finish(&mut rx, &exec_id, "file-1").await, Some(0));
     }
 
@@ -2602,7 +2924,14 @@ mod tests {
                         let display = node(NodeKind::Display, "display-1");
                         vec![source, display]
                     },
-                    vec![edge("edge-1", "text-1", PortKind::Stdout, "display-1", PortKind::Stdin, None)],
+                    vec![edge(
+                        "edge-1",
+                        "text-1",
+                        PortKind::Stdout,
+                        "display-1",
+                        PortKind::Stdin,
+                        None,
+                    )],
                 ),
                 HashMap::new(),
                 ExecutionAction::PullRun,
@@ -2612,7 +2941,11 @@ mod tests {
             .expect("context"),
         );
 
-        context.clone().run("display-1".to_string()).await.expect("run");
+        context
+            .clone()
+            .run("display-1".to_string())
+            .await
+            .expect("run");
         assert_eq!(
             context
                 .materialized_values
@@ -2627,32 +2960,61 @@ mod tests {
     #[tokio::test]
     async fn pull_run_commits_failing_upstream_but_not_downstream() {
         let (tx, _) = broadcast::channel(64);
+        let mut store = HashMap::new();
         let mut a = node(NodeKind::Script, "a");
         a.script = Some("printf 'A'; exit 1".to_string());
         let mut b = node(NodeKind::Script, "b");
         b.script = Some("printf 'B'".to_string());
         let mut c = node(NodeKind::Script, "c");
         c.script = Some("printf '%s %s C' \"$1\" \"$2\"".to_string());
-        seed_materialized_text(&mut c, "stdout", "old-c");
+        seed_materialized_text(&mut c, &mut store, "stdout", "old-c");
         let mut d = node(NodeKind::Script, "d");
         d.script = Some("printf '%s D' \"$1\"".to_string());
-        seed_materialized_text(&mut d, "stdout", "old-d");
+        seed_materialized_text(&mut d, &mut store, "stdout", "old-d");
         let mut e = node(NodeKind::Script, "e");
         e.script = Some("printf '%s E' \"$1\"".to_string());
-        seed_materialized_text(&mut e, "stdout", "old-e");
+        seed_materialized_text(&mut e, &mut store, "stdout", "old-e");
         let context = Arc::new(
             ExecutionContext::new(
                 "pull-run-fail".to_string(),
                 workspace(
                     vec![a, b, c, d, e],
                     vec![
-                        edge("edge-a-c", "a", PortKind::Stdout, "c", PortKind::Argv, Some(1)),
-                        edge("edge-b-c", "b", PortKind::Stdout, "c", PortKind::Argv, Some(2)),
-                        edge("edge-c-d", "c", PortKind::Stdout, "d", PortKind::Argv, Some(1)),
-                        edge("edge-b-e", "b", PortKind::Stdout, "e", PortKind::Argv, Some(1)),
+                        edge(
+                            "edge-a-c",
+                            "a",
+                            PortKind::Stdout,
+                            "c",
+                            PortKind::Argv,
+                            Some(1),
+                        ),
+                        edge(
+                            "edge-b-c",
+                            "b",
+                            PortKind::Stdout,
+                            "c",
+                            PortKind::Argv,
+                            Some(2),
+                        ),
+                        edge(
+                            "edge-c-d",
+                            "c",
+                            PortKind::Stdout,
+                            "d",
+                            PortKind::Argv,
+                            Some(1),
+                        ),
+                        edge(
+                            "edge-b-e",
+                            "b",
+                            PortKind::Stdout,
+                            "e",
+                            PortKind::Argv,
+                            Some(1),
+                        ),
                     ],
                 ),
-                HashMap::new(),
+                store,
                 ExecutionAction::PullRun,
                 tx,
                 CancellationToken::new(),
@@ -2674,20 +3036,27 @@ mod tests {
     #[tokio::test]
     async fn rerun_uses_materialized_inputs_even_if_upstream_last_exit_failed() {
         let (tx, _) = broadcast::channel(64);
+        let mut store = HashMap::new();
         let mut source = node(NodeKind::Script, "source");
         source.materialized.last_exit_code = Some(1);
         let mut target = node(NodeKind::Script, "target");
         target.script = Some("cat".to_string());
-        seed_materialized_text(&mut target, "stdin", "old-input
-");
+        seed_materialized_text(&mut target, &mut store, "stdin", "old-input\n");
         let context = Arc::new(
             ExecutionContext::new(
                 "rerun-materialized-inputs".to_string(),
                 workspace(
                     vec![source, target],
-                    vec![edge("edge-1", "source", PortKind::Stdout, "target", PortKind::Stdin, None)],
+                    vec![edge(
+                        "edge-1",
+                        "source",
+                        PortKind::Stdout,
+                        "target",
+                        PortKind::Stdin,
+                        None,
+                    )],
                 ),
-                HashMap::new(),
+                store,
                 ExecutionAction::Rerun,
                 tx,
                 CancellationToken::new(),
@@ -2695,34 +3064,45 @@ mod tests {
             .expect("context"),
         );
 
-        context.clone().run("target".to_string()).await.expect("run");
-        assert_eq!(materialized_text(&context, "target", "stdout"), "old-input
-");
+        context
+            .clone()
+            .run("target".to_string())
+            .await
+            .expect("run");
+        assert_eq!(
+            materialized_text(&context, "target", "stdout"),
+            "old-input\n"
+        );
         assert_eq!(context.node_last_exit_code("target"), Some(0));
     }
 
     #[tokio::test]
     async fn repush_replays_failed_exit_without_materializing_downstream() {
         let (tx, _) = broadcast::channel(64);
+        let mut store = HashMap::new();
         let mut source = node(NodeKind::Script, "source");
-        seed_materialized_text(&mut source, "stdout", "watch me
-");
-        seed_materialized_text(&mut source, "stderr", "");
+        seed_materialized_text(&mut source, &mut store, "stdout", "watch me\n");
+        seed_materialized_text(&mut source, &mut store, "stderr", "");
         source.materialized.last_exit_code = Some(1);
         let mut sink = node(NodeKind::Script, "sink");
         sink.script = Some("cat".to_string());
-        seed_materialized_text(&mut sink, "stdin", "old-input
-");
-        seed_materialized_text(&mut sink, "stdout", "old-output
-");
+        seed_materialized_text(&mut sink, &mut store, "stdin", "old-input\n");
+        seed_materialized_text(&mut sink, &mut store, "stdout", "old-output\n");
         let context = Arc::new(
             ExecutionContext::new(
                 "repush-failed-status".to_string(),
                 workspace(
                     vec![source, sink],
-                    vec![edge("edge-1", "source", PortKind::Stdout, "sink", PortKind::Stdin, None)],
+                    vec![edge(
+                        "edge-1",
+                        "source",
+                        PortKind::Stdout,
+                        "sink",
+                        PortKind::Stdin,
+                        None,
+                    )],
                 ),
-                HashMap::new(),
+                store,
                 ExecutionAction::Repush,
                 tx,
                 CancellationToken::new(),
@@ -2730,14 +3110,21 @@ mod tests {
             .expect("context"),
         );
 
-        context.clone().run("source".to_string()).await.expect("run");
-        assert_eq!(materialized_text(&context, "source", "stdout"), "watch me
-");
+        context
+            .clone()
+            .run("source".to_string())
+            .await
+            .expect("run");
+        assert_eq!(
+            materialized_text(&context, "source", "stdout"),
+            "watch me\n"
+        );
         assert_eq!(context.node_last_exit_code("source"), Some(1));
-        assert_eq!(materialized_text(&context, "sink", "stdin"), "old-input
-");
-        assert_eq!(materialized_text(&context, "sink", "stdout"), "old-output
-");
+        assert_eq!(materialized_text(&context, "sink", "stdin"), "old-input\n");
+        assert_eq!(
+            materialized_text(&context, "sink", "stdout"),
+            "old-output\n"
+        );
     }
 
     #[tokio::test]
@@ -2755,8 +3142,15 @@ mod tests {
             .expect("context"),
         );
 
-        let error = context.clone().run("display-1".to_string()).await.expect_err("repush should fail");
-        assert!(error.contains("has no outputs to push"), "unexpected error: {error}");
+        let error = context
+            .clone()
+            .run("display-1".to_string())
+            .await
+            .expect_err("repush should fail");
+        assert!(
+            error.contains("has no outputs to push"),
+            "unexpected error: {error}"
+        );
     }
 
     #[tokio::test]
@@ -2770,35 +3164,51 @@ mod tests {
         formula_node.formula = Some("$1^2 + 1".to_string());
         let workspace = workspace(
             vec![source, formula_node],
-            vec![edge("edge-1", "text-1", PortKind::Stdout, "formula-1", PortKind::Argv, Some(1))],
+            vec![edge(
+                "edge-1",
+                "text-1",
+                PortKind::Stdout,
+                "formula-1",
+                PortKind::Argv,
+                Some(1),
+            )],
         );
 
-        let exec_id = manager.run(workspace, HashMap::new(), "formula-1".to_string(), ExecutionAction::PullRun);
-        assert_eq!(wait_for_finish(&mut rx, &exec_id, "formula-1").await, Some(0));
+        let exec_id = manager.run(
+            workspace,
+            HashMap::new(),
+            "formula-1".to_string(),
+            ExecutionAction::PullRun,
+        );
+        assert_eq!(
+            wait_for_finish(&mut rx, &exec_id, "formula-1").await,
+            Some(0)
+        );
     }
 
     #[tokio::test]
     async fn formula_rerun_uses_materialized_argv() {
         let (tx, _) = broadcast::channel(64);
+        let mut store = HashMap::new();
+        let source = node(NodeKind::Text, "text-1");
+        let mut formula_node = node(NodeKind::Formula, "formula-1");
+        formula_node.formula = Some("let x = $1 + 2 in x * 3".to_string());
+        seed_materialized_text(&mut formula_node, &mut store, "argv-1", "5");
         let context = Arc::new(
             ExecutionContext::new(
                 "formula-rerun".to_string(),
                 workspace(
-                    {
-                        let source = node(NodeKind::Text, "text-1");
-                        let mut formula_node = node(NodeKind::Formula, "formula-1");
-                        formula_node.formula = Some("let x = $1 + 2 in x * 3".to_string());
-                        formula_node.materialized.legacy_values.insert(
-                            "argv-1".to_string(),
-                            MaterializedValue {
-                                data_base64: encode_bytes(b"5"),
-                            },
-                        );
-                        vec![source, formula_node]
-                    },
-                    vec![edge("edge-1", "text-1", PortKind::Stdout, "formula-1", PortKind::Argv, Some(1))],
+                    vec![source, formula_node],
+                    vec![edge(
+                        "edge-1",
+                        "text-1",
+                        PortKind::Stdout,
+                        "formula-1",
+                        PortKind::Argv,
+                        Some(1),
+                    )],
                 ),
-                HashMap::new(),
+                store,
                 ExecutionAction::Rerun,
                 tx,
                 CancellationToken::new(),
@@ -2806,7 +3216,11 @@ mod tests {
             .expect("context"),
         );
 
-        context.clone().run("formula-1".to_string()).await.expect("run");
+        context
+            .clone()
+            .run("formula-1".to_string())
+            .await
+            .expect("run");
         assert_eq!(
             context
                 .materialized_values

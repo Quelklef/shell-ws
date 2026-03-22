@@ -83,7 +83,7 @@ import { selectionSupportsPreviewCategory, togglePreviewCategoryForSelection, ty
 import { nextPaneSizes } from "./lib/paneLayout";
 import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
-import { clearNodeMaterialized, duplicateNodeMaterialized, migrateLegacyNodeMaterialized } from "./lib/materializedOutputs";
+import { clearNodeMaterialized, duplicateNodeMaterialized } from "./lib/materializedOutputs";
 
 const nodeTypes = {
   shell: ShellNode,
@@ -382,7 +382,6 @@ function flowNodeToPersistedWorkspaceNode(
     materialized: model.materialized
       ? {
           ...model.materialized,
-          values: undefined,
         }
       : model.materialized,
   };
@@ -1031,31 +1030,6 @@ function WorkspaceCanvas() {
     saveMaterializedOutputs(nextStore).catch((error) => setToast(String(error)));
   }, []);
 
-  const migrateLoadedMaterializedState = useCallback((loadedWorkspace: Workspace, loadedTuckspace: TuckedSubgraph[], store: MaterializedOutputStore) => {
-    let nextStore = store;
-    let changed = false;
-    const nextWorkspace = {
-      ...loadedWorkspace,
-      nodes: loadedWorkspace.nodes.map((node) => {
-        const migrated = migrateLegacyNodeMaterialized(node, nextStore);
-        nextStore = migrated.store;
-        changed ||= migrated.changed;
-        return migrated.node;
-      }),
-    };
-    const nextTuckspace = loadedTuckspace.map((item) => ({
-      ...item,
-      nodes: item.nodes.map((node) => {
-        const migrated = migrateLegacyNodeMaterialized(node, nextStore);
-        nextStore = migrated.store;
-        changed ||= migrated.changed;
-        return migrated.node;
-      }),
-    }));
-    return { workspace: nextWorkspace, tuckspace: nextTuckspace, store: nextStore, changed };
-  }, []);
-
-
   const persistWorkspaceSnapshot = useCallback((
     nextNodes: FlowNode[],
     nextEdges: FlowEdge[],
@@ -1544,7 +1518,6 @@ function WorkspaceCanvas() {
                     ...candidate.data.model,
                     materialized: {
                       ...event.materialized,
-                      values: undefined,
                     },
                   };
                   return {
@@ -1993,17 +1966,8 @@ function WorkspaceCanvas() {
     setWorkspaceSwitching(true);
     try {
       await flushPendingWorkspaceSave();
-      const migrated = migrateLoadedMaterializedState(
-        sanitizeWorkspace(await getWorkspace(workspaceId)),
-        tuckspaceRef.current,
-        materializedOutputStoreRef.current,
-      );
-      if (migrated.changed) {
-        setMaterializedOutputStore(migrated.store);
-        materializedOutputStoreRef.current = migrated.store;
-        saveMaterializedOutputs(migrated.store).catch((error) => setToast(String(error)));
-      }
-      applyLoadedWorkspace(migrated.workspace, migrated.store);
+      const workspace = sanitizeWorkspace(await getWorkspace(workspaceId));
+      applyLoadedWorkspace(workspace, materializedOutputStoreRef.current);
     } catch (error) {
       setToast(String(error));
     } finally {
@@ -2160,19 +2124,15 @@ function WorkspaceCanvas() {
           getMaterializedOutputs(),
           initialWorkspaceId ? getWorkspace(initialWorkspaceId) : createWorkspace(),
         ]);
-        const migrated = migrateLoadedMaterializedState(sanitizeWorkspace(loadedWorkspace), sharedTuckspace, sharedMaterializedOutputs);
+        const workspace = sanitizeWorkspace(loadedWorkspace);
         if (disposed) {
           return;
         }
-        setTuckspace(migrated.tuckspace);
-        tuckspaceRef.current = migrated.tuckspace;
-        setMaterializedOutputStore(migrated.store);
-        materializedOutputStoreRef.current = migrated.store;
-        if (migrated.changed) {
-          saveTuckspace(migrated.tuckspace).catch((error) => setToast(String(error)));
-          saveMaterializedOutputs(migrated.store).catch((error) => setToast(String(error)));
-        }
-        applyLoadedWorkspace(migrated.workspace, migrated.store);
+        setTuckspace(sharedTuckspace);
+        tuckspaceRef.current = sharedTuckspace;
+        setMaterializedOutputStore(sharedMaterializedOutputs);
+        materializedOutputStoreRef.current = sharedMaterializedOutputs;
+        applyLoadedWorkspace(workspace, sharedMaterializedOutputs);
       } catch (error) {
         if (!disposed) {
           setToast(String(error));
@@ -2457,9 +2417,7 @@ function WorkspaceCanvas() {
     () => selectedNodes.map((node) => ({
       id: node.id,
       previewTabs: node.data.previewTabs ?? nodePreviewTabs(node.data.model.kind),
-      openPreviewTabs:
-        node.data.model.uiState?.openPreviewTabs ??
-        (node.data.model.uiState?.activePreviewTab ? [node.data.model.uiState.activePreviewTab] : []),
+      openPreviewTabs: node.data.model.uiState?.openPreviewTabs ?? [],
     })),
     [selectedNodes],
   );
@@ -2781,7 +2739,6 @@ function WorkspaceCanvas() {
               ...node.data.model,
               uiState: {
                 ...(node.data.model.uiState ?? {}),
-                activePreviewTab: null,
                 openPreviewTabs: nextTabs,
               },
             },
