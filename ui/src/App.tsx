@@ -2318,11 +2318,11 @@ function WorkspaceCanvas() {
       const targetWidth = targetNode.measured?.width ?? targetNode.width ?? targetNode.data.model.size.width;
       return [
         {
-          top: sourceNode.position.y * zoom + viewportY + portTopForEdgeHandle(sourceNode, sourceHandle, edges),
+          top: (sourceNode.position.y + portTopForEdgeHandle(sourceNode, sourceHandle, edges)) * zoom + viewportY,
           right: (sourceNode.position.x + sourceWidth) * zoom + viewportX,
         },
         {
-          top: targetNode.position.y * zoom + viewportY + portTopForEdgeHandle(targetNode, targetHandle, edges),
+          top: (targetNode.position.y + portTopForEdgeHandle(targetNode, targetHandle, edges)) * zoom + viewportY,
           right: targetNode.position.x * zoom + viewportX,
         },
       ];
