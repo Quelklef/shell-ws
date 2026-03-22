@@ -194,6 +194,7 @@ mod tests {
             text: None,
             formula: None,
             materialized_values: HashMap::new(),
+            last_exit_code: None,
             auto_run: None,
             ui_state: Default::default(),
         }

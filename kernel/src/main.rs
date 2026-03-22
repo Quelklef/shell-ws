@@ -443,15 +443,17 @@ fn summarize_server_event(event: &ServerEvent) -> String {
             exec_id,
             node_id,
             exit_code,
+            materialized,
             ..
         } => {
             format!(
-                "finish {} {} code={}",
+                "finish {} {} code={} mat={}",
                 node_id,
                 exec_id,
                 exit_code
                     .map(|code| code.to_string())
-                    .unwrap_or_else(|| "null".to_string())
+                    .unwrap_or_else(|| "null".to_string()),
+                if *materialized { 1 } else { 0 }
             )
         }
         ServerEvent::PortActivity {

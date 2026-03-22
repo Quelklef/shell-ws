@@ -1472,7 +1472,9 @@ function WorkspaceCanvas() {
                           ...candidate.data,
                           model: {
                             ...candidate.data.model,
-                            lastExitCode: event.exit_code,
+                            lastExitCode: event.materialized
+                              ? event.exit_code
+                              : candidate.data.model.lastExitCode ?? null,
                           },
                         },
                       }
@@ -1488,7 +1490,7 @@ function WorkspaceCanvas() {
               if (node) {
                 for (const port of previewOutputPortsForKind(node.kind)) {
                   const candidate = live[port];
-                  if (event.exit_code === 0 && candidate) {
+                  if (event.materialized && candidate) {
                     committed[port] = { ...candidate, completed: true };
                   }
                   delete live[port];

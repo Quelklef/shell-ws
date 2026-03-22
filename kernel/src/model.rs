@@ -68,6 +68,7 @@ impl Workspace {
                     text: Some(String::new()),
                     formula: None,
                     materialized_values: HashMap::new(),
+                    last_exit_code: None,
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
@@ -90,6 +91,7 @@ impl Workspace {
                     text: None,
                     formula: None,
                     materialized_values: HashMap::new(),
+                    last_exit_code: None,
                     auto_run: None,
                     ui_state: NodeUiState::default(),
                 },
@@ -448,6 +450,7 @@ pub enum ServerEvent {
         exec_id: String,
         node_id: String,
         exit_code: Option<i32>,
+        materialized: bool,
         timestamp: u64,
     },
     PortActivity {

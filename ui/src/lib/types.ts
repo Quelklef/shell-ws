@@ -159,6 +159,7 @@ export type ServerEvent =
       exec_id: string;
       node_id: string;
       exit_code: number | null;
+      materialized: boolean;
       timestamp: number;
     }
   | {

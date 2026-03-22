@@ -209,6 +209,7 @@ struct ExecutionContext {
     outgoing: HashMap<String, Vec<Edge>>,
     incoming: HashMap<String, Vec<Edge>>,
     materialized_values: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
+    last_exit_codes: Arc<Mutex<HashMap<String, Option<i32>>>>,
     execution_scope: Arc<Mutex<HashSet<String>>>,
     blocked_nodes: Arc<Mutex<HashSet<String>>>,
 }
@@ -279,6 +280,11 @@ impl ExecutionContext {
             .iter()
             .map(|node| (node.id.clone(), materialized_value_map(node)))
             .collect();
+        let last_exit_codes = workspace
+            .nodes
+            .iter()
+            .map(|node| (node.id.clone(), node.last_exit_code))
+            .collect();
 
         Ok(Self {
             exec_id,
@@ -290,6 +296,7 @@ impl ExecutionContext {
             outgoing,
             incoming,
             materialized_values: Arc::new(Mutex::new(materialized_values)),
+            last_exit_codes: Arc::new(Mutex::new(last_exit_codes)),
             execution_scope: Arc::new(Mutex::new(HashSet::new())),
             blocked_nodes: Arc::new(Mutex::new(HashSet::new())),
         })
@@ -340,16 +347,6 @@ impl ExecutionContext {
         self.incoming.get(node_id).cloned().unwrap_or_default()
     }
 
-    fn required_input_keys(&self, node_id: &str) -> Vec<String> {
-        let mut keys = HashSet::new();
-        for edge in self.connected_input_edges(node_id) {
-            keys.insert(input_key(edge.to.port, edge.to.slot));
-        }
-        let mut keys: Vec<String> = keys.into_iter().collect();
-        keys.sort();
-        keys
-    }
-
     fn node_materialized_values(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
         self.materialized_values
             .lock()
@@ -372,18 +369,30 @@ impl ExecutionContext {
             .collect()
     }
 
+    fn node_last_exit_code(&self, node_id: &str) -> Option<i32> {
+        self.last_exit_codes.lock().get(node_id).copied().flatten()
+    }
+
+    fn materialized_outputs_are_usable(&self, node_id: &str) -> bool {
+        self.node_last_exit_code(node_id) == Some(0)
+    }
+
     fn ensure_rerunnable(&self, node_id: &str) -> Result<(), String> {
         let available = self.node_materialized_inputs(node_id);
-        let missing: Vec<String> = self
-            .required_input_keys(node_id)
-            .into_iter()
-            .filter(|key| !available.contains_key(key))
-            .collect();
+        let mut missing = HashSet::new();
+        for edge in self.connected_input_edges(node_id) {
+            let key = input_key(edge.to.port, edge.to.slot);
+            if !self.materialized_outputs_are_usable(&edge.from.node_id) || !available.contains_key(&key) {
+                missing.insert(key);
+            }
+        }
+        let mut missing: Vec<String> = missing.into_iter().collect();
+        missing.sort();
         if missing.is_empty() {
             Ok(())
         } else {
             Err(format!(
-                "{} is missing materialized {}.",
+                "{} is missing usable materialized {}.",
                 node_label(self.nodes.get(node_id).expect("node")),
                 missing.join(", "),
             ))
@@ -395,6 +404,9 @@ impl ExecutionContext {
         let required = source_output_ports(&node.kind);
         if required.is_empty() {
             return Err(format!("{} has no outputs to push.", node_label(node)));
+        }
+        if !self.materialized_outputs_are_usable(node_id) {
+            return Err(format!("{} has no successful materialized outputs to push.", node_label(node)));
         }
         let available = self.node_materialized_outputs(node_id);
         let missing: Vec<String> = required
@@ -593,6 +605,12 @@ impl ExecutionContext {
         values.extend(outputs);
     }
 
+    fn set_materialized_exit_code(&self, node_id: &str, exit_code: Option<i32>) {
+        self.last_exit_codes
+            .lock()
+            .insert(node_id.to_string(), exit_code);
+    }
+
     fn emit_started(&self, node_id: &str) {
         let _ = self.broadcaster.send(ServerEvent::ExecStarted {
             exec_id: self.exec_id.clone(),
@@ -601,11 +619,12 @@ impl ExecutionContext {
         });
     }
 
-    fn emit_finished(&self, node_id: &str, exit_code: Option<i32>) {
+    fn emit_finished(&self, node_id: &str, exit_code: Option<i32>, materialized: bool) {
         let _ = self.broadcaster.send(ServerEvent::ExecFinished {
             exec_id: self.exec_id.clone(),
             node_id: node_id.to_string(),
             exit_code,
+            materialized,
             timestamp: now_ms(),
         });
     }
@@ -658,7 +677,7 @@ struct RunController {
     edge_buffers: HashMap<String, EdgeBufferState>,
     live_inputs: HashMap<String, HashMap<String, Vec<u8>>>,
     live_outputs: HashMap<String, HashMap<String, Vec<u8>>>,
-    pending_finish_events: HashMap<String, Option<i32>>,
+    pending_finish_events: HashMap<String, (Option<i32>, bool)>,
     pending_delivery_counts: HashMap<String, usize>,
     next_delivery_sequence: HashMap<String, u64>,
     next_delivery_to_process: HashMap<String, u64>,
@@ -872,25 +891,29 @@ impl RunController {
         let inputs = self.context.node_materialized_inputs(node_id);
         let state = self.stream_states.get(node_id).cloned().unwrap_or_default();
 
-        if self.has_fresh_stdin_edge(node_id) {
-            if !state.stdin_seen && !state.buffered_stdin_closed {
-                return false;
-            }
-        } else if self.context.has_connected_stdin(node_id) && !inputs.contains_key("stdin") {
+        if state.tainted {
             return false;
         }
 
-        for edge in self
-            .context
-            .connected_input_edges(node_id)
-            .into_iter()
-            .filter(|edge| edge.to.port == PortKind::Argv)
-        {
+        for edge in self.context.connected_input_edges(node_id) {
+            let key = input_key(edge.to.port, edge.to.slot);
             if self.plan.scope.contains(&edge.from.node_id) {
-                if !state.argv_completed.contains(&edge.id) {
-                    return false;
+                match edge.to.port {
+                    PortKind::Stdin => {
+                        if !state.stdin_seen && !state.buffered_stdin_closed {
+                            return false;
+                        }
+                    }
+                    PortKind::Argv => {
+                        if !state.argv_completed.contains(&edge.id) {
+                            return false;
+                        }
+                    }
+                    _ => {}
                 }
-            } else if !inputs.contains_key(&input_key(PortKind::Argv, edge.to.slot)) {
+            } else if !self.context.materialized_outputs_are_usable(&edge.from.node_id)
+                || !inputs.contains_key(&key)
+            {
                 return false;
             }
         }
@@ -1270,12 +1293,16 @@ impl RunController {
     }
 
     async fn handle_node_exit(&mut self, node_id: &str, exit_code: Option<i32>) -> Result<(), String> {
-        let commit_success = exit_code == Some(0)
-            && !self
-                .stream_states
-                .get(node_id)
-                .map(|state| state.tainted)
-                .unwrap_or(false);
+        let tainted = self
+            .stream_states
+            .get(node_id)
+            .map(|state| state.tainted)
+            .unwrap_or(false);
+        // Only committed exits update materialized state. Tainted or abnormal exits leave the
+        // previous committed outputs and exit code intact so downstream reuse stays conservative.
+        let materialized = exit_code.is_some() && !tainted;
+        // Downstream reuse is stricter: only a clean zero exit may propagate to dependent nodes.
+        let propagation_success = exit_code == Some(0) && !tainted;
 
         if let Some(state) = self.stream_states.get_mut(node_id) {
             state.running = false;
@@ -1283,8 +1310,9 @@ impl RunController {
             state.stdin_writer = None;
         }
 
-        if commit_success {
+        if materialized {
             self.commit_live_outputs(node_id);
+            self.context.set_materialized_exit_code(node_id, exit_code);
         } else {
             self.live_outputs.remove(node_id);
         }
@@ -1308,7 +1336,7 @@ impl RunController {
             };
             let delivered_payload = !flushed.is_empty();
             for (reset, payload) in flushed {
-                self.schedule_delivery(edge.clone(), edge.from.port, payload, reset, true, commit_success);
+                self.schedule_delivery(edge.clone(), edge.from.port, payload, reset, true, propagation_success);
             }
             if !delivered_payload {
                 let reset = self
@@ -1316,11 +1344,11 @@ impl RunController {
                     .get(&edge.id)
                     .map(|state| !state.sent_any)
                     .unwrap_or(true);
-                self.schedule_delivery(edge.clone(), edge.from.port, Vec::new(), reset, true, commit_success);
+                self.schedule_delivery(edge.clone(), edge.from.port, Vec::new(), reset, true, propagation_success);
             }
         }
 
-        self.pending_finish_events.insert(node_id.to_string(), exit_code);
+        self.pending_finish_events.insert(node_id.to_string(), (exit_code, materialized));
         self.finish_node_if_delivery_drained(node_id);
         Ok(())
     }
@@ -1331,8 +1359,8 @@ impl RunController {
         if self.pending_delivery_counts.get(node_id).copied().unwrap_or(0) != 0 {
             return;
         }
-        if let Some(exit_code) = self.pending_finish_events.remove(node_id) {
-            self.context.emit_finished(node_id, exit_code);
+        if let Some((exit_code, materialized)) = self.pending_finish_events.remove(node_id) {
+            self.context.emit_finished(node_id, exit_code, materialized);
         }
     }
 
@@ -1629,6 +1657,7 @@ mod tests {
             text: None,
             formula: None,
             materialized_values: HashMap::new(),
+            last_exit_code: Some(0),
             auto_run: Some(AutoRunConfig {
                 enabled: false,
                 mode: ExecutionAction::RerunPush,
@@ -1670,6 +1699,26 @@ mod tests {
         }
     }
 
+    fn seed_materialized_text(node: &mut Node, key: &str, value: &str) {
+        node.materialized_values.insert(
+            key.to_string(),
+            MaterializedValue {
+                data_base64: encode_bytes(value.as_bytes()),
+            },
+        );
+    }
+
+    fn materialized_text(context: &ExecutionContext, node_id: &str, key: &str) -> String {
+        let bytes = context
+            .materialized_values
+            .lock()
+            .get(node_id)
+            .and_then(|values| values.get(key))
+            .cloned()
+            .unwrap_or_default();
+        String::from_utf8(bytes).expect("materialized utf8")
+    }
+
     async fn wait_for_finish(rx: &mut broadcast::Receiver<ServerEvent>, exec_id: &str, node_id: &str) -> Option<i32> {
         timeout(Duration::from_secs(3), async {
             loop {
@@ -1708,17 +1757,6 @@ mod tests {
                 )
                 .expect("context"),
             )
-        }
-
-        fn materialized_text(context: &ExecutionContext, node_id: &str, key: &str) -> String {
-            let bytes = context
-                .materialized_values
-                .lock()
-                .get(node_id)
-                .and_then(|values| values.get(key))
-                .cloned()
-                .unwrap_or_default();
-            String::from_utf8(bytes).expect("materialized utf8")
         }
 
         #[tokio::test]
@@ -2385,7 +2423,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn failed_rerun_push_keeps_committed_values_unchanged() {
+    async fn failed_rerun_push_commits_source_outputs_but_not_downstream() {
         let (tx, _) = broadcast::channel(256);
         let context = Arc::new(
             ExecutionContext::new(
@@ -2393,11 +2431,13 @@ mod tests {
                 workspace(
                     {
                         let mut source = node(NodeKind::Script, "script-1");
-                        source.script = Some("printf 'fresh\n'; exit 1".to_string());
+                        source.script = Some("printf 'fresh
+'; exit 1".to_string());
                         source.materialized_values.insert(
                             "stdout".to_string(),
                             MaterializedValue {
-                                data_base64: encode_bytes(b"old-output\n"),
+                                data_base64: encode_bytes(b"old-output
+"),
                             },
                         );
                         let mut sink = node(NodeKind::Script, "script-2");
@@ -2405,7 +2445,8 @@ mod tests {
                         sink.materialized_values.insert(
                             "stdin".to_string(),
                             MaterializedValue {
-                                data_base64: encode_bytes(b"old-input\n"),
+                                data_base64: encode_bytes(b"old-input
+"),
                             },
                         );
                         vec![source, sink]
@@ -2428,8 +2469,10 @@ mod tests {
                 .get("script-1")
                 .and_then(|ports| ports.get("stdout"))
                 .cloned(),
-            Some(b"old-output\n".to_vec())
+            Some(b"fresh
+".to_vec())
         );
+        assert_eq!(context.node_last_exit_code("script-1"), Some(1));
         assert_eq!(
             context
                 .materialized_values
@@ -2437,7 +2480,8 @@ mod tests {
                 .get("script-2")
                 .and_then(|ports| ports.get("stdin"))
                 .cloned(),
-            Some(b"old-input\n".to_vec())
+            Some(b"old-input
+".to_vec())
         );
     }
 
@@ -2500,6 +2544,105 @@ mod tests {
                 .cloned(),
             Some(b"watch me".to_vec())
         );
+    }
+
+    #[tokio::test]
+    async fn pull_run_commits_failing_upstream_but_not_downstream() {
+        let (tx, _) = broadcast::channel(64);
+        let mut a = node(NodeKind::Script, "a");
+        a.script = Some("printf 'A'; exit 1".to_string());
+        let mut b = node(NodeKind::Script, "b");
+        b.script = Some("printf 'B'".to_string());
+        let mut c = node(NodeKind::Script, "c");
+        c.script = Some("printf '%s %s C' \"$1\" \"$2\"".to_string());
+        seed_materialized_text(&mut c, "stdout", "old-c");
+        let mut d = node(NodeKind::Script, "d");
+        d.script = Some("printf '%s D' \"$1\"".to_string());
+        seed_materialized_text(&mut d, "stdout", "old-d");
+        let mut e = node(NodeKind::Script, "e");
+        e.script = Some("printf '%s E' \"$1\"".to_string());
+        seed_materialized_text(&mut e, "stdout", "old-e");
+        let context = Arc::new(
+            ExecutionContext::new(
+                "pull-run-fail".to_string(),
+                workspace(
+                    vec![a, b, c, d, e],
+                    vec![
+                        edge("edge-a-c", "a", PortKind::Stdout, "c", PortKind::Argv, Some(1)),
+                        edge("edge-b-c", "b", PortKind::Stdout, "c", PortKind::Argv, Some(2)),
+                        edge("edge-c-d", "c", PortKind::Stdout, "d", PortKind::Argv, Some(1)),
+                        edge("edge-b-e", "b", PortKind::Stdout, "e", PortKind::Argv, Some(1)),
+                    ],
+                ),
+                ExecutionAction::PullRun,
+                tx,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        );
+
+        context.clone().run("d".to_string()).await.expect("run");
+
+        assert_eq!(materialized_text(&context, "a", "stdout"), "A");
+        assert_eq!(context.node_last_exit_code("a"), Some(1));
+        assert_eq!(materialized_text(&context, "b", "stdout"), "B");
+        assert_eq!(context.node_last_exit_code("b"), Some(0));
+        assert_eq!(materialized_text(&context, "c", "stdout"), "old-c");
+        assert_eq!(materialized_text(&context, "d", "stdout"), "old-d");
+        assert_eq!(materialized_text(&context, "e", "stdout"), "old-e");
+    }
+
+    #[tokio::test]
+    async fn rerun_push_blocks_reuse_from_failed_materialized_upstream() {
+        let (tx, _) = broadcast::channel(64);
+        let mut a = node(NodeKind::Script, "a");
+        a.script = Some("printf 'A'; exit 1".to_string());
+        seed_materialized_text(&mut a, "stdout", "A");
+        a.last_exit_code = Some(1);
+        let mut b = node(NodeKind::Script, "b");
+        b.script = Some("printf 'B'".to_string());
+        let mut c = node(NodeKind::Script, "c");
+        c.script = Some("printf '%s %s C' \"$1\" \"$2\"".to_string());
+        seed_materialized_text(&mut c, "argv-1", "old-A");
+        seed_materialized_text(&mut c, "argv-2", "old-B");
+        seed_materialized_text(&mut c, "stdout", "old-c");
+        let mut d = node(NodeKind::Script, "d");
+        d.script = Some("printf '%s D' \"$1\"".to_string());
+        seed_materialized_text(&mut d, "argv-1", "old-c");
+        seed_materialized_text(&mut d, "stdout", "old-d");
+        let mut e = node(NodeKind::Script, "e");
+        e.script = Some("printf '%s E' \"$1\"".to_string());
+        seed_materialized_text(&mut e, "argv-1", "old-b");
+        seed_materialized_text(&mut e, "stdout", "old-e");
+        let context = Arc::new(
+            ExecutionContext::new(
+                "rerun-push-fail-gate".to_string(),
+                workspace(
+                    vec![a, b, c, d, e],
+                    vec![
+                        edge("edge-a-c", "a", PortKind::Stdout, "c", PortKind::Argv, Some(1)),
+                        edge("edge-b-c", "b", PortKind::Stdout, "c", PortKind::Argv, Some(2)),
+                        edge("edge-c-d", "c", PortKind::Stdout, "d", PortKind::Argv, Some(1)),
+                        edge("edge-b-e", "b", PortKind::Stdout, "e", PortKind::Argv, Some(1)),
+                    ],
+                ),
+                ExecutionAction::RerunPush,
+                tx,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        );
+
+        context.clone().run("b".to_string()).await.expect("run");
+
+        assert_eq!(materialized_text(&context, "a", "stdout"), "A");
+        assert_eq!(context.node_last_exit_code("a"), Some(1));
+        assert_eq!(materialized_text(&context, "b", "stdout"), "B");
+        assert_eq!(context.node_last_exit_code("b"), Some(0));
+        assert_eq!(materialized_text(&context, "c", "stdout"), "old-c");
+        assert_eq!(materialized_text(&context, "d", "stdout"), "old-d");
+        assert_eq!(materialized_text(&context, "e", "stdout"), "B E");
+        assert_eq!(context.node_last_exit_code("e"), Some(0));
     }
 
     #[tokio::test]

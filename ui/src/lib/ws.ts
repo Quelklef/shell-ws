@@ -18,7 +18,7 @@ function summarizeServerEvent(event: ServerEvent) {
     case "exec_started":
       return `start ${event.node_id} ${event.exec_id}`;
     case "exec_finished":
-      return `finish ${event.node_id} ${event.exec_id} code=${event.exit_code ?? "null"}`;
+      return `finish ${event.node_id} ${event.exec_id} code=${event.exit_code ?? "null"} mat=${event.materialized ? 1 : 0}`;
     case "port_activity":
       return `port ${event.node_id}.${event.port} bytes=${event.bytes}`;
     case "node_output":
