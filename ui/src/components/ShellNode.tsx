@@ -23,7 +23,7 @@ import type {
 import { clamp } from "../lib/utils";
 
 const PORT_SPACING = 30;
-const PORT_STACK_TOP = 84;
+const PORT_STACK_TOP = 48;
 
 function AutoRunControls({
   config,
