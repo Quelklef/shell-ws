@@ -2204,16 +2204,18 @@ function WorkspaceCanvas() {
       return { top: 16, right: 16 } as const;
     }
     const [viewportX, viewportY, zoom] = viewportTransform;
-    const minX = Math.min(...selectedNodes.map((node) => node.position.x));
     const minY = Math.min(...selectedNodes.map((node) => node.position.y));
     const maxX = Math.max(...selectedNodes.map((node) => node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width)));
     const screenTop = minY * zoom + viewportY;
     const screenRight = maxX * zoom + viewportX;
     const anchorLeft = screenRight + 12;
-    const sticky = screenTop < 16 || anchorLeft > canvas.clientWidth - 240 || anchorLeft < 16;
-    return sticky
-      ? ({ top: 16, right: 16 } as const)
-      : ({ top: Math.max(16, screenTop), left: anchorLeft } as const);
+    const stickyTop = screenTop < 16;
+    const stickyRight = anchorLeft > canvas.clientWidth - 180;
+
+    return {
+      top: stickyTop ? 16 : Math.max(16, screenTop),
+      ...(stickyRight ? { right: 16 } : { left: anchorLeft }),
+    } as const;
   }, [selectedNodes, viewportTransform]);
 
   const deleteTuckShell = useCallback((tuckId: string) => {
