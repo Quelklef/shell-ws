@@ -19,7 +19,7 @@ import {
   useReactFlow,
   useStore,
 } from "@xyflow/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
 import "@xyflow/react/dist/style.css";
 
@@ -2352,6 +2352,20 @@ function WorkspaceCanvas() {
     () => tuckspace.filter((item) => isTuckspaceShell(item) && item.userNamed),
     [tuckspace],
   );
+  const selectionActionsRef = useRef<HTMLDivElement | null>(null);
+  const [selectionActionsSize, setSelectionActionsSize] = useState({ width: 180, height: 240 });
+
+  useLayoutEffect(() => {
+    const element = selectionActionsRef.current;
+    if (!element) {
+      return;
+    }
+    const next = { width: element.offsetWidth, height: element.offsetHeight };
+    setSelectionActionsSize((current) =>
+      current.width === next.width && current.height === next.height ? current : next,
+    );
+  });
+
   const canToggleSelectedPreviewTabs = useMemo(
     () => ({
       all: selectionSupportsPreviewCategory(selectedPreviewNodes, "all"),
@@ -2368,34 +2382,29 @@ function WorkspaceCanvas() {
       return null;
     }
     const canvas = canvasRef.current;
+    const margin = 16;
     if (!canvas) {
-      return { top: 16, right: 16 } as const;
+      return { top: margin, right: margin } as const;
     }
+    let anchorLeft = margin;
+    let anchorTop = margin;
     if (selectedNodes.length > 0) {
       const [viewportX, viewportY, zoom] = viewportTransform;
       const minY = Math.min(...selectedNodes.map((node) => node.position.y));
       const maxX = Math.max(...selectedNodes.map((node) => node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width)));
-      const screenTop = minY * zoom + viewportY;
-      const screenRight = maxX * zoom + viewportX;
-      const anchorLeft = screenRight + 12;
-      const stickyTop = screenTop < 16;
-      const stickyRight = anchorLeft > canvas.clientWidth - 180;
-      return {
-        top: stickyTop ? 16 : Math.max(16, screenTop),
-        ...(stickyRight ? { right: 16 } : { left: anchorLeft }),
-      } as const;
+      anchorLeft = maxX * zoom + viewportX + 12;
+      anchorTop = minY * zoom + viewportY;
+    } else if (selectedEdgeBounds) {
+      anchorLeft = selectedEdgeBounds.right + 12;
+      anchorTop = selectedEdgeBounds.top;
     }
-    if (!selectedEdgeBounds) {
-      return { top: 16, right: 16 } as const;
-    }
-    const anchorLeft = selectedEdgeBounds.right + 12;
-    const stickyTop = selectedEdgeBounds.top < 16;
-    const stickyRight = anchorLeft > canvas.clientWidth - 180;
+    const maxLeft = Math.max(margin, canvas.clientWidth - selectionActionsSize.width - margin);
+    const maxTop = Math.max(margin, canvas.clientHeight - selectionActionsSize.height - margin);
     return {
-      top: stickyTop ? 16 : Math.max(16, selectedEdgeBounds.top),
-      ...(stickyRight ? { right: 16 } : { left: anchorLeft }),
+      left: Math.min(Math.max(margin, anchorLeft), maxLeft),
+      top: Math.min(Math.max(margin, anchorTop), maxTop),
     } as const;
-  }, [selectedEdgeBounds, selectedEdges.length, selectedNodes, viewportTransform]);
+  }, [selectedEdgeBounds, selectedEdges.length, selectedNodes, selectionActionsSize.height, selectionActionsSize.width, viewportTransform]);
 
   const deleteTuckShell = useCallback((tuckId: string) => {
     const nextTuckspace = tuckspaceRef.current.filter((item) => item.id !== tuckId);
@@ -2962,7 +2971,7 @@ function WorkspaceCanvas() {
           <Background gap={28} size={1} color="rgba(250, 244, 233, 0.08)" />
         </ReactFlow>
         {selectionActionsStyle && (
-          <div className="selection-actions" style={selectionActionsStyle}>
+          <div ref={selectionActionsRef} className="selection-actions" style={selectionActionsStyle}>
             <button type="button" onClick={duplicateSelected} disabled={selectedNodes.length === 0}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
