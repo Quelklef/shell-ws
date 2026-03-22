@@ -301,6 +301,7 @@ export default function ShellNode({ data }: NodeProps) {
     model.size.width,
     openPreviewSignature,
     paneSizeSignature,
+    previewControlsLocation,
     refreshNodeInternals,
     showFormulaHelp,
   ]);
