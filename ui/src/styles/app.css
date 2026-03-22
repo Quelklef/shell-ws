@@ -592,7 +592,7 @@ textarea {
 }
 
 .node-palette button,
-.context-menu button,
+.selection-actions button,
 .node-toolbar button,
 .execution-item button,
 .autorun-controls button,
@@ -615,7 +615,7 @@ textarea {
 }
 
 .node-palette button:hover,
-.context-menu button:hover,
+.selection-actions button:hover,
 .node-toolbar button:hover,
 .execution-item button:hover,
 .autorun-controls button:hover,
@@ -927,24 +927,24 @@ textarea {
   box-shadow: var(--shadow);
 }
 
-.context-menu {
+.selection-actions {
   position: absolute;
   z-index: 30;
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 6px;
-  padding: 8px;
+  padding: 6px;
   border-radius: 8px;
-  background: rgba(12, 14, 16, 0.96);
-  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--selection) 18%, rgba(12, 14, 16, 0.96));
+  border: 1px solid color-mix(in srgb, var(--selection) 70%, white 30%);
   box-shadow: var(--shadow);
 }
 
-.context-menu-item {
+.selection-actions-item {
   position: relative;
 }
 
-.context-submenu {
+.selection-actions-submenu {
   position: absolute;
   left: calc(100% + 8px);
   top: 0;
@@ -954,20 +954,20 @@ textarea {
   min-width: 170px;
   padding: 8px;
   border-radius: 8px;
-  background: rgba(12, 14, 16, 0.96);
-  border: 1px solid var(--line);
+  background: color-mix(in srgb, var(--selection) 16%, rgba(12, 14, 16, 0.96));
+  border: 1px solid color-mix(in srgb, var(--selection) 64%, white 36%);
   box-shadow: var(--shadow);
 }
 
-.context-menu-item-has-submenu:hover .context-submenu,
-.context-menu-item-has-submenu:focus-within .context-submenu {
+.selection-actions-item-has-submenu:hover .selection-actions-submenu,
+.selection-actions-item-has-submenu:focus-within .selection-actions-submenu {
   display: flex;
 }
 
-.context-menu button:disabled {
+.selection-actions button:disabled {
   cursor: not-allowed;
   color: var(--text-soft);
-  border-color: rgba(244, 236, 223, 0.08);
+  border-color: color-mix(in srgb, var(--selection) 24%, rgba(244, 236, 223, 0.08));
   background: rgba(244, 236, 223, 0.03);
 }
 

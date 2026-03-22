@@ -619,25 +619,8 @@ function WorkspaceCanvas() {
   >([]);
   const [tuckspaceQuery, setTuckspaceQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
-  const [contextMenu, setContextMenu] = useState<{
-    x: number;
-    y: number;
-  } | null>(null);
   const socketRef = useRef<ReturnType<typeof connectKernel> | null>(null);
   const canvasRef = useRef<HTMLElement | null>(null);
-  const suppressContextMenuUntilRef = useRef(0);
-  const viewportMoveActiveRef = useRef(false);
-  const rightDragRef = useRef<{
-    pointerId: number | null;
-    startX: number;
-    startY: number;
-    moved: boolean;
-  }>({
-    pointerId: null,
-    startX: 0,
-    startY: 0,
-    moved: false,
-  });
   const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "createdAt" | "sortOrder" | "cwd" | "openaiApiKey" | "ui"> | null>(
     null,
   );
@@ -1562,30 +1545,6 @@ function WorkspaceCanvas() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!contextMenu) {
-      return;
-    }
-
-    const closeOnPointer = (event: PointerEvent) => {
-      if ((event.target as HTMLElement | null)?.closest(".context-menu")) {
-        return;
-      }
-      setContextMenu(null);
-    };
-
-    const closeMenu = () => setContextMenu(null);
-
-    window.addEventListener("pointerdown", closeOnPointer, true);
-    window.addEventListener("wheel", closeMenu, { passive: true });
-    window.addEventListener("keydown", closeMenu);
-
-    return () => {
-      window.removeEventListener("pointerdown", closeOnPointer, true);
-      window.removeEventListener("wheel", closeMenu);
-      window.removeEventListener("keydown", closeMenu);
-    };
-  }, [contextMenu]);
 
   useEffect(() => {
     if (!toast) {
@@ -1770,7 +1729,6 @@ function WorkspaceCanvas() {
     setGeneration({});
     setRuntime(loadedRuntime);
     setActiveExecutions([]);
-    setContextMenu(null);
     setWorkspaceDeleteConfirmingId(null);
     setWorkspaceRenamingId(null);
     setWorkspaceRenameDraft("");
@@ -2117,7 +2075,6 @@ function WorkspaceCanvas() {
     setEdges(nextEdges);
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
-    setContextMenu(null);
   }, [clearRunningTimer, persistWorkspaceSnapshot, setEdges, setNodes]);
 
   const untuckSubgraph = useCallback((tuckId: string) => {
@@ -2214,9 +2171,13 @@ function WorkspaceCanvas() {
     });
   }, [workspaceSummaries]);
 
-  const selectedNodeIds = useMemo(
-    () => new Set(nodes.filter((node) => node.selected).map((node) => node.id)),
+  const selectedNodes = useMemo(
+    () => nodes.filter((node) => node.selected),
     [nodes],
+  );
+  const selectedNodeIds = useMemo(
+    () => new Set(selectedNodes.map((node) => node.id)),
+    [selectedNodes],
   );
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
@@ -2232,6 +2193,28 @@ function WorkspaceCanvas() {
     () => tuckspace.filter((item) => isTuckspaceShell(item) && item.userNamed),
     [tuckspace],
   );
+
+
+  const selectionActionsStyle = useMemo(() => {
+    if (selectedNodes.length === 0) {
+      return null;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return { top: 16, right: 16 } as const;
+    }
+    const [viewportX, viewportY, zoom] = viewportTransform;
+    const minX = Math.min(...selectedNodes.map((node) => node.position.x));
+    const minY = Math.min(...selectedNodes.map((node) => node.position.y));
+    const maxX = Math.max(...selectedNodes.map((node) => node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width)));
+    const screenTop = minY * zoom + viewportY;
+    const screenRight = maxX * zoom + viewportX;
+    const anchorLeft = screenRight + 12;
+    const sticky = screenTop < 16 || anchorLeft > canvas.clientWidth - 240 || anchorLeft < 16;
+    return sticky
+      ? ({ top: 16, right: 16 } as const)
+      : ({ top: Math.max(16, screenTop), left: anchorLeft } as const);
+  }, [selectedNodes, viewportTransform]);
 
   const deleteTuckShell = useCallback((tuckId: string) => {
     const nextTuckspace = tuckspaceRef.current.filter((item) => item.id !== tuckId);
@@ -2296,7 +2279,6 @@ function WorkspaceCanvas() {
       persistSoon(next, edgesRef.current);
       return next;
     });
-    setContextMenu(null);
   }, [persistSoon, setNodes]);
 
   if (!workspaceMeta) {
@@ -2562,62 +2544,9 @@ function WorkspaceCanvas() {
       <main
         ref={canvasRef}
         className="canvas-shell"
-        onPointerDownCapture={(event) => {
-          if (event.button === 2) {
-            rightDragRef.current = {
-              pointerId: event.pointerId,
-              startX: event.clientX,
-              startY: event.clientY,
-              moved: false,
-            };
-          }
-        }}
-        onPointerMoveCapture={(event) => {
-          const state = rightDragRef.current;
-          if (
-            state.pointerId !== null &&
-            state.pointerId === event.pointerId &&
-            (event.buttons & 2) === 2
-          ) {
-            const distance = Math.hypot(
-              event.clientX - state.startX,
-              event.clientY - state.startY,
-            );
-            if (distance > 6) {
-              state.moved = true;
-            }
-          }
-        }}
-        onPointerUpCapture={() => {
-          if (rightDragRef.current.moved) {
-            suppressContextMenuUntilRef.current = Date.now() + 250;
-          }
-          rightDragRef.current = {
-            pointerId: null,
-            startX: 0,
-            startY: 0,
-            moved: false,
-          };
-        }}
-        onContextMenuCapture={(event) => {
-          if (rightDragRef.current.moved || viewportMoveActiveRef.current || Date.now() < suppressContextMenuUntilRef.current) {
+        onContextMenu={(event) => {
+          if (selectedNodes.length > 0) {
             event.preventDefault();
-            rightDragRef.current = {
-              pointerId: null,
-              startX: 0,
-              startY: 0,
-              moved: false,
-            };
-            return;
-          }
-          const selectedCount = nodes.filter((node) => node.selected).length;
-          if (selectedCount > 0) {
-            event.preventDefault();
-            const canvasRect = canvasRef.current?.getBoundingClientRect();
-            setContextMenu({
-              x: (canvasRect ? event.clientX - canvasRect.left : event.clientX) + 32,
-              y: canvasRect ? event.clientY - canvasRect.top : event.clientY,
-            });
           }
         }}
       >
@@ -2643,12 +2572,7 @@ function WorkspaceCanvas() {
           maxZoom={64}
           colorMode="dark"
           connectionLineType={ConnectionLineType.SmoothStep}
-          onMoveStart={() => {
-            viewportMoveActiveRef.current = true;
-          }}
-          onMoveEnd={(_, viewport) => {
-            viewportMoveActiveRef.current = false;
-            suppressContextMenuUntilRef.current = Date.now() + 250;
+          onMoveEnd={(_, viewport) =>
             updateWorkspaceUi(
               (ui) => ({
                 ...ui,
@@ -2657,8 +2581,8 @@ function WorkspaceCanvas() {
                 zoom: viewport.zoom,
               }),
               true,
-            );
-          }}
+            )
+          }
         >
           <MiniMap pannable zoomable className="minimap" />
           <Controls position="bottom-left">
@@ -2677,16 +2601,12 @@ function WorkspaceCanvas() {
           </Panel>
           <Background gap={28} size={1} color="rgba(250, 244, 233, 0.08)" />
         </ReactFlow>
-        {contextMenu && (
-          <div
-            className="context-menu"
-            style={{ left: contextMenu.x, top: contextMenu.y }}
-            onMouseLeave={() => setContextMenu(null)}
-          >
+        {selectionActionsStyle && (
+          <div className="selection-actions" style={selectionActionsStyle}>
             <button type="button" onClick={runLayout}>
               layout selected
             </button>
-            <div className="context-menu-item context-menu-item-has-submenu">
+            <div className="selection-actions-item selection-actions-item-has-submenu">
               <button
                 type="button"
                 onClick={() => moveSelectionToTuckspace()}
@@ -2696,7 +2616,7 @@ function WorkspaceCanvas() {
                 move to tuckspace
               </button>
               {canTuckSelection && tuckspaceShells.length > 0 && (
-                <div className="context-submenu">
+                <div className="selection-actions-submenu">
                   {tuckspaceShells.map((item) => (
                     <button
                       key={item.id}
