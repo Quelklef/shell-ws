@@ -625,6 +625,7 @@ function WorkspaceCanvas() {
   } | null>(null);
   const socketRef = useRef<ReturnType<typeof connectKernel> | null>(null);
   const canvasRef = useRef<HTMLElement | null>(null);
+  const suppressContextMenuUntilRef = useRef(0);
   const rightDragRef = useRef<{
     pointerId: number | null;
     startX: number;
@@ -2587,17 +2588,18 @@ function WorkspaceCanvas() {
           }
         }}
         onPointerUp={() => {
-          window.setTimeout(() => {
-            rightDragRef.current = {
-              pointerId: null,
-              startX: 0,
-              startY: 0,
-              moved: false,
-            };
-          }, 0);
+          if (rightDragRef.current.moved) {
+            suppressContextMenuUntilRef.current = Date.now() + 250;
+          }
+          rightDragRef.current = {
+            pointerId: null,
+            startX: 0,
+            startY: 0,
+            moved: false,
+          };
         }}
         onContextMenu={(event) => {
-          if (rightDragRef.current.moved) {
+          if (rightDragRef.current.moved || Date.now() < suppressContextMenuUntilRef.current) {
             event.preventDefault();
             rightDragRef.current = {
               pointerId: null,
