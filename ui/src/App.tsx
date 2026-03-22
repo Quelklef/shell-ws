@@ -90,7 +90,7 @@ const edgeTypes = {
 
 
 function makeNode(kind: NodeKind, count: number): WorkspaceNode {
-  const previewOpenByDefault = kind === "formula" ? [] : ["stdout"];
+  const previewOpenByDefault = kind === "formula" || kind === "text" ? [] : ["stdout"];
   return {
     id: encodeId(`node-${kind.replaceAll("_", "-")}`),
     kind,
