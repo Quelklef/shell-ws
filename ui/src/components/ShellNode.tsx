@@ -24,6 +24,44 @@ import { clamp } from "../lib/utils";
 
 const PORT_SPACING = 30;
 const PORT_STACK_TOP = 48;
+const PREVIEW_WIDTH_SAMPLE = "MMMMMMMMMM";
+
+function tabExpandedLength(line: string, tabSize: number) {
+  let width = 0;
+  for (const char of line) {
+    if (char === "\t") {
+      const spaces = tabSize - (width % tabSize || 0);
+      width += spaces;
+    } else {
+      width += 1;
+    }
+  }
+  return width;
+}
+
+function measureMonospaceCharWidth(referenceElement: HTMLElement) {
+  const computedStyle = window.getComputedStyle(referenceElement);
+  const probe = document.createElement("span");
+  probe.textContent = PREVIEW_WIDTH_SAMPLE;
+  probe.style.position = "absolute";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.whiteSpace = "pre";
+  probe.style.margin = "0";
+  probe.style.padding = "0";
+  probe.style.border = "0";
+  probe.style.fontFamily = computedStyle.fontFamily;
+  probe.style.fontSize = computedStyle.fontSize;
+  probe.style.fontWeight = computedStyle.fontWeight;
+  probe.style.fontStyle = computedStyle.fontStyle;
+  probe.style.fontVariant = computedStyle.fontVariant;
+  probe.style.letterSpacing = computedStyle.letterSpacing;
+  probe.style.textTransform = computedStyle.textTransform;
+  document.body.appendChild(probe);
+  const width = probe.getBoundingClientRect().width / PREVIEW_WIDTH_SAMPLE.length;
+  probe.remove();
+  return width || Math.max(parseFloat(computedStyle.fontSize) * 0.6, 1);
+}
 
 function AutoRunControls({
   config,
@@ -206,6 +244,15 @@ export default function ShellNode({ data }: NodeProps) {
   );
 
   const floatingPreviewPanes = orderedOpenPreviewTabs.map((port) => {
+    const preview = getVisiblePreview(port);
+    const previewText = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
+    const renderedPreview = preview
+      ? renderDisplay(preview.bytes)
+      : {
+          label: port,
+          content: <div className="display-empty">no materialized {port}</div>,
+        };
+    const paneId = previewPaneId(port);
     const closePreviewPane = () => {
       typedData.onUpdate(model.id, {
         uiState: {
@@ -225,24 +272,22 @@ export default function ShellNode({ data }: NodeProps) {
       if (!paneElement || !bodyElement) {
         return;
       }
-      const maxWidth = Math.max(defaultPaneWidth(paneId, model.size.width), Math.floor(window.innerWidth * 0.5));
+      const tabSize = Number.parseInt(window.getComputedStyle(bodyElement).tabSize || "8", 10) || 8;
+      const longestLineColumns = previewText.split(/\r?\n/).reduce((max, line) => {
+        return Math.max(max, tabExpandedLength(line, tabSize));
+      }, 0);
+      const charWidth = measureMonospaceCharWidth(bodyElement);
+      const maxWidth = Math.max(180, Math.floor(window.innerWidth * 0.3));
       const maxHeight = Math.max(defaultPaneHeight(paneId), Math.floor(window.innerHeight * 0.8));
       const widthChrome = Math.max(24, paneElement.offsetWidth - bodyElement.clientWidth);
       const headerHeight = headerElement?.offsetHeight ?? 0;
       const heightChrome = Math.max(16, paneElement.offsetHeight - headerHeight - bodyElement.clientHeight);
-      const nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(bodyElement.scrollWidth + widthChrome)));
+      const contentWidth = Math.ceil(longestLineColumns * charWidth);
+      const nextWidth = Math.min(maxWidth, Math.max(180, contentWidth + widthChrome));
       const nextHeight = Math.min(maxHeight, Math.max(96, Math.ceil(bodyElement.scrollHeight + headerHeight + heightChrome)));
       typedData.onResizePaneWidth(model.id, paneId, nextWidth);
       typedData.onResizePaneHeight(model.id, paneId, nextHeight);
     };
-    const preview = getVisiblePreview(port);
-    const renderedPreview = preview
-      ? renderDisplay(preview.bytes)
-      : {
-          label: port,
-          content: <div className="display-empty">no materialized {port}</div>,
-        };
-    const paneId = previewPaneId(port);
     return (
       <ResizablePane
         key={port}
