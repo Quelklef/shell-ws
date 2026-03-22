@@ -2795,6 +2795,7 @@ function WorkspaceCanvas() {
           onConnect={onConnect}
           selectionOnDrag
           selectionMode={SelectionMode.Partial}
+          deleteKeyCode={null}
           zoomOnScroll
           panOnScroll={false}
           panOnDrag={[1, 2]}
