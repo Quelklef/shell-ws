@@ -265,15 +265,16 @@ export default function ShellNode({ data }: NodeProps) {
             <button
               type="button"
               className="port-preview-copy nodrag nopan"
-              title={`fit ${port}`}
-              aria-label={`fit ${port}`}
-              onClick={fitPreviewPane}
+              title={`copy ${port}`}
+              aria-label={`copy ${port}`}
+              onClick={() => {
+                const text = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
+                void navigator.clipboard?.writeText(text);
+              }}
             >
               <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                <path d="M6 2.5H2.5V6" />
-                <path d="M10 2.5h3.5V6" />
-                <path d="M6 13.5H2.5V10" />
-                <path d="M10 13.5h3.5V10" />
+                <rect x="5" y="3" width="7" height="9" rx="1.2" />
+                <path d="M4 5H3.2A1.2 1.2 0 0 0 2 6.2v6.6A1.2 1.2 0 0 0 3.2 14h5.6A1.2 1.2 0 0 0 10 12.8V12" />
               </svg>
             </button>
             <button
@@ -293,28 +294,27 @@ export default function ShellNode({ data }: NodeProps) {
             <button
               type="button"
               className="port-preview-copy nodrag nopan"
-              title={`close ${port}`}
-              aria-label={`close ${port}`}
-              onClick={closePreviewPane}
+              title={`fit ${port}`}
+              aria-label={`fit ${port}`}
+              onClick={fitPreviewPane}
             >
               <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                <path d="M4 4l8 8" />
-                <path d="M12 4l-8 8" />
+                <path d="M6 2.5H2.5V6" />
+                <path d="M10 2.5h3.5V6" />
+                <path d="M6 13.5H2.5V10" />
+                <path d="M10 13.5h3.5V10" />
               </svg>
             </button>
             <button
               type="button"
               className="port-preview-copy nodrag nopan"
-              title={`copy ${port}`}
-              aria-label={`copy ${port}`}
-              onClick={() => {
-                const text = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
-                void navigator.clipboard?.writeText(text);
-              }}
+              title={`close ${port}`}
+              aria-label={`close ${port}`}
+              onClick={closePreviewPane}
             >
-              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                <rect x="5" y="3" width="7" height="9" rx="1.2" />
-                <path d="M4 5H3.2A1.2 1.2 0 0 0 2 6.2v6.6A1.2 1.2 0 0 0 3.2 14h5.6A1.2 1.2 0 0 0 10 12.8V12" />
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true" style={{ transform: "scale(1.15)" }}>
+                <path d="M4 4l8 8" />
+                <path d="M12 4l-8 8" />
               </svg>
             </button>
           </div>
