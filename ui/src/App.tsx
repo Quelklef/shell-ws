@@ -1583,7 +1583,7 @@ function WorkspaceCanvas() {
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
       const filteredChanges = changes.filter((change) =>
-        change.type !== "select" || selectionGestureActiveRef.current,
+        change.type !== "select" || selectionGestureActiveRef.current || userSelectionActive,
       );
       if (filteredChanges.length === 0) {
         return;
@@ -1608,13 +1608,13 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [persistLayoutSoon, persistSoon, setNodes],
+    [persistLayoutSoon, persistSoon, setNodes, userSelectionActive],
   );
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<FlowEdge>[]) => {
       const filteredChanges = changes.filter((change) =>
-        change.type !== "select" || selectionGestureActiveRef.current,
+        change.type !== "select" || selectionGestureActiveRef.current || userSelectionActive,
       );
       if (filteredChanges.length === 0) {
         return;
@@ -1633,7 +1633,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [handlers, persistSoon, setEdges, setNodes],
+    [handlers, persistSoon, setEdges, setNodes, userSelectionActive],
   );
 
   const deleteEdge = useCallback(
@@ -2235,6 +2235,34 @@ function WorkspaceCanvas() {
     })),
     [selectedNodes],
   );
+  const selectedElementBounds = useMemo(() => {
+    const nodeBounds = selectedNodes.map((node) => ({
+      minY: node.position.y,
+      maxX: node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width),
+    }));
+    const selectedNodeIds = new Set(selectedNodes.map((node) => node.id));
+    for (const edge of selectedEdges) {
+      const sourceNode = nodes.find((node) => node.id === edge.source);
+      const targetNode = nodes.find((node) => node.id === edge.target);
+      for (const node of [sourceNode, targetNode]) {
+        if (!node || selectedNodeIds.has(node.id)) {
+          continue;
+        }
+        selectedNodeIds.add(node.id);
+        nodeBounds.push({
+          minY: node.position.y,
+          maxX: node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width),
+        });
+      }
+    }
+    if (nodeBounds.length === 0) {
+      return null;
+    }
+    return {
+      minY: Math.min(...nodeBounds.map((bounds) => bounds.minY)),
+      maxX: Math.max(...nodeBounds.map((bounds) => bounds.maxX)),
+    };
+  }, [nodes, selectedEdges, selectedNodes]);
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
     [edges, selectedNodeIds],
@@ -2264,14 +2292,12 @@ function WorkspaceCanvas() {
       return null;
     }
     const canvas = canvasRef.current;
-    if (!canvas) {
+    if (!canvas || !selectedElementBounds) {
       return { top: 16, right: 16 } as const;
     }
     const [viewportX, viewportY, zoom] = viewportTransform;
-    const minY = Math.min(...selectedNodes.map((node) => node.position.y));
-    const maxX = Math.max(...selectedNodes.map((node) => node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width)));
-    const screenTop = minY * zoom + viewportY;
-    const screenRight = maxX * zoom + viewportX;
+    const screenTop = selectedElementBounds.minY * zoom + viewportY;
+    const screenRight = selectedElementBounds.maxX * zoom + viewportX;
     const anchorLeft = screenRight + 12;
     const stickyTop = screenTop < 16;
     const stickyRight = anchorLeft > canvas.clientWidth - 180;
@@ -2280,7 +2306,7 @@ function WorkspaceCanvas() {
       top: stickyTop ? 16 : Math.max(16, screenTop),
       ...(stickyRight ? { right: 16 } : { left: anchorLeft }),
     } as const;
-  }, [selectedEdges.length, selectedNodes, viewportTransform]);
+  }, [selectedEdges.length, selectedElementBounds, selectedNodes.length, viewportTransform]);
 
   const deleteTuckShell = useCallback((tuckId: string) => {
     const nextTuckspace = tuckspaceRef.current.filter((item) => item.id !== tuckId);
