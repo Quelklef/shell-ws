@@ -9,6 +9,7 @@ import type {
 } from "./types";
 import { encodeId, fromBase64, toBase64 } from "./utils";
 
+// Producer outputs and consumer inputs share the same referrer list so store-local GC never needs a workspace scan.
 function uniqueReferrers(referrers: MaterializedReferrer[]) {
   const seen = new Set<string>();
   return referrers.filter((referrer) => {

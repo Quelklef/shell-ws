@@ -24,6 +24,7 @@ fn track_delete(mutation: &mut MaterializedMutation, id: &str) {
     }
 }
 
+// Producer output slots and consumer input slots both live in `referrers`, so GC is decided from one entry in isolation.
 fn dedupe_referrers(referrers: &mut Vec<MaterializedReferrer>) {
     let mut seen = std::collections::HashSet::new();
     referrers.retain(|referrer| seen.insert((referrer.node_id.clone(), referrer.key.clone())));
