@@ -1701,7 +1701,8 @@ textarea {
 
 
 
-.workspace-edge-path.is-animated {
+.workspace-edge-path.is-animated,
+.workspace-edge-path-unbuffered {
   stroke-dasharray: 8 6;
   animation: workspace-edge-crawl 800ms linear infinite;
 }
@@ -1719,12 +1720,24 @@ textarea {
   }
 }
 
+.workspace-edge-hover-target {
+  pointer-events: stroke;
+}
+
 .edge-toolbar {
   position: absolute;
   z-index: 8;
   display: flex;
   align-items: center;
   gap: 4px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+
+.edge-toolbar.is-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 .edge-toolbar.is-selected .edge-buffering {
