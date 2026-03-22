@@ -62,18 +62,6 @@ export default function WorkspaceEdge({
           >
             {String(typedData.buffering ?? "line_or_1024").replaceAll("_", " ")}
           </button>
-          <button
-            type="button"
-            className="edge-delete nodrag nopan"
-            onClick={(event) => {
-              event.stopPropagation();
-              typedData.onDelete?.(id);
-            }}
-            aria-label="delete wire"
-            title="delete wire"
-          >
-            ×
-          </button>
         </div>
       </EdgeLabelRenderer>
     </>

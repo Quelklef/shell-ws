@@ -2175,9 +2175,17 @@ function WorkspaceCanvas() {
     () => nodes.filter((node) => node.selected),
     [nodes],
   );
+  const selectedEdges = useMemo(
+    () => edges.filter((edge) => edge.selected),
+    [edges],
+  );
   const selectedNodeIds = useMemo(
     () => new Set(selectedNodes.map((node) => node.id)),
     [selectedNodes],
+  );
+  const selectedEdgeIds = useMemo(
+    () => new Set(selectedEdges.map((edge) => edge.id)),
+    [selectedEdges],
   );
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
@@ -2196,7 +2204,7 @@ function WorkspaceCanvas() {
 
 
   const selectionActionsStyle = useMemo(() => {
-    if (selectedNodes.length === 0) {
+    if (selectedNodes.length === 0 && selectedEdges.length === 0) {
       return null;
     }
     const canvas = canvasRef.current;
@@ -2216,7 +2224,7 @@ function WorkspaceCanvas() {
       top: stickyTop ? 16 : Math.max(16, screenTop),
       ...(stickyRight ? { right: 16 } : { left: anchorLeft }),
     } as const;
-  }, [selectedNodes, viewportTransform]);
+  }, [selectedEdges.length, selectedNodes, viewportTransform]);
 
   const deleteTuckShell = useCallback((tuckId: string) => {
     const nextTuckspace = tuckspaceRef.current.filter((item) => item.id !== tuckId);
@@ -2259,6 +2267,21 @@ function WorkspaceCanvas() {
     }
     untuckSubgraph(tuckId);
   }, [tuckReorder, untuckSubgraph]);
+
+  const deleteSelected = useCallback(() => {
+    const selectedNodeIds = new Set(nodesRef.current.filter((node) => node.selected).map((node) => node.id));
+    const selectedEdgeIds = new Set(edgesRef.current.filter((edge) => edge.selected).map((edge) => edge.id));
+    if (selectedNodeIds.size === 0 && selectedEdgeIds.size === 0) {
+      return;
+    }
+    const nextEdges = edgesRef.current.filter(
+      (edge) => !selectedEdgeIds.has(edge.id) && !selectedNodeIds.has(edge.source) && !selectedNodeIds.has(edge.target),
+    );
+    const nextNodes = nodesRef.current.filter((node) => !selectedNodeIds.has(node.id));
+    setEdges(nextEdges);
+    setNodes(nextNodes);
+    persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current);
+  }, [persistWorkspaceSnapshot, setEdges, setNodes]);
 
   const runLayout = useCallback(() => {
     const selectedNodeIds = nodesRef.current
@@ -2605,6 +2628,9 @@ function WorkspaceCanvas() {
         </ReactFlow>
         {selectionActionsStyle && (
           <div className="selection-actions" style={selectionActionsStyle}>
+            <button type="button" onClick={deleteSelected}>
+              delete
+            </button>
             <button type="button" onClick={runLayout}>
               layout selected
             </button>

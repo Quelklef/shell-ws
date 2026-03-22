@@ -425,15 +425,6 @@ export default function ShellNode({ data }: NodeProps) {
       </div>
 
       <div className="node-card">
-        <button
-          type="button"
-          className="node-delete nodrag nopan"
-          onClick={() => typedData.onDelete(model.id)}
-          aria-label="delete node"
-          title="delete node"
-        >
-          ×
-        </button>
         <div className="node-meta">
           <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
           {model.kind === "formula" && (
