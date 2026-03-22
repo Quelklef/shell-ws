@@ -12,6 +12,7 @@ type ResizablePaneProps = {
   minWidth?: number;
   className?: string;
   widthBehavior?: "node" | "pane";
+  customResizeHandles?: boolean;
   onWidthChange?: ((width: number) => void) | ((paneId: string, width: number) => void);
   onHeightChange: (paneId: string, height: number) => void;
   onLayoutChange?: () => void;
@@ -26,6 +27,7 @@ export default function ResizablePane({
   minWidth = MIN_RESIZABLE_PANE_WIDTH,
   className,
   widthBehavior = "node",
+  customResizeHandles = false,
   onWidthChange,
   onHeightChange,
   onLayoutChange,
@@ -51,6 +53,15 @@ export default function ResizablePane({
   const latestOnLayoutChangeRef = useRef(onLayoutChange);
   const applyingPropResizeRef = useRef(false);
   const nativeResizeActiveRef = useRef(false);
+  const customResizeDragRef = useRef<{
+    pointerId: number;
+    resizeWidth: boolean;
+    resizeHeight: boolean;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
 
   useEffect(() => {
     latestWidthRef.current = width;
@@ -61,6 +72,71 @@ export default function ResizablePane({
     latestOnHeightChangeRef.current = onHeightChange;
     latestOnLayoutChangeRef.current = onLayoutChange;
   }, [height, onHeightChange, onLayoutChange, onWidthChange, paneId, width, widthBehavior]);
+
+  useEffect(() => {
+    return () => {
+      if (!customResizeDragRef.current) {
+        return;
+      }
+      customResizeDragRef.current = null;
+      nativeResizeActiveRef.current = false;
+    };
+  }, []);
+
+  const startCustomResize = (resizeWidth: boolean, resizeHeight: boolean) =>
+    (event: React.PointerEvent<HTMLDivElement>) => {
+      const element = elementRef.current;
+      if (!element) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      const rect = element.getBoundingClientRect();
+      customResizeDragRef.current = {
+        pointerId: event.pointerId,
+        resizeWidth,
+        resizeHeight,
+        startX: event.clientX,
+        startY: event.clientY,
+        startWidth: rect.width,
+        startHeight: rect.height,
+      };
+      nativeResizeActiveRef.current = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    };
+
+  const updateCustomResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = customResizeDragRef.current;
+    const element = elementRef.current;
+    if (!drag || !element || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (drag.resizeWidth) {
+      const nextWidth = Math.max(minWidth, Math.round(drag.startWidth + (event.clientX - drag.startX)));
+      element.style.width = `${nextWidth}px`;
+    }
+    if (drag.resizeHeight) {
+      const nextHeight = Math.max(minHeight, Math.round(drag.startHeight + (event.clientY - drag.startY)));
+      element.style.height = `${nextHeight}px`;
+    }
+  };
+
+  const finishCustomResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = customResizeDragRef.current;
+    if (!drag || event.pointerId !== drag.pointerId) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    customResizeDragRef.current = null;
+    nativeResizeActiveRef.current = false;
+    if (nativeResizeSettleTimerRef.current !== null) {
+      window.clearTimeout(nativeResizeSettleTimerRef.current);
+      nativeResizeSettleTimerRef.current = null;
+    }
+  };
 
   useLayoutEffect(() => {
     const element = elementRef.current;
@@ -223,11 +299,36 @@ export default function ResizablePane({
   return (
     <div
       ref={elementRef}
-      className={className}
+      className={`${className ?? ""}${customResizeHandles ? " has-custom-resize-handles" : ""}`}
       style={{ minHeight, minWidth }}
       onWheelCapture={(event) => event.stopPropagation()}
     >
       {children}
+      {customResizeHandles ? (
+        <>
+          <div
+            className="resizable-pane-handle resizable-pane-handle-right nodrag nopan"
+            onPointerDown={startCustomResize(true, false)}
+            onPointerMove={updateCustomResize}
+            onPointerUp={finishCustomResize}
+            onPointerCancel={finishCustomResize}
+          />
+          <div
+            className="resizable-pane-handle resizable-pane-handle-bottom nodrag nopan"
+            onPointerDown={startCustomResize(false, true)}
+            onPointerMove={updateCustomResize}
+            onPointerUp={finishCustomResize}
+            onPointerCancel={finishCustomResize}
+          />
+          <div
+            className="resizable-pane-handle resizable-pane-handle-corner nodrag nopan"
+            onPointerDown={startCustomResize(true, true)}
+            onPointerMove={updateCustomResize}
+            onPointerUp={finishCustomResize}
+            onPointerCancel={finishCustomResize}
+          />
+        </>
+      ) : null}
     </div>
   );
 }

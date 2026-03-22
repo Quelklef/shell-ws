@@ -1435,6 +1435,11 @@ textarea {
   background: rgba(9, 11, 13, 0.54);
 }
 
+.resizable-pane.has-custom-resize-handles {
+  position: relative;
+  resize: none;
+}
+
 .resizable-pane:focus-within {
   border-color: rgba(242, 192, 120, 0.55);
   box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.22);
@@ -1442,6 +1447,82 @@ textarea {
 
 .resizable-pane::-webkit-resizer {
   background: rgba(242, 192, 120, 0.72);
+}
+
+.resizable-pane-handle {
+  position: absolute;
+  z-index: 3;
+}
+
+.resizable-pane-handle-right {
+  top: 0;
+  right: -3px;
+  bottom: 12px;
+  width: 10px;
+  cursor: ew-resize;
+}
+
+.resizable-pane-handle-bottom {
+  left: 0;
+  right: 12px;
+  bottom: -3px;
+  height: 10px;
+  cursor: ns-resize;
+}
+
+.resizable-pane-handle-corner {
+  right: -3px;
+  bottom: -3px;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+}
+
+.resizable-pane-handle-right::before,
+.resizable-pane-handle-bottom::before,
+.resizable-pane-handle-corner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transition:
+    background 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.resizable-pane-handle-right::before {
+  left: 4px;
+  width: 2px;
+  background: rgba(244, 232, 214, 0.12);
+}
+
+.resizable-pane-handle-bottom::before {
+  top: 4px;
+  height: 2px;
+  background: rgba(244, 232, 214, 0.12);
+}
+
+.resizable-pane-handle-corner::before {
+  right: 3px;
+  bottom: 3px;
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid rgba(244, 232, 214, 0.16);
+  border-bottom: 2px solid rgba(244, 232, 214, 0.16);
+  border-radius: 0 0 3px 0;
+}
+
+.resizable-pane-handle-right:hover::before,
+.resizable-pane-handle-bottom:hover::before,
+.resizable-pane-handle-corner:hover::before {
+  background: rgba(242, 192, 120, 0.92);
+  box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.35);
+}
+
+.resizable-pane-handle-corner:hover::before {
+  background: none;
+  border-right-color: rgba(242, 192, 120, 0.96);
+  border-bottom-color: rgba(242, 192, 120, 0.96);
+  box-shadow: none;
 }
 
 .resizable-pane.input-pane {
