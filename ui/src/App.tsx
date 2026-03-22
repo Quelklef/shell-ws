@@ -2282,33 +2282,35 @@ function WorkspaceCanvas() {
     [selectedNodes],
   );
   const selectedElementBounds = useMemo(() => {
-    const nodeBounds = selectedNodes.map((node) => ({
-      minY: node.position.y,
-      maxX: node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width),
-    }));
-    const selectedNodeIds = new Set(selectedNodes.map((node) => node.id));
-    for (const edge of selectedEdges) {
-      const sourceNode = nodes.find((node) => node.id === edge.source);
-      const targetNode = nodes.find((node) => node.id === edge.target);
-      for (const node of [sourceNode, targetNode]) {
-        if (!node || selectedNodeIds.has(node.id)) {
-          continue;
-        }
-        selectedNodeIds.add(node.id);
-        nodeBounds.push({
-          minY: node.position.y,
-          maxX: node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width),
-        });
-      }
+    const canvas = canvasRef.current;
+    if (!canvas) {
+      return null;
     }
-    if (nodeBounds.length === 0) {
+    const [viewportX, viewportY, zoom] = viewportTransform;
+    const bounds: Array<{ top: number; right: number }> = selectedNodes.map((node) => ({
+      top: node.position.y * zoom + viewportY,
+      right: (node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width)) * zoom + viewportX,
+    }));
+    const canvasBounds = canvas.getBoundingClientRect();
+    for (const edge of selectedEdges) {
+      const edgeElement = canvas.querySelector<SVGGElement>(`.react-flow__edge[data-id="${edge.id}"]`);
+      if (!edgeElement) {
+        continue;
+      }
+      const edgeBounds = edgeElement.getBoundingClientRect();
+      bounds.push({
+        top: edgeBounds.top - canvasBounds.top,
+        right: edgeBounds.right - canvasBounds.left,
+      });
+    }
+    if (bounds.length === 0) {
       return null;
     }
     return {
-      minY: Math.min(...nodeBounds.map((bounds) => bounds.minY)),
-      maxX: Math.max(...nodeBounds.map((bounds) => bounds.maxX)),
+      top: Math.min(...bounds.map((entry) => entry.top)),
+      right: Math.max(...bounds.map((entry) => entry.right)),
     };
-  }, [nodes, selectedEdges, selectedNodes]);
+  }, [selectedEdges, selectedNodes, viewportTransform]);
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
     [edges, selectedNodeIds],
@@ -2342,18 +2344,15 @@ function WorkspaceCanvas() {
     if (!canvas || !selectedElementBounds) {
       return { top: 16, right: 16 } as const;
     }
-    const [viewportX, viewportY, zoom] = viewportTransform;
-    const screenTop = selectedElementBounds.minY * zoom + viewportY;
-    const screenRight = selectedElementBounds.maxX * zoom + viewportX;
-    const anchorLeft = screenRight + 12;
-    const stickyTop = screenTop < 16;
+    const anchorLeft = selectedElementBounds.right + 12;
+    const stickyTop = selectedElementBounds.top < 16;
     const stickyRight = anchorLeft > canvas.clientWidth - 180;
 
     return {
-      top: stickyTop ? 16 : Math.max(16, screenTop),
+      top: stickyTop ? 16 : Math.max(16, selectedElementBounds.top),
       ...(stickyRight ? { right: 16 } : { left: anchorLeft }),
     } as const;
-  }, [selectedEdges.length, selectedElementBounds, selectedNodes.length, viewportTransform]);
+  }, [selectedEdges.length, selectedElementBounds, selectedNodes.length]);
 
   const deleteTuckShell = useCallback((tuckId: string) => {
     const nextTuckspace = tuckspaceRef.current.filter((item) => item.id !== tuckId);
