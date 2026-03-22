@@ -271,13 +271,15 @@ export default function ShellNode({ data }: NodeProps) {
       const bodyElement = paneElement?.querySelector(".port-preview-body") as HTMLElement | null;
       const headerElement = paneElement?.querySelector(".port-preview-header") as HTMLElement | null;
       const preElement = bodyElement?.querySelector(".display-code") as HTMLElement | null;
+      const contentElement = bodyElement?.firstElementChild as HTMLElement | null;
       if (!paneElement || !bodyElement) {
         return;
       }
       const maxWidth = Math.max(180, Math.floor(window.innerWidth * 0.4));
       const maxHeight = Math.max(defaultPaneHeight(paneId), Math.floor(window.innerHeight * 0.45));
       const headerHeight = headerElement?.offsetHeight ?? 0;
-      const heightChrome = Math.max(16, paneElement.offsetHeight - headerHeight - bodyElement.clientHeight);
+      const contentHeight = contentElement ? Math.ceil(contentElement.scrollHeight) : Math.ceil(bodyElement.scrollHeight);
+      const heightChrome = Math.max(16, paneElement.offsetHeight - headerHeight - bodyElement.getBoundingClientRect().height);
       let nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(bodyElement.scrollWidth + (paneElement.offsetWidth - bodyElement.clientWidth))));
       if (preElement) {
         const tabSize = Number.parseInt(window.getComputedStyle(preElement).tabSize || "8", 10) || 8;
@@ -289,7 +291,7 @@ export default function ShellNode({ data }: NodeProps) {
         const widthChrome = Math.max(24, paneElement.getBoundingClientRect().width - preElement.getBoundingClientRect().width);
         nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(desiredPreWidth + widthChrome + PREVIEW_SCROLLBAR_BUFFER)));
       }
-      const nextHeight = Math.min(maxHeight, Math.max(96, Math.ceil(bodyElement.scrollHeight + headerHeight + heightChrome)));
+      const nextHeight = Math.min(maxHeight, Math.max(96, Math.ceil(contentHeight + headerHeight + heightChrome)));
       typedData.onResizePaneWidth(model.id, paneId, nextWidth);
       typedData.onResizePaneHeight(model.id, paneId, nextHeight);
     };
