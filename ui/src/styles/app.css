@@ -385,6 +385,7 @@ textarea {
   border: 0;
   background: transparent;
   color: inherit;
+  font-size: 12px;
   text-align: left;
   padding: 3px 5px;
   cursor: pointer;
@@ -396,6 +397,7 @@ textarea {
 }
 
 .workspace-list-name-input {
+  font-size: 12px;
   padding: 4px 6px;
 }
 
