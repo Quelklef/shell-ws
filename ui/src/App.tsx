@@ -209,6 +209,13 @@ function computePreviewTabs(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
   return nodePreviewTabsForNode(nodeId, kind, edges, parseHandleId);
 }
 
+function rectsIntersect(
+  a: { left: number; top: number; right: number; bottom: number },
+  b: { left: number; top: number; right: number; bottom: number },
+) {
+  return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
+}
+
 function syncNodeData(
   current: FlowNode[],
   runtime: Record<string, NodeRuntimeState>,
@@ -728,6 +735,49 @@ function WorkspaceCanvas() {
       return changed ? next : current;
     });
   }, [flow, setNodes, userSelectionActive, userSelectionRect, viewportTransform]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !userSelectionActive || !userSelectionRect) {
+      return;
+    }
+    const canvasBounds = canvas.getBoundingClientRect();
+    const selectionBounds = {
+      left: userSelectionRect.x,
+      top: userSelectionRect.y,
+      right: userSelectionRect.x + userSelectionRect.width,
+      bottom: userSelectionRect.y + userSelectionRect.height,
+    };
+    const selectedEdgeIds = new Set<string>();
+    for (const edgeElement of canvas.querySelectorAll<SVGGElement>('.react-flow__edge[data-id]')) {
+      const edgeId = edgeElement.dataset.id;
+      if (!edgeId) {
+        continue;
+      }
+      const bounds = edgeElement.getBoundingClientRect();
+      const edgeBounds = {
+        left: bounds.left - canvasBounds.left,
+        top: bounds.top - canvasBounds.top,
+        right: bounds.right - canvasBounds.left,
+        bottom: bounds.bottom - canvasBounds.top,
+      };
+      if (rectsIntersect(selectionBounds, edgeBounds)) {
+        selectedEdgeIds.add(edgeId);
+      }
+    }
+    setEdges((current) => {
+      let changed = false;
+      const next = current.map((edge) => {
+        const selected = selectedEdgeIds.has(edge.id);
+        if (!!edge.selected === selected) {
+          return edge;
+        }
+        changed = true;
+        return { ...edge, selected };
+      });
+      return changed ? next : current;
+    });
+  }, [setEdges, userSelectionActive, userSelectionRect]);
 
   useEffect(() => {
     generationRef.current = generation;
@@ -1613,9 +1663,7 @@ function WorkspaceCanvas() {
 
   const onEdgesChange = useCallback(
     (changes: EdgeChange<FlowEdge>[]) => {
-      const filteredChanges = changes.filter((change) =>
-        change.type !== "select" || selectionGestureActiveRef.current || userSelectionActive,
-      );
+      const filteredChanges = changes.filter((change) => change.type !== "select");
       if (filteredChanges.length === 0) {
         return;
       }
@@ -1624,16 +1672,14 @@ function WorkspaceCanvas() {
         setNodes((nodesCurrent) =>
           syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
         );
-        const shouldPersist = filteredChanges.some(
-          (change) => change.type !== "select",
-        );
+        const shouldPersist = filteredChanges.length > 0;
         if (shouldPersist) {
           persistSoon(nodesRef.current, next);
         }
         return next;
       });
     },
-    [handlers, persistSoon, setEdges, setNodes, userSelectionActive],
+    [handlers, persistSoon, setEdges, setNodes],
   );
 
   const deleteEdge = useCallback(
