@@ -117,7 +117,7 @@ export default function ShellNode({ data }: NodeProps) {
   const [isEditingComment, setIsEditingComment] = useState(false);
   const [showFormulaHelp, setShowFormulaHelp] = useState(false);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
-  const previewControlsLocation = typedData.previewControlsLocation ?? "node";
+  const previewControlsLocation = typedData.previewControlsLocation ?? "floating";
   const getVisiblePreview = (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port];
   const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);

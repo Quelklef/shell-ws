@@ -77,7 +77,6 @@ import { missingConnectedInputs, missingOutputs, runtimePreviewsFromNode, materi
 import { outputPortsForKind, previewOutputPortsForKind } from "./lib/portSchema";
 import { applyNodeOutputEvent } from "./lib/runtimeEvents";
 import { nextPaneSizes } from "./lib/paneLayout";
-import { normalizePreviewControlsLocation } from "./lib/workspaceUi";
 import { emptyTuckedSubgraph, isClosedSelection, isTuckspaceShell, recenterTuckedNodes, reorderTuckspaceWithPlacement, shouldKeepShellOnRestore, storeTuckedSubgraph } from "./lib/tuckspace";
 import { concatBytes, encodeId, fromBase64, toBase64 } from "./lib/utils";
 
@@ -2522,26 +2521,6 @@ function WorkspaceCanvas() {
                   <EyeIcon />
                 </button>
               </div>
-            </label>
-            <label className="sidebar-field">
-              <span className="sidebar-label">preview controls</span>
-              <select
-                className="sidebar-input"
-                value={workspaceMeta.ui.previewControlsLocation}
-                onChange={(event) =>
-                  updateWorkspaceUi(
-                    (ui) => ({
-                      ...ui,
-                      previewControlsLocation: normalizePreviewControlsLocation(event.target.value as any),
-                    }),
-                    true,
-                  )
-                }
-                disabled={workspaceSwitching}
-              >
-                <option value="node">buttons in node</option>
-                <option value="floating">buttons floating</option>
-              </select>
             </label>
           </section>
         </div>

@@ -383,8 +383,8 @@ impl Default for WorkspaceUi {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum PreviewControlsLocation {
+        Node,
     #[default]
-    Node,
     Floating,
 }
 
@@ -717,7 +717,7 @@ mod tests {
 
         assert_eq!(workspace.ui.sidebars.workspaces.width, 220.0);
         assert!(!workspace.ui.sidebars.tuckspace.collapsed);
-        assert_eq!(workspace.ui.preview_controls_location, super::PreviewControlsLocation::Node);
+        assert_eq!(workspace.ui.preview_controls_location, super::PreviewControlsLocation::Floating);
     }
 
     #[test]

@@ -6,7 +6,7 @@ describe("workspaceUi", () => {
   it("fills in default sidebars", () => {
     const ui = normalizeWorkspaceUi({ viewportX: 1, viewportY: 2, zoom: 3 });
     expect(ui.sidebars).toEqual(SIDEBAR_DEFAULTS);
-    expect(ui.previewControlsLocation).toBe("node");
+    expect(ui.previewControlsLocation).toBe("floating");
   });
 
   it("clamps sidebar widths and preserves collapse state", () => {

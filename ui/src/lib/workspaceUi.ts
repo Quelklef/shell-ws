@@ -86,5 +86,5 @@ function normalizeSidebarState(
 }
 
 export function normalizePreviewControlsLocation(value: PreviewControlsLocation | undefined): PreviewControlsLocation {
-  return value === "floating" ? "floating" : "node";
+  return "floating";
 }
