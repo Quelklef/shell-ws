@@ -944,6 +944,8 @@ textarea {
 
 .selection-actions-item {
   position: relative;
+  display: block;
+  margin: 0;
 }
 
 .selection-actions button {
@@ -966,7 +968,7 @@ textarea {
 
 .selection-actions-submenu {
   position: absolute;
-  left: calc(100% + 8px);
+  left: calc(100% - 1px);
   top: 0;
   display: none;
   flex-direction: column;
