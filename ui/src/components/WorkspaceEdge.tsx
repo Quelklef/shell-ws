@@ -72,7 +72,10 @@ export default function WorkspaceEdge({
         fill="none"
         stroke="currentColor"
         strokeOpacity={0}
-        strokeWidth={20}
+        strokeWidth={28}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray="none"
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
       />

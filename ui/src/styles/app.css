@@ -1724,6 +1724,8 @@ textarea {
 
 .workspace-edge-hover-target {
   pointer-events: stroke;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .edge-toolbar {
