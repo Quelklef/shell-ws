@@ -2319,11 +2319,11 @@ function WorkspaceCanvas() {
       return [
         {
           top: (sourceNode.position.y + portTopForEdgeHandle(sourceNode, sourceHandle, edges) - HANDLE_SIZE / 2) * zoom + viewportY,
-          right: (sourceNode.position.x + sourceWidth + HANDLE_SIZE / 2) * zoom + viewportX,
+          right: (sourceNode.position.x + sourceWidth) * zoom + viewportX,
         },
         {
           top: (targetNode.position.y + portTopForEdgeHandle(targetNode, targetHandle, edges) - HANDLE_SIZE / 2) * zoom + viewportY,
-          right: (targetNode.position.x + HANDLE_SIZE / 2) * zoom + viewportX,
+          right: targetNode.position.x * zoom + viewportX,
         },
       ];
     });
