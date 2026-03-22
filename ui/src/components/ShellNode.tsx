@@ -274,8 +274,8 @@ export default function ShellNode({ data }: NodeProps) {
       if (!paneElement || !bodyElement) {
         return;
       }
-      const maxWidth = Math.max(180, Math.floor(window.innerWidth * 0.3));
-      const maxHeight = Math.max(defaultPaneHeight(paneId), Math.floor(window.innerHeight * 0.8));
+      const maxWidth = Math.max(180, Math.floor(window.innerWidth * 0.4));
+      const maxHeight = Math.max(defaultPaneHeight(paneId), Math.floor(window.innerHeight * 0.45));
       const headerHeight = headerElement?.offsetHeight ?? 0;
       const heightChrome = Math.max(16, paneElement.offsetHeight - headerHeight - bodyElement.clientHeight);
       let nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(bodyElement.scrollWidth + (paneElement.offsetWidth - bodyElement.clientWidth))));
