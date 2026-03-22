@@ -183,6 +183,8 @@ pub struct Node {
     pub formula: Option<String>,
     #[serde(default)]
     pub materialized_values: HashMap<String, MaterializedValue>,
+    #[serde(default)]
+    pub last_exit_code: Option<i32>,
     #[serde(default, alias = "auto_run")]
     pub auto_run: Option<AutoRunConfig>,
     #[serde(default)]

@@ -1377,6 +1377,14 @@ textarea {
   color: var(--text-soft);
 }
 
+.node-exit-pill.is-success {
+  color: color-mix(in srgb, var(--success) 78%, white 22%);
+}
+
+.node-exit-pill.is-failed {
+  color: color-mix(in srgb, var(--danger) 82%, white 18%);
+}
+
 .autorun-shell {
   display: flex;
   flex-direction: column;

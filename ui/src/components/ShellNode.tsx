@@ -457,6 +457,11 @@ export default function ShellNode({ data }: NodeProps) {
           <span className={`node-state-pill ${runtime.running ? "is-running" : "is-idle"}`}>
             {runtime.running ? "running" : "idle"}
           </span>
+          {model.lastExitCode != null && (
+            <span className={`node-state-pill node-exit-pill ${model.lastExitCode === 0 ? "is-success" : "is-failed"}`}>
+              exit {model.lastExitCode}
+            </span>
+          )}
         </div>
 
         {(model.kind === "script" || model.kind === "ai_script") && (

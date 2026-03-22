@@ -109,6 +109,7 @@ export interface WorkspaceNode {
   text?: string | null;
   formula?: string | null;
   materializedValues?: Record<string, MaterializedValue> | null;
+  lastExitCode?: number | null;
   autoRun?: AutoRunConfig | null;
   uiState?: NodeUiState | null;
 }

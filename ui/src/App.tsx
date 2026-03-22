@@ -108,6 +108,7 @@ function makeNode(kind: NodeKind, count: number): WorkspaceNode {
     text: kind === "text" ? "" : null,
     formula: kind === "formula" ? "$1 + 1" : null,
     materializedValues: {},
+    lastExitCode: null,
     autoRun: null,
     uiState: { openPreviewTabs: previewOpenByDefault },
   };
@@ -1462,6 +1463,22 @@ function WorkspaceCanvas() {
             }
             case "exec_finished": {
               const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
+              setNodes((nodesCurrent) =>
+                nodesCurrent.map((candidate) =>
+                  candidate.id === event.node_id
+                    ? {
+                        ...candidate,
+                        data: {
+                          ...candidate.data,
+                          model: {
+                            ...candidate.data.model,
+                            lastExitCode: event.exit_code,
+                          },
+                        },
+                      }
+                    : candidate,
+                ),
+              );
               const previous = current[event.node_id] ?? {
                 running: false,
                 portActivity: {},
