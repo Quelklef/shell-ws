@@ -26,7 +26,7 @@
           ];
 
           shellHook = ''
-            export CODEX_HOME=${toString ./.codex}
+            export CODEX_HOME=$(realpath ./.codex)
             mkdir -p "$CODEX_HOME"
           '';
         };
