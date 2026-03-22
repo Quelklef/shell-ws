@@ -936,7 +936,7 @@ textarea {
   gap: 0;
   padding: 0;
   border-radius: 2px;
-  background: color-mix(in srgb, var(--selection) 14%, transparent);
+  background: color-mix(in srgb, var(--selection) 14%, rgba(12, 14, 16, 0.98));
   border: 1px solid color-mix(in srgb, var(--selection) 82%, white 18%);
   box-shadow: var(--shadow);
   overflow: visible;
