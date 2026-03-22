@@ -34,7 +34,7 @@ export function paneWidth(uiState: NodeUiState | null | undefined, paneId: strin
   if (typeof persisted === "number" && Number.isFinite(persisted) && persisted > 0) {
     return Math.round(Math.max(MIN_RESIZABLE_PANE_WIDTH, persisted));
   }
-  return Math.round(Math.max(MIN_RESIZABLE_PANE_WIDTH, fallback));
+  return defaultPaneWidth(paneId, fallback);
 }
 
 export function paneHeight(uiState: NodeUiState | null | undefined, paneId: string) {
