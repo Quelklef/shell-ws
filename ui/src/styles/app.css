@@ -1783,9 +1783,9 @@ textarea {
 
 .port-preview-floating-panes {
   display: flex;
+  flex-direction: column;
   align-items: flex-start;
   gap: 8px;
-  flex-wrap: wrap;
 }
 
 .port-preview-tab {

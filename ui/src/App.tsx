@@ -640,6 +640,21 @@ function WorkspaceCanvas() {
   const workspaceMetaRef = useRef<Pick<Workspace, "id" | "name" | "createdAt" | "sortOrder" | "cwd" | "openaiApiKey" | "ui"> | null>(
     null,
   );
+  const handlersRef = useRef<ShellNodeActions | null>(null);
+  const handlersFallback = useMemo<ShellNodeActions>(() => ({
+    onUpdate: () => undefined,
+    onRun: () => undefined,
+    getActionReason: () => null,
+    onDelete: () => undefined,
+    onPickFile: async () => undefined,
+    onToggleAutorun: () => undefined,
+    onGenerate: async () => undefined,
+    onClearMaterialized: () => undefined,
+    onConvertKind: () => undefined,
+    onResizeWidth: () => undefined,
+    onResizePaneHeight: () => undefined,
+    onResizePaneWidth: () => undefined,
+  }), []);
   const sidebarUiRef = useRef<WorkspaceSidebars>(sidebarUi);
   const nodesRef = useRef<FlowNode[]>([]);
   const edgesRef = useRef<FlowEdge[]>([]);
@@ -913,6 +928,16 @@ function WorkspaceCanvas() {
         }
         const next = { ...current, ui: updater(current.ui) };
         workspaceMetaRef.current = next;
+        setNodes((nodesCurrent) =>
+          syncNodeData(
+            nodesCurrent,
+            runtimeRef.current,
+            generationRef.current,
+            handlersRef.current ?? handlersFallback,
+            edgesRef.current,
+            next.ui.previewControlsLocation,
+          ),
+        );
         if (persist) {
           const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
           if (nextWorkspace) {
@@ -922,7 +947,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [buildWorkspace],
+    [buildWorkspace, handlersFallback, setNodes],
   );
 
   const persistWorkspaceSnapshot = useCallback((
@@ -1298,6 +1323,10 @@ function WorkspaceCanvas() {
     }),
     [getActionReason, persistLayoutSoon, persistSoon, sendRunRequest, setNodes],
   );
+
+  useEffect(() => {
+    handlersRef.current = handlers;
+  }, [handlers]);
 
   useEffect(() => {
     setNodes((current) =>
