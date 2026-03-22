@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { MIN_RESIZABLE_PANE_WIDTH, defaultPaneHeight, nextPaneSizes, paneHeight, paneWidth, previewPaneId } from "./paneLayout";
+import { DEFAULT_PREVIEW_PANE_WIDTH, MIN_RESIZABLE_PANE_WIDTH, defaultPaneHeight, defaultPaneWidth, nextPaneSizes, paneHeight, paneWidth, previewPaneId } from "./paneLayout";
 
 describe("paneLayout", () => {
   it("exposes a minimum resizable pane width", () => {
@@ -10,6 +10,12 @@ describe("paneLayout", () => {
   it("uses shared defaults for preview panes", () => {
     expect(previewPaneId("stdout")).toBe("preview-stdout");
     expect(defaultPaneHeight(previewPaneId("stdout"))).toBe(112);
+    expect(defaultPaneWidth(previewPaneId("stdout"), 500)).toBe(DEFAULT_PREVIEW_PANE_WIDTH);
+  });
+
+  it("uses the fallback width for non-preview panes", () => {
+    expect(defaultPaneWidth("script", 500)).toBe(500);
+    expect(defaultPaneWidth("script", 120)).toBe(MIN_RESIZABLE_PANE_WIDTH);
   });
 
   it("falls back to pane-type defaults when no persisted height exists", () => {

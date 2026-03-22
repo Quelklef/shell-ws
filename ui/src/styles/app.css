@@ -1844,6 +1844,12 @@ textarea {
   margin-bottom: 6px;
 }
 
+.port-preview-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .port-preview-copy {
   display: inline-flex;
   align-items: center;

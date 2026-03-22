@@ -13,7 +13,7 @@ import { renderDisplay } from "../lib/format";
 import { ACTIONS } from "../lib/actionIcons";
 import { outputPortsForKind } from "../lib/portSchema";
 import { nodeHasArgvPort, nodeHasInputPort, nodePreviewTabs } from "../lib/nodePorts";
-import { paneHeight, paneWidth, previewPaneId } from "../lib/paneLayout";
+import { defaultPaneHeight, defaultPaneWidth, paneHeight, paneWidth, previewPaneId } from "../lib/paneLayout";
 import type {
   AutoRunConfig,
   ExecutionAction,
@@ -209,6 +209,27 @@ export default function ShellNode({ data }: NodeProps) {
   );
 
   const floatingPreviewPanes = orderedOpenPreviewTabs.map((port) => {
+    const minimizePreviewPane = () => {
+      typedData.onResizePaneWidth(model.id, paneId, defaultPaneWidth(paneId, model.size.width));
+      typedData.onResizePaneHeight(model.id, paneId, defaultPaneHeight(paneId));
+    };
+    const fitPreviewPane = (event: React.MouseEvent<HTMLButtonElement>) => {
+      const paneElement = event.currentTarget.closest(".port-preview-pane") as HTMLElement | null;
+      const bodyElement = paneElement?.querySelector(".port-preview-body") as HTMLElement | null;
+      const headerElement = paneElement?.querySelector(".port-preview-header") as HTMLElement | null;
+      if (!paneElement || !bodyElement) {
+        return;
+      }
+      const maxWidth = Math.max(defaultPaneWidth(paneId, model.size.width), Math.floor(window.innerWidth * 0.5));
+      const maxHeight = Math.max(defaultPaneHeight(paneId), Math.floor(window.innerHeight * 0.8));
+      const widthChrome = Math.max(24, paneElement.offsetWidth - bodyElement.clientWidth);
+      const headerHeight = headerElement?.offsetHeight ?? 0;
+      const heightChrome = Math.max(16, paneElement.offsetHeight - headerHeight - bodyElement.clientHeight);
+      const nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(bodyElement.scrollWidth + widthChrome)));
+      const nextHeight = Math.min(maxHeight, Math.max(96, Math.ceil(bodyElement.scrollHeight + headerHeight + heightChrome)));
+      typedData.onResizePaneWidth(model.id, paneId, nextWidth);
+      typedData.onResizePaneHeight(model.id, paneId, nextHeight);
+    };
     const preview = getVisiblePreview(port);
     const renderedPreview = preview
       ? renderDisplay(preview.bytes)
@@ -235,21 +256,51 @@ export default function ShellNode({ data }: NodeProps) {
           <div className="display-label">
             {port} · {renderedPreview.label}
           </div>
-          <button
-            type="button"
-            className="port-preview-copy nodrag nopan"
-            title={`copy ${port}`}
-            aria-label={`copy ${port}`}
-            onClick={() => {
-              const text = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
-              void navigator.clipboard?.writeText(text);
-            }}
-          >
-            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-              <rect x="5" y="3" width="7" height="9" rx="1.2" />
-              <path d="M4 5H3.2A1.2 1.2 0 0 0 2 6.2v6.6A1.2 1.2 0 0 0 3.2 14h5.6A1.2 1.2 0 0 0 10 12.8V12" />
-            </svg>
-          </button>
+          <div className="port-preview-actions">
+            <button
+              type="button"
+              className="port-preview-copy nodrag nopan"
+              title={`fit ${port}`}
+              aria-label={`fit ${port}`}
+              onClick={fitPreviewPane}
+            >
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                <path d="M6 2.5H2.5V6" />
+                <path d="M10 2.5h3.5V6" />
+                <path d="M6 13.5H2.5V10" />
+                <path d="M10 13.5h3.5V10" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="port-preview-copy nodrag nopan"
+              title={`minimize ${port}`}
+              aria-label={`minimize ${port}`}
+              onClick={minimizePreviewPane}
+            >
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                <path d="M6 5.5H2.5V2" />
+                <path d="M10 5.5h3.5V2" />
+                <path d="M6 10.5H2.5V14" />
+                <path d="M10 10.5h3.5V14" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              className="port-preview-copy nodrag nopan"
+              title={`copy ${port}`}
+              aria-label={`copy ${port}`}
+              onClick={() => {
+                const text = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
+                void navigator.clipboard?.writeText(text);
+              }}
+            >
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                <rect x="5" y="3" width="7" height="9" rx="1.2" />
+                <path d="M4 5H3.2A1.2 1.2 0 0 0 2 6.2v6.6A1.2 1.2 0 0 0 3.2 14h5.6A1.2 1.2 0 0 0 10 12.8V12" />
+              </svg>
+            </button>
+          </div>
         </div>
         <div className="port-preview-body">{renderedPreview.content}</div>
       </ResizablePane>

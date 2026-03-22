@@ -1,6 +1,7 @@
 import type { NodeUiState } from "./types";
 
 export const MIN_RESIZABLE_PANE_WIDTH = 150;
+export const DEFAULT_PREVIEW_PANE_WIDTH = 240;
 
 const DEFAULT_PANE_HEIGHTS: Record<string, number> = {
   "ai-prompt": 72,
@@ -19,6 +20,13 @@ export function defaultPaneHeight(paneId: string) {
     return 112;
   }
   return DEFAULT_PANE_HEIGHTS[paneId] ?? 112;
+}
+
+export function defaultPaneWidth(paneId: string, fallback: number) {
+  if (paneId.startsWith("preview-")) {
+    return DEFAULT_PREVIEW_PANE_WIDTH;
+  }
+  return Math.round(Math.max(MIN_RESIZABLE_PANE_WIDTH, fallback));
 }
 
 export function paneWidth(uiState: NodeUiState | null | undefined, paneId: string, fallback: number) {
