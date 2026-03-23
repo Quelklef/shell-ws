@@ -1,4 +1,5 @@
 model = "gpt-5.4"
 model_reasoning_effort = "high"
+approvals_reviewer = "user"
 [projects."/per/dev/shell-ws"]
 trust_level = "trusted"
