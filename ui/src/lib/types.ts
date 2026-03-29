@@ -236,14 +236,15 @@ export interface DisplayState {
 
 export interface ExecutionRequest {
   workspace: Workspace;
+  executableNodeIds: string[];
   providedMatoutIds: MatOutId[];
-  blockedNodeIds: string[];
+  edgeIds: string[];
 }
 
 export interface ExecutionPlanState {
-  targetNodeIds: string[];
+  executableNodeIds: string[];
+  edgeIds: string[];
   providedMatoutIds: MatOutId[];
-  blockedNodeIds: string[];
 }
 
 export interface ExecutionPlanNodeMatval {
@@ -254,8 +255,8 @@ export interface ExecutionPlanNodeMatval {
 }
 
 export interface NodeExecutionPlanState {
-  isTarget: boolean;
-  isBlocked: boolean;
+  isExecutable: boolean;
+  isParticipating: boolean;
   matvals: ExecutionPlanNodeMatval[];
 }
 
@@ -296,7 +297,6 @@ export interface ShellNodeData extends Record<string, unknown> {
   onRun: (nodeId: string, action: ExecutionAction) => void;
   onSelectExecutionTarget: (nodeId: string, action: ExecutionAction, additive: boolean) => void;
   getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
-  onToggleExecutionPlanBlocked: (nodeId: string) => void;
   onToggleExecutionPlanMatout: (nodeId: string, id: MatOutId) => void;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;

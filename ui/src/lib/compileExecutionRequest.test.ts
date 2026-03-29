@@ -50,7 +50,7 @@ function edgeIds(request: ReturnType<typeof compileExecutionRequest>) {
 }
 
 describe("compileExecutionRequest", () => {
-  it("compiles pull_inputs to the upstream closure", () => {
+  it("compiles pull_inputs to the upstream closure without making the target executable", () => {
     const a = node("a", "text");
     const b = node("b", "script");
     b.materialized = {
@@ -76,7 +76,8 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["a", "b"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.blockedNodeIds).toEqual(["b"]);
+    expect(request.executableNodeIds).toEqual(["a"]);
+    expect(request.edgeIds).toEqual(["e1"]);
     expect(request.providedMatoutIds).toEqual([]);
     expect(request.workspace.nodes.find((item) => item.id === "b")?.materialized).toEqual({
       inputs: { stdin: "old-b-in" },
@@ -85,7 +86,7 @@ describe("compileExecutionRequest", () => {
     });
   });
 
-  it("compiles pull_run to the upstream closure without blocking the target", () => {
+  it("compiles pull_run to the upstream closure with the target executable", () => {
     const a = node("a", "text");
     const b = node("b", "script");
     const request = compileExecutionRequest(
@@ -106,7 +107,8 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["a", "b"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.blockedNodeIds).toEqual([]);
+    expect(request.executableNodeIds).toEqual(["a", "b"]);
+    expect(request.edgeIds).toEqual(["e1"]);
     expect(request.providedMatoutIds).toEqual([]);
   });
 
@@ -139,7 +141,8 @@ describe("compileExecutionRequest", () => {
       "rerun",
     );
 
-    expect(request.blockedNodeIds).toEqual([]);
+    expect(request.executableNodeIds).toEqual(["target"]);
+    expect(request.edgeIds).toEqual([]);
     expect(request.providedMatoutIds).toEqual(["mat-in"]);
     expect(request.workspace.nodes.map((item) => item.id)).toEqual(["target"]);
     expect(request.workspace.edges).toEqual([]);
@@ -147,7 +150,7 @@ describe("compileExecutionRequest", () => {
     expect(request.workspace.nodes[0].materialized?.outputs).toEqual({ stdout: "mat-out" });
   });
 
-  it("compiles repush to a downstream graph with blocked target and provided outputs", () => {
+  it("compiles repush to a downstream graph with non-executable source and provided outputs", () => {
     const source = node("source", "script");
     source.materialized = {
       inputs: {},
@@ -171,10 +174,10 @@ describe("compileExecutionRequest", () => {
       "repush",
     );
 
-    expect(request.blockedNodeIds).toEqual(["source"]);
+    expect(request.executableNodeIds).toEqual(["sink"]);
+    expect(request.edgeIds).toEqual(["e1"]);
     expect(request.providedMatoutIds).toEqual(["mat-stdout"]);
     expect(request.workspace.nodes.map((item) => item.id)).toEqual(["source", "sink"]);
-    expect(request.workspace.edges.map((item) => item.id)).toEqual(["e1"]);
     expect(request.workspace.nodes[0].materialized?.outputs).toEqual({ stdout: "mat-stdout" });
   });
 
@@ -211,7 +214,7 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["source"]);
     expect(edgeIds(request)).toEqual([]);
-    expect(request.blockedNodeIds).toEqual(["source"]);
+    expect(request.executableNodeIds).toEqual([]);
     expect(request.providedMatoutIds).toEqual(["source-out"]);
   });
 
@@ -253,7 +256,7 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["source", "sink"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.blockedNodeIds).toEqual(["source"]);
+    expect(request.executableNodeIds).toEqual(["sink"]);
     expect(request.providedMatoutIds).toEqual(["cached-sibling", "source-out"]);
     expect(request.workspace.nodes.find((item) => item.id === "sink")?.materialized?.inputs).toEqual({
       "argv-2": "cached-sibling",
@@ -263,6 +266,11 @@ describe("compileExecutionRequest", () => {
   it("prunes rerun_push downstream nodes that are missing sibling inputs", () => {
     const a = node("a", "text");
     const b = node("b", "text");
+    b.materialized = {
+      inputs: {},
+      outputs: { stdout: "mat-b" },
+      lastExitCode: 0,
+    };
     const c = node("c", "script");
     const request = compileExecutionRequest(
       workspace(
@@ -288,12 +296,18 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["b"]);
     expect(edgeIds(request)).toEqual([]);
+    expect(request.executableNodeIds).toEqual(["b"]);
     expect(request.providedMatoutIds).toEqual([]);
   });
 
   it("keeps rerun_push downstream nodes when cached sibling inputs are available", () => {
     const a = node("a", "text");
     const b = node("b", "text");
+    b.materialized = {
+      inputs: {},
+      outputs: { stdout: "mat-b" },
+      lastExitCode: 0,
+    };
     const c = node("c", "script");
     c.materialized = {
       inputs: { "argv-1": "mat-a" },
@@ -324,9 +338,7 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["b", "c"]);
     expect(edgeIds(request)).toEqual(["e2"]);
+    expect(request.executableNodeIds).toEqual(["b", "c"]);
     expect(request.providedMatoutIds).toEqual(["mat-a"]);
-    expect(request.workspace.nodes.find((item) => item.id === "c")?.materialized?.inputs).toEqual({
-      "argv-1": "mat-a",
-    });
   });
 });

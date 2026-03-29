@@ -44,10 +44,11 @@ import { compileExecutionRequest } from "./lib/compileExecutionRequest";
 import {
   buildExecutionRequestFromPlan,
   emptyExecutionPlan,
-  executionPlanForTargetNodeIds,
+  executionPlanForSelection,
   executionPlanFromRequest,
   executionPlanMatvalsForNode,
   mergeExecutionPlans,
+  participatingNodeIdsForPlan,
   trimExecutionPlan,
 } from "./lib/executionPlan";
 import { layoutSelectedNodes } from "./lib/layout";
@@ -489,11 +490,12 @@ function toFlowNode(
   generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "onSelectExecutionTarget" | "getActionReason" | "onToggleExecutionPlanBlocked" | "onToggleExecutionPlanMatout" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
+    "onUpdate" | "onRun" | "onSelectExecutionTarget" | "getActionReason" | "onToggleExecutionPlanMatout" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
   >,
   edgeDerived: NodeEdgeDerivedData,
   previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
   executionPlan: ExecutionPlanState,
+  participatingNodeIds: Set<string>,
 ): FlowNode {
   return {
     id: node.id,
@@ -505,8 +507,8 @@ function toFlowNode(
       generation: generation[node.id],
       selectionPreview: false,
       executionPlan: {
-        isTarget: executionPlan.targetNodeIds.includes(node.id),
-        isBlocked: executionPlan.blockedNodeIds.includes(node.id),
+        isExecutable: executionPlan.executableNodeIds.includes(node.id),
+        isParticipating: participatingNodeIds.has(node.id),
         matvals: executionPlanMatvalsForNode(node, executionPlan),
       },
       argvSlots: edgeDerived.argvSlots,
@@ -516,7 +518,6 @@ function toFlowNode(
       onRun: handlers.onRun,
       onSelectExecutionTarget: handlers.onSelectExecutionTarget,
       getActionReason: handlers.getActionReason,
-      onToggleExecutionPlanBlocked: handlers.onToggleExecutionPlanBlocked,
       onToggleExecutionPlanMatout: handlers.onToggleExecutionPlanMatout,
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
@@ -546,7 +547,6 @@ function toFlowEdge(
   onCycle?: (edgeId: string) => void,
   executionPlan: ExecutionPlanState = emptyExecutionPlan(),
 ): FlowEdge {
-  const targetNodeIds = new Set(executionPlan.targetNodeIds);
   return {
     id: edge.id,
     source: edge.from.nodeId,
@@ -558,7 +558,7 @@ function toFlowEdge(
     animated: edge.buffering === "unbuffered",
     data: {
       buffering: edge.buffering,
-      executionPlan: targetNodeIds.has(edge.from.nodeId) && targetNodeIds.has(edge.to.nodeId),
+      executionPlan: executionPlan.edgeIds.includes(edge.id),
       onDelete,
       onCycle,
     },
@@ -616,7 +616,6 @@ type ShellNodeActions = {
   onRun: (nodeId: string, action: ExecutionAction) => void;
   onSelectExecutionTarget: (nodeId: string, action: ExecutionAction, additive: boolean) => void;
   getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
-  onToggleExecutionPlanBlocked: (nodeId: string) => void;
   onToggleExecutionPlanMatout: (nodeId: string, id: string) => void;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
@@ -894,7 +893,6 @@ function WorkspaceCanvas() {
     onRun: () => undefined,
     onSelectExecutionTarget: () => undefined,
     getActionReason: () => null,
-    onToggleExecutionPlanBlocked: () => undefined,
     onToggleExecutionPlanMatout: () => undefined,
     onDelete: () => undefined,
     onPickFile: async () => undefined,
@@ -938,7 +936,6 @@ function WorkspaceCanvas() {
     onRun: (...args) => (handlersRef.current ?? handlersFallback).onRun(...args),
     onSelectExecutionTarget: (...args) => (handlersRef.current ?? handlersFallback).onSelectExecutionTarget(...args),
     getActionReason: (...args) => (handlersRef.current ?? handlersFallback).getActionReason(...args),
-    onToggleExecutionPlanBlocked: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanBlocked(...args),
     onToggleExecutionPlanMatout: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanMatout(...args),
     onDelete: (...args) => (handlersRef.current ?? handlersFallback).onDelete(...args),
     onPickFile: (...args) => (handlersRef.current ?? handlersFallback).onPickFile(...args),
@@ -998,7 +995,13 @@ function WorkspaceCanvas() {
           });
   }, [patchNodesById]);
 
+  const participatingNodeIdsForCurrentPlan = useCallback((plan: ExecutionPlanState) => {
+    const workspaceEdges = edgesRef.current.map(flowEdgeToWorkspaceEdge);
+    return new Set(participatingNodeIdsForPlan(plan, workspaceEdges));
+  }, []);
+
   const updateNodeMaterializedData = useCallback((nodeId: string, nextMaterialized: NodeMaterialized | undefined) => {
+    const participatingNodeIds = participatingNodeIdsForCurrentPlan(executionPlanRef.current);
     patchNodesById([nodeId], (node) =>
       node.data.model.materialized === nextMaterialized
         ? node
@@ -1011,8 +1014,8 @@ function WorkspaceCanvas() {
                 materialized: nextMaterialized,
               },
               executionPlan: {
-                isTarget: executionPlanRef.current.targetNodeIds.includes(node.id),
-                isBlocked: executionPlanRef.current.blockedNodeIds.includes(node.id),
+                isExecutable: executionPlanRef.current.executableNodeIds.includes(node.id),
+                isParticipating: participatingNodeIds.has(node.id),
                 matvals: executionPlanMatvalsForNode(
                   {
                     ...node.data.model,
@@ -1023,7 +1026,7 @@ function WorkspaceCanvas() {
               },
             },
           });
-  }, [patchNodesById]);
+  }, [participatingNodeIdsForCurrentPlan, patchNodesById]);
 
   const updateNodeRuntimeData = useCallback((nodeId: string, nextRuntime: NodeRuntimeState | undefined) => {
     patchNodesById([nodeId], (node) => {
@@ -1041,10 +1044,11 @@ function WorkspaceCanvas() {
   }, [patchNodesById]);
 
   const updateNodeExecutionPlanData = useCallback((nextPlan: ExecutionPlanState) => {
+    const participatingNodeIds = participatingNodeIdsForCurrentPlan(nextPlan);
     patchNodesById(nodesRef.current.map((node) => node.id), (node) => {
       const nextNodeExecutionPlan = {
-        isTarget: nextPlan.targetNodeIds.includes(node.id),
-        isBlocked: nextPlan.blockedNodeIds.includes(node.id),
+        isExecutable: nextPlan.executableNodeIds.includes(node.id),
+        isParticipating: participatingNodeIds.has(node.id),
         matvals: executionPlanMatvalsForNode(node.data.model, nextPlan),
       };
       const currentNodeExecutionPlan = node.data.executionPlan;
@@ -1058,8 +1062,8 @@ function WorkspaceCanvas() {
             && entry.included === nextEntry.included;
         });
       if (
-        currentNodeExecutionPlan?.isTarget === nextNodeExecutionPlan.isTarget
-        && currentNodeExecutionPlan?.isBlocked === nextNodeExecutionPlan.isBlocked
+        currentNodeExecutionPlan?.isExecutable === nextNodeExecutionPlan.isExecutable
+        && currentNodeExecutionPlan?.isParticipating === nextNodeExecutionPlan.isParticipating
         && sameMatvals
       ) {
         return node;
@@ -1072,7 +1076,7 @@ function WorkspaceCanvas() {
         },
       };
     });
-  }, [patchNodesById]);
+  }, [participatingNodeIdsForCurrentPlan, patchNodesById]);
 
   const updateNodesRuntimeData = useCallback((nodeIds: Iterable<string>, runtimeMap: Record<string, NodeRuntimeState>) => {
     patchNodesById(nodeIds, (node) => {
@@ -1109,11 +1113,11 @@ function WorkspaceCanvas() {
   }, [patchNodesById]);
 
   const updateEdgeExecutionPlanData = useCallback((nextPlan: ExecutionPlanState) => {
-    const targetNodeIds = new Set(nextPlan.targetNodeIds);
+    const edgeIds = new Set(nextPlan.edgeIds);
     setEdges((current) => {
       let changed = false;
       const next = current.map((edge) => {
-        const executionPlan = targetNodeIds.has(edge.source) && targetNodeIds.has(edge.target);
+        const executionPlan = edgeIds.has(edge.id);
         if (edge.data?.executionPlan === executionPlan) {
           return edge;
         }
@@ -1360,9 +1364,9 @@ function WorkspaceCanvas() {
       Object.keys(materializedOutputStoreRef.current),
     );
     if (
-      sameArray(trimmed.targetNodeIds, executionPlanRef.current.targetNodeIds)
+      sameArray(trimmed.executableNodeIds, executionPlanRef.current.executableNodeIds)
+      && sameArray(trimmed.edgeIds, executionPlanRef.current.edgeIds)
       && sameArray(trimmed.providedMatoutIds, executionPlanRef.current.providedMatoutIds)
-      && sameArray(trimmed.blockedNodeIds, executionPlanRef.current.blockedNodeIds)
     ) {
       return;
     }
@@ -1768,14 +1772,6 @@ function WorkspaceCanvas() {
         }
       },
       getActionReason,
-      onToggleExecutionPlanBlocked: (nodeId) => {
-        setExecutionPlan((current) => ({
-          ...current,
-          blockedNodeIds: current.blockedNodeIds.includes(nodeId)
-            ? current.blockedNodeIds.filter((id) => id !== nodeId)
-            : [...current.blockedNodeIds, nodeId].sort(),
-        }));
-      },
       onToggleExecutionPlanMatout: (_nodeId, id) => {
         setExecutionPlan((current) => ({
           ...current,
@@ -1884,6 +1880,7 @@ function WorkspaceCanvas() {
             livePreviews: undefined,
           },
         };
+        const participatingNodeIds = participatingNodeIdsForCurrentPlan(executionPlanRef.current);
         const nextNodes = nodesRef.current.map((candidate) =>
           candidate.id === nodeId
             ? {
@@ -1895,6 +1892,7 @@ function WorkspaceCanvas() {
                   deriveNodeEdgeData(cleared.node.kind, incomingEdgeSummaryRef.current.get(cleared.node.id)),
                   workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
                   executionPlanRef.current,
+                  participatingNodeIds,
                 ),
                 selected: candidate.selected,
               }
@@ -2558,6 +2556,7 @@ function WorkspaceCanvas() {
       toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, emptyExecutionPlan()),
     );
     const incomingSummaries = buildIncomingEdgeSummaries(loadedEdges);
+    const participatingNodeIds = new Set<string>();
     const loadedNodes = loaded.nodes.map((node) =>
       toFlowNode(
         node,
@@ -2567,6 +2566,7 @@ function WorkspaceCanvas() {
         deriveNodeEdgeData(node.kind, incomingSummaries.get(node.id)),
         loaded.ui.previewControlsLocation,
         emptyExecutionPlan(),
+        participatingNodeIds,
       ),
     );
 
@@ -2862,9 +2862,7 @@ function WorkspaceCanvas() {
             type: "workspace",
             data: {
               buffering: "unbuffered",
-              executionPlan:
-                executionPlanRef.current.targetNodeIds.includes(connection.source ?? "")
-                && executionPlanRef.current.targetNodeIds.includes(connection.target ?? ""),
+              executionPlan: false,
               onDelete: deleteEdge,
               onCycle: cycleEdgeBuffering,
             },
@@ -2915,6 +2913,7 @@ function WorkspaceCanvas() {
           deriveNodeEdgeData(nextNodeModel.kind, incomingEdgeSummaryRef.current.get(nextNodeModel.id)),
           workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
           executionPlanRef.current,
+          participatingNodeIdsForCurrentPlan(executionPlanRef.current),
         );
         const next = [...current, nextNode];
         persistSoon(next, edgesRef.current);
@@ -3005,6 +3004,8 @@ function WorkspaceCanvas() {
     const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current));
     const nextEdges = [...edgesRef.current, ...restoredEdges];
     const nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
+    const nextExecutionPlanEdges = nextEdges.map(flowEdgeToWorkspaceEdge);
+    const participatingNodeIds = new Set(participatingNodeIdsForPlan(executionPlanRef.current, nextExecutionPlanEdges));
     const preservedNodes = nodesRef.current.map((node) => ({ ...node, selected: false }));
     const restoredNodes = restoredModels.map((node) => ({
       ...toFlowNode(
@@ -3015,6 +3016,7 @@ function WorkspaceCanvas() {
         deriveNodeEdgeData(node.kind, nextIncomingSummaries.get(node.id)),
         workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
         executionPlanRef.current,
+        participatingNodeIds,
       ),
       selected: true,
     }));
@@ -3093,23 +3095,27 @@ function WorkspaceCanvas() {
     })),
     [selectedNodes],
   );
-  const executionPlanHasTargets = executionPlan.targetNodeIds.length > 0;
-  const selectedExecutionTargetNodeIds = useMemo(
-    () =>
-      Array.from(
-        new Set([
-          ...selectedNodes.map((node) => node.id),
-          ...selectedEdges.flatMap((edge) => [edge.source, edge.target]),
-        ]),
-      ).sort(),
-    [selectedEdges, selectedNodes],
+  const executionPlanHasTargets =
+    executionPlan.executableNodeIds.length > 0 || executionPlan.edgeIds.length > 0;
+  const selectedExecutionPlanNodeIds = useMemo(
+    () => selectedNodes.map((node) => node.id).sort(),
+    [selectedNodes],
+  );
+  const selectedExecutionPlanEdgeIds = useMemo(
+    () => selectedEdges.map((edge) => edge.id).sort(),
+    [selectedEdges],
+  );
+  const executionPlanParticipatingNodeIds = useMemo(
+    () => participatingNodeIdsForPlan(executionPlan, edges.map(flowEdgeToWorkspaceEdge)),
+    [edges, executionPlan],
   );
   const executionPlanSummary = useMemo(
     () => ({
-      nodeCount: executionPlan.targetNodeIds.length,
+      nodeCount: executionPlanParticipatingNodeIds.length,
+      edgeCount: executionPlan.edgeIds.length,
       matoutCount: executionPlan.providedMatoutIds.length,
     }),
-    [executionPlan],
+    [executionPlan, executionPlanParticipatingNodeIds.length],
   );
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
@@ -3226,6 +3232,7 @@ function WorkspaceCanvas() {
               deriveNodeEdgeData(updated.kind, incomingEdgeSummaryRef.current.get(updated.id)),
               workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
               executionPlanRef.current,
+              participatingNodeIdsForCurrentPlan(executionPlanRef.current),
             ),
             selected: node.selected,
           }
@@ -3299,6 +3306,8 @@ function WorkspaceCanvas() {
         selected: true,
       })),
     ];
+    const nextExecutionPlanEdges = nextEdges.map(flowEdgeToWorkspaceEdge);
+    const participatingNodeIds = new Set(participatingNodeIdsForPlan(executionPlanRef.current, nextExecutionPlanEdges));
     const nextNodes = [
       ...nodesRef.current.map((node) => ({ ...node, selected: false })),
       ...duplicatedModels.map((node) => ({
@@ -3310,6 +3319,7 @@ function WorkspaceCanvas() {
           deriveNodeEdgeData(node.kind, nextIncomingSummaries.get(node.id)),
           workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
           executionPlanRef.current,
+          participatingNodeIds,
         ),
         selected: true,
       })),
@@ -3323,12 +3333,15 @@ function WorkspaceCanvas() {
   }, [cycleEdgeBuffering, deleteEdge, persistWorkspaceSnapshot, setEdges, setNodes, stableNodeActions]);
 
   const applySelectedToExecutionPlan = useCallback((additive: boolean) => {
-    if (selectedExecutionTargetNodeIds.length === 0) {
+    if (selectedExecutionPlanNodeIds.length === 0 && selectedExecutionPlanEdgeIds.length === 0) {
       return;
     }
-    const computedPlan = executionPlanForTargetNodeIds(selectedExecutionTargetNodeIds);
+    const computedPlan = executionPlanForSelection(
+      selectedExecutionPlanNodeIds,
+      selectedExecutionPlanEdgeIds,
+    );
     setExecutionPlan((current) => mergeExecutionPlans(current, computedPlan, additive));
-  }, [selectedExecutionTargetNodeIds]);
+  }, [selectedExecutionPlanEdgeIds, selectedExecutionPlanNodeIds]);
 
   const setSelectedEdgeBuffering = useCallback((buffering: BufferingMode) => {
     const selectedEdgeIds = new Set(
@@ -3794,7 +3807,7 @@ function WorkspaceCanvas() {
           {executionPlanHasTargets && (
             <Panel position="top-right" className="exec-plan-panel">
               <div className="exec-plan-panel-summary">
-                plan · {executionPlanSummary.nodeCount} nodes · {executionPlanSummary.matoutCount} matvals
+                plan · {executionPlanSummary.nodeCount} nodes · {executionPlanSummary.edgeCount} wires · {executionPlanSummary.matoutCount} matvals
               </div>
               <div className="exec-plan-panel-buttons">
                 <button type="button" onClick={runCurrentExecutionPlan}>
@@ -3922,9 +3935,9 @@ function WorkspaceCanvas() {
               type="button"
               className="selection-actions-plan-target"
               onClick={(event) => applySelectedToExecutionPlan(event.shiftKey)}
-              disabled={selectedExecutionTargetNodeIds.length === 0}
+              disabled={selectedExecutionPlanNodeIds.length === 0 && selectedExecutionPlanEdgeIds.length === 0}
               title={
-                selectedExecutionTargetNodeIds.length === 0
+                selectedExecutionPlanNodeIds.length === 0 && selectedExecutionPlanEdgeIds.length === 0
                   ? "select nodes or wires first"
                   : "Set selected nodes/wires as execution target.\n\nShift+click to add/remove from execution target instead."
               }

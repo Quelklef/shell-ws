@@ -157,8 +157,8 @@ export default function ShellNode({ data }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
   const executionPlan = typedData.executionPlan ?? {
-    isTarget: false,
-    isBlocked: false,
+    isExecutable: false,
+    isParticipating: false,
     matvals: [],
   };
   const refreshNodeInternals = useUpdateNodeInternals();
@@ -501,24 +501,10 @@ export default function ShellNode({ data }: NodeProps) {
 
   return (
     <div
-      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""} ${executionPlan.isTarget ? "is-execution-target" : ""}`}
+      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""} ${executionPlan.isParticipating ? "is-execution-target" : ""}`}
     >
-      {executionPlan.isTarget && (
+      {executionPlan.isParticipating && (
         <div className="execution-plan-floating nodrag nopan">
-          <div className="execution-plan-toggle-row">
-            <button
-              type="button"
-              className={`execution-plan-toggle nodrag nopan ${executionPlan.isBlocked ? "is-active" : ""}`}
-              onClick={() => typedData.onToggleExecutionPlanBlocked(model.id)}
-              title={executionPlan.isBlocked ? "unblock execution at this node" : "block execution at this node"}
-              aria-label={executionPlan.isBlocked ? "unblock execution at this node" : "block execution at this node"}
-            >
-              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                <path d="M5.2 7V5.4a2.8 2.8 0 1 1 5.6 0V7" />
-                <rect x="3.5" y="7" width="9" height="6.5" rx="1.2" />
-              </svg>
-            </button>
-          </div>
           <div className="execution-plan-matvals">
             {executionPlan.matvals.length > 0 ? (
               executionPlan.matvals.map((entry) => (

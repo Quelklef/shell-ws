@@ -448,9 +448,11 @@ pub enum ClientEvent {
 pub struct ExecutionRequest {
     pub workspace: Workspace,
     #[serde(default)]
+    pub executable_node_ids: Vec<String>,
+    #[serde(default)]
     pub provided_matout_ids: Vec<String>,
     #[serde(default)]
-    pub blocked_node_ids: Vec<String>,
+    pub edge_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -718,8 +720,9 @@ mod tests {
             "type": "run_node",
             "request": {
                 "workspace": workspace,
+                "executableNodeIds": [],
                 "providedMatoutIds": [],
-                "blockedNodeIds": []
+                "edgeIds": []
             }
         });
 

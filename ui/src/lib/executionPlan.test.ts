@@ -3,10 +3,11 @@ import { describe, expect, it } from "vitest";
 import {
   buildExecutionRequestFromPlan,
   emptyExecutionPlan,
-  executionPlanForTargetNodeIds,
+  executionPlanForSelection,
   executionPlanFromRequest,
   executionPlanMatvalsForNode,
   mergeExecutionPlans,
+  participatingNodeIdsForPlan,
 } from "./executionPlan";
 import type { ExecutionRequest, Workspace, WorkspaceNode } from "./types";
 
@@ -51,76 +52,107 @@ function workspace(nodes: WorkspaceNode[], edges: Workspace["edges"]): Workspace
 describe("executionPlan", () => {
   it("starts empty", () => {
     expect(emptyExecutionPlan()).toEqual({
-      targetNodeIds: [],
+      executableNodeIds: [],
+      edgeIds: [],
       providedMatoutIds: [],
-      blockedNodeIds: [],
     });
   });
 
   it("derives a plan snapshot from an execution request", () => {
     const request: ExecutionRequest = {
-      workspace: workspace([node("a", "text"), node("b", "script")], []),
+      workspace: workspace(
+        [node("a", "text"), node("b", "script"), node("c", "display")],
+        [
+          {
+            id: "e1",
+            from: { nodeId: "a", port: "stdout" },
+            to: { nodeId: "b", port: "stdin" },
+            buffering: "line_or_1024",
+          },
+        ],
+      ),
+      executableNodeIds: ["b"],
+      edgeIds: ["e1"],
       providedMatoutIds: ["out-1"],
-      blockedNodeIds: ["b"],
     };
 
     expect(executionPlanFromRequest(request)).toEqual({
-      targetNodeIds: ["a", "b"],
+      executableNodeIds: ["b"],
+      edgeIds: ["e1"],
       providedMatoutIds: ["out-1"],
-      blockedNodeIds: ["b"],
     });
   });
 
-  it("creates a target-only execution plan from node ids", () => {
-    expect(executionPlanForTargetNodeIds(["b", "a", "a"])).toEqual({
-      targetNodeIds: ["a", "b"],
+  it("creates a selection plan from node and edge ids", () => {
+    expect(executionPlanForSelection(["b", "a", "a"], ["e2", "e1", "e2"])).toEqual({
+      executableNodeIds: ["a", "b"],
+      edgeIds: ["e1", "e2"],
       providedMatoutIds: [],
-      blockedNodeIds: [],
     });
   });
 
-  it("shift-add unions computed plans when the current target is not a superset", () => {
+  it("shift-add unions computed plans when the current plan is not a superset", () => {
     expect(
       mergeExecutionPlans(
         {
-          targetNodeIds: ["a"],
+          executableNodeIds: ["a"],
+          edgeIds: ["e1"],
           providedMatoutIds: ["mat-a"],
-          blockedNodeIds: [],
         },
         {
-          targetNodeIds: ["b"],
+          executableNodeIds: ["b"],
+          edgeIds: ["e2"],
           providedMatoutIds: ["mat-b"],
-          blockedNodeIds: ["b"],
         },
         true,
       ),
     ).toEqual({
-      targetNodeIds: ["a", "b"],
+      executableNodeIds: ["a", "b"],
+      edgeIds: ["e1", "e2"],
       providedMatoutIds: ["mat-a", "mat-b"],
-      blockedNodeIds: ["b"],
     });
   });
 
-  it("shift-click subtracts a computed plan when the current target is a superset", () => {
+  it("shift-click subtracts a computed plan when the current plan is a superset", () => {
     expect(
       mergeExecutionPlans(
         {
-          targetNodeIds: ["a", "b"],
+          executableNodeIds: ["a", "b"],
+          edgeIds: ["e1", "e2"],
           providedMatoutIds: ["mat-a", "mat-b"],
-          blockedNodeIds: ["b"],
         },
         {
-          targetNodeIds: ["b"],
+          executableNodeIds: ["b"],
+          edgeIds: ["e2"],
           providedMatoutIds: ["mat-b"],
-          blockedNodeIds: ["b"],
         },
         true,
       ),
     ).toEqual({
-      targetNodeIds: ["a"],
+      executableNodeIds: ["a"],
+      edgeIds: ["e1"],
       providedMatoutIds: ["mat-a"],
-      blockedNodeIds: [],
     });
+  });
+
+  it("derives participating nodes from executable nodes and included wires", () => {
+    const plan = {
+      executableNodeIds: ["b"],
+      edgeIds: ["e1"],
+      providedMatoutIds: [],
+    };
+    const ids = participatingNodeIdsForPlan(
+      plan,
+      [
+        {
+          id: "e1",
+          from: { nodeId: "a", port: "stdout" },
+          to: { nodeId: "b", port: "stdin" },
+          buffering: "line_or_1024",
+        },
+      ],
+    );
+    expect(ids).toEqual(["a", "b"]);
   });
 
   it("builds a pruned request from the current plan", () => {
@@ -157,16 +189,17 @@ describe("executionPlan", () => {
         ],
       ),
       {
-        targetNodeIds: ["b", "c"],
+        executableNodeIds: ["c"],
+        edgeIds: ["e2", "missing"],
         providedMatoutIds: ["a-out", "b-out", "dangling"],
-        blockedNodeIds: ["a", "c"],
       },
     );
 
     expect(request.workspace.nodes.map((item) => item.id)).toEqual(["b", "c"]);
     expect(request.workspace.edges.map((item) => item.id)).toEqual(["e2"]);
+    expect(request.executableNodeIds).toEqual(["c"]);
+    expect(request.edgeIds).toEqual(["e2"]);
     expect(request.providedMatoutIds).toEqual(["a-out", "b-out"]);
-    expect(request.blockedNodeIds).toEqual(["c"]);
   });
 
   it("reports node matvals and whether they are included", () => {
@@ -179,9 +212,9 @@ describe("executionPlan", () => {
 
     expect(
       executionPlanMatvalsForNode(current, {
-        targetNodeIds: ["current"],
+        executableNodeIds: ["current"],
+        edgeIds: [],
         providedMatoutIds: ["stdout-id"],
-        blockedNodeIds: [],
       }),
     ).toEqual([
       { id: "stdin-id", key: "stdin", source: "input", included: false },

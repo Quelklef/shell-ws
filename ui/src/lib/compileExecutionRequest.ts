@@ -106,6 +106,7 @@ function prepareNodeMaterialized(
 function filterWorkspaceToScope(
   workspace: Workspace,
   scopeNodeIds: Set<string>,
+  includedEdgeIds: Set<string>,
   targetNodeId: string | null,
   allowedOutputPorts: Set<MaterializedOutputPort> | null,
 ): Workspace {
@@ -120,7 +121,10 @@ function filterWorkspaceToScope(
         ),
       ),
     edges: workspace.edges.filter(
-      (edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId),
+      (edge) =>
+        includedEdgeIds.has(edge.id)
+        && scopeNodeIds.has(edge.from.nodeId)
+        && scopeNodeIds.has(edge.to.nodeId),
     ),
     tuckspace: [],
   };
@@ -215,28 +219,48 @@ export function compileExecutionRequest(
   }
 
   let scopeNodeIds: Set<string>;
-  let blockedNodeIds: string[] = [];
+  let executableNodeIds: string[] = [];
   const providedMatoutIds = new Set<MatOutId>();
+  let includedEdgeIds = new Set<string>();
   let allowedOutputPorts: Set<MaterializedOutputPort> | null = null;
 
   if (action === "pull_inputs" || action === "pull_run") {
     scopeNodeIds = upstreamClosure(workspace.edges, nodeId);
-    if (action === "pull_inputs") {
-      blockedNodeIds = [nodeId];
-    }
+    includedEdgeIds = new Set(
+      workspace.edges
+        .filter((edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId))
+        .map((edge) => edge.id),
+    );
+    executableNodeIds = Array.from(scopeNodeIds)
+      .filter((id) => action === "pull_run" || id !== nodeId)
+      .sort();
   } else if (action === "rerun") {
     scopeNodeIds = new Set([nodeId]);
+    executableNodeIds = [nodeId];
     for (const id of idsForInputKeys(target, connectedInputKeys(workspace.edges, nodeId))) {
       providedMatoutIds.add(id);
     }
   } else if (action === "rerun_push") {
     scopeNodeIds = pushRunnableScope(workspace, nodeId);
+    includedEdgeIds = new Set(
+      workspace.edges
+        .filter((edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId))
+        .map((edge) => edge.id),
+    );
+    executableNodeIds = Array.from(scopeNodeIds).sort();
     for (const id of idsForExternalDependencies(workspace, scopeNodeIds)) {
       providedMatoutIds.add(id);
     }
   } else {
     scopeNodeIds = pushRunnableScope(workspace, nodeId);
-    blockedNodeIds = [nodeId];
+    includedEdgeIds = new Set(
+      workspace.edges
+        .filter((edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId))
+        .map((edge) => edge.id),
+    );
+    executableNodeIds = Array.from(scopeNodeIds)
+      .filter((id) => id !== nodeId)
+      .sort();
     allowedOutputPorts = connectedOutputPorts(
       workspace.edges.filter(
         (edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId),
@@ -261,10 +285,12 @@ export function compileExecutionRequest(
     workspace: filterWorkspaceToScope(
       workspace,
       scopeNodeIds,
+      includedEdgeIds,
       nodeId,
       allowedOutputPorts,
     ),
+    executableNodeIds,
+    edgeIds: Array.from(includedEdgeIds).sort(),
     providedMatoutIds: Array.from(providedMatoutIds).sort(),
-    blockedNodeIds,
   };
 }

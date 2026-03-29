@@ -183,7 +183,7 @@ struct ExecutionHandle {
 
 struct StreamingExecutionPlan {
     scope: HashSet<String>,
-    blocked_nodes: HashSet<String>,
+    executable_nodes: HashSet<String>,
 }
 
 struct ExecutionContext {
@@ -201,7 +201,7 @@ struct ExecutionContext {
     available_matout_ids: HashSet<String>,
     last_exit_codes: Arc<Mutex<HashMap<String, Option<i32>>>>,
     execution_scope: Arc<Mutex<HashSet<String>>>,
-    blocked_nodes: Arc<Mutex<HashSet<String>>>,
+    executable_nodes: Arc<Mutex<HashSet<String>>>,
 }
 
 impl ExecutionContext {
@@ -349,7 +349,7 @@ impl ExecutionContext {
             available_matout_ids: provided_ids,
             last_exit_codes: Arc::new(Mutex::new(replayable_exit_nodes)),
             execution_scope: Arc::new(Mutex::new(HashSet::new())),
-            blocked_nodes: Arc::new(Mutex::new(HashSet::new())),
+            executable_nodes: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -365,34 +365,54 @@ impl ExecutionContext {
             .iter()
             .map(|node| node.id.clone())
             .collect::<HashSet<_>>();
-        let blocked_nodes = self
+        let executable_nodes = self
             .request
-            .blocked_node_ids
+            .executable_node_ids
             .iter()
             .cloned()
             .collect::<HashSet<_>>();
+        let requested_edge_ids = self.request.edge_ids.iter().cloned().collect::<HashSet<_>>();
+        let workspace_edge_ids = self
+            .workspace
+            .edges
+            .iter()
+            .map(|edge| edge.id.clone())
+            .collect::<HashSet<_>>();
 
-        for node_id in blocked_nodes.iter() {
+        for node_id in executable_nodes.iter() {
             if !scope.contains(node_id) {
                 return Err(format!("node {node_id} is not in the execution graph"));
             }
         }
+        if requested_edge_ids != workspace_edge_ids {
+            return Err("execution request wires do not match the request workspace".to_string());
+        }
 
         let roots = self.roots_in_scope(&scope);
 
-        for node_id in &blocked_nodes {
+        for node_id in scope.iter().filter(|node_id| !executable_nodes.contains(*node_id)) {
+            let has_upstream = self
+                .incoming
+                .get(node_id)
+                .map(|edges| edges.iter().any(|edge| scope.contains(&edge.from.node_id)))
+                .unwrap_or(false);
             let has_downstream = self
                 .outgoing
                 .get(node_id)
                 .map(|edges| edges.iter().any(|edge| scope.contains(&edge.to.node_id)))
                 .unwrap_or(false);
+            if has_upstream && has_downstream {
+                return Err(format!(
+                    "non-executable node {node_id} cannot sit between included upstream and downstream wires"
+                ));
+            }
             if has_downstream && !self.node_has_replayable_outputs(node_id) {
                 return Err(format!(
-                    "blocked node {node_id} cannot feed downstream execution without provided outputs"
+                    "non-executable node {node_id} cannot feed downstream execution without provided outputs"
                 ));
             }
         }
-        for node_id in roots.iter().filter(|node_id| blocked_nodes.contains(*node_id)) {
+        for node_id in roots.iter().filter(|node_id| !executable_nodes.contains(*node_id)) {
             if !self.node_has_replayable_outputs(node_id) {
                 let node = self.nodes.get(node_id).expect("root node");
                 return Err(format!("{} has no outputs to push.", node_label(node)));
@@ -401,7 +421,7 @@ impl ExecutionContext {
 
         Ok(StreamingExecutionPlan {
             scope,
-            blocked_nodes,
+            executable_nodes,
         })
     }
 
@@ -479,7 +499,7 @@ impl ExecutionContext {
     }
 
     fn should_execute_node_in_scope(&self, node_id: &str) -> bool {
-        !self.blocked_nodes.lock().contains(node_id)
+        self.executable_nodes.lock().contains(node_id)
     }
 
     // Keep planning separate from execution so every action can share one forward engine.
@@ -727,7 +747,7 @@ impl RunController {
 
     fn init(&mut self) {
         *self.context.execution_scope.lock() = self.plan.scope.clone();
-        *self.context.blocked_nodes.lock() = self.plan.blocked_nodes.clone();
+        *self.context.executable_nodes.lock() = self.plan.executable_nodes.clone();
         for edge in self.context.workspace.edges.iter().filter(|edge| {
             self.plan.scope.contains(&edge.from.node_id)
                 && self.plan.scope.contains(&edge.to.node_id)
@@ -1493,7 +1513,7 @@ impl RunController {
 
     fn finish_node_if_delivery_drained(&mut self, node_id: &str) {
         // A node is not fully finished until every delayed delivery sourced from it has drained.
-        // Otherwise pull-style runs can return before a blocked target commits its final input.
+        // Otherwise pull-style runs can return before a non-executable sink commits its final input.
         if self
             .pending_delivery_counts
             .get(node_id)
@@ -2064,14 +2084,17 @@ mod tests {
             .expect("target node");
         let mut provided_ids = HashSet::new();
         let mut allowed_output_ports = None;
-        let (scope, blocked_node_ids) = match action {
+        let (executable_node_ids, scope) = match action {
             ExecutionAction::PullInputs => {
                 let scope = upstream_closure(workspace, node_id);
-                (scope, vec![node_id.to_string()])
+                (
+                    scope.iter().filter(|id| id.as_str() != node_id).cloned().collect::<Vec<_>>(),
+                    scope,
+                )
             }
             ExecutionAction::PullRun => {
                 let scope = upstream_closure(workspace, node_id);
-                (scope, Vec::new())
+                (scope.iter().cloned().collect::<Vec<_>>(), scope)
             }
             ExecutionAction::Rerun => {
                 let keys = connected_input_keys(workspace, node_id);
@@ -2081,16 +2104,16 @@ mod tests {
                     }
                 }
                 (
+                    vec![node_id.to_string()],
                     HashSet::from([node_id.to_string()]),
-                    Vec::new(),
                 )
             }
             ExecutionAction::RerunPush => {
                 let scope = push_runnable_scope(workspace, node_id);
                 provided_ids.extend(ids_for_external_dependencies(workspace, &scope));
                 (
+                    scope.iter().cloned().collect::<Vec<_>>(),
                     scope,
-                    Vec::new(),
                 )
             }
             ExecutionAction::Repush => {
@@ -2104,24 +2127,30 @@ mod tests {
                 provided_ids.extend(ids_for_external_dependencies(workspace, &scope));
                 allowed_output_ports = Some(ports);
                 (
+                    scope.iter().filter(|id| id.as_str() != node_id).cloned().collect::<Vec<_>>(),
                     scope,
-                    vec![node_id.to_string()],
                 )
             }
         };
+        let workspace = prepare_workspace_materialized(
+            workspace,
+            &scope,
+            node_id,
+            allowed_output_ports.as_ref(),
+        );
         ExecutionRequest {
-            workspace: prepare_workspace_materialized(
-                workspace,
-                &scope,
-                node_id,
-                allowed_output_ports.as_ref(),
-            ),
+            executable_node_ids: {
+                let mut ids = executable_node_ids;
+                ids.sort();
+                ids
+            },
+            edge_ids: workspace.edges.iter().map(|edge| edge.id.clone()).collect(),
+            workspace,
             provided_matout_ids: {
                 let mut ids = provided_ids.into_iter().collect::<Vec<_>>();
                 ids.sort();
                 ids
             },
-            blocked_node_ids,
         }
     }
 
@@ -3218,8 +3247,9 @@ mod tests {
         let target = node(NodeKind::Script, "target");
         let request = ExecutionRequest {
             workspace: workspace(vec![target], vec![]),
+            executable_node_ids: vec!["target".to_string()],
+            edge_ids: Vec::new(),
             provided_matout_ids: vec!["missing".to_string()],
-            blocked_node_ids: Vec::new(),
         };
         let error = ExecutionContext::new(
             "missing-provided".to_string(),
@@ -3254,8 +3284,9 @@ mod tests {
                     None,
                 )],
             ),
+            executable_node_ids: vec!["source".to_string(), "sink".to_string()],
+            edge_ids: vec!["edge-1".to_string()],
             provided_matout_ids: Vec::new(),
-            blocked_node_ids: Vec::new(),
         };
         let context = ExecutionContext::new(
             "no-preload".to_string(),
@@ -3300,8 +3331,9 @@ mod tests {
             "no-replay-exit".to_string(),
             ExecutionRequest {
                 workspace: workspace(vec![source.clone()], vec![]),
+                executable_node_ids: vec!["source".to_string()],
+                edge_ids: Vec::new(),
                 provided_matout_ids: Vec::new(),
-                blocked_node_ids: Vec::new(),
             },
             store.clone(),
             broadcast::channel(8).0,
@@ -3314,8 +3346,9 @@ mod tests {
             "replay-exit".to_string(),
             ExecutionRequest {
                 workspace: workspace(vec![source], vec![]),
+                executable_node_ids: Vec::new(),
+                edge_ids: Vec::new(),
                 provided_matout_ids: vec![provided],
-                blocked_node_ids: Vec::new(),
             },
             store,
             broadcast::channel(8).0,
@@ -3332,8 +3365,9 @@ mod tests {
                 vec![node(NodeKind::Text, "a"), node(NodeKind::Text, "b")],
                 vec![],
             ),
+            executable_node_ids: vec!["a".to_string(), "b".to_string()],
+            edge_ids: Vec::new(),
             provided_matout_ids: Vec::new(),
-            blocked_node_ids: Vec::new(),
         };
         let context = ExecutionContext::new(
             "disconnected-scope".to_string(),
@@ -3381,8 +3415,14 @@ mod tests {
                     ),
                 ],
             ),
+            executable_node_ids: vec![
+                "left-root".to_string(),
+                "left-sink".to_string(),
+                "right-root".to_string(),
+                "right-sink".to_string(),
+            ],
+            edge_ids: vec!["edge-left".to_string(), "edge-right".to_string()],
             provided_matout_ids: Vec::new(),
-            blocked_node_ids: Vec::new(),
         };
         let context = Arc::new(
             ExecutionContext::new(
