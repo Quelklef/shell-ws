@@ -1070,6 +1070,14 @@ textarea {
   transform: none;
 }
 
+.selection-actions button.selection-actions-plan-target {
+  color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+}
+
+.selection-actions button.selection-actions-plan-target:hover {
+  background: color-mix(in srgb, var(--exec-plan-color) 16%, transparent);
+}
+
 .selection-actions button:disabled {
   cursor: not-allowed;
   color: color-mix(in srgb, var(--selection) 36%, var(--text-soft));

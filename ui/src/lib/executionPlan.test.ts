@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildExecutionRequestFromPlan,
   emptyExecutionPlan,
+  executionPlanForTargetNodeIds,
   executionPlanFromRequest,
   executionPlanMatvalsForNode,
   mergeExecutionPlans,
@@ -70,6 +71,15 @@ describe("executionPlan", () => {
       seedNodeIds: ["a"],
       providedMatoutIds: ["out-1"],
       blockedNodeIds: ["b"],
+    });
+  });
+
+  it("creates a target-only execution plan from node ids", () => {
+    expect(executionPlanForTargetNodeIds(["b", "a", "a"])).toEqual({
+      targetNodeIds: ["a", "b"],
+      providedMatoutIds: [],
+      seedNodeIds: [],
+      blockedNodeIds: [],
     });
   });
 

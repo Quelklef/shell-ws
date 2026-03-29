@@ -44,6 +44,7 @@ import { compileExecutionRequest } from "./lib/compileExecutionRequest";
 import {
   buildExecutionRequestFromPlan,
   emptyExecutionPlan,
+  executionPlanForTargetNodeIds,
   executionPlanFromRequest,
   executionPlanMatvalsForNode,
   mergeExecutionPlans,
@@ -3071,6 +3072,16 @@ function WorkspaceCanvas() {
     [selectedNodes],
   );
   const executionPlanHasTargets = executionPlan.targetNodeIds.length > 0;
+  const selectedExecutionTargetNodeIds = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...selectedNodes.map((node) => node.id),
+          ...selectedEdges.flatMap((edge) => [edge.source, edge.target]),
+        ]),
+      ).sort(),
+    [selectedEdges, selectedNodes],
+  );
   const executionPlanSummary = useMemo(
     () => ({
       nodeCount: executionPlan.targetNodeIds.length,
@@ -3288,6 +3299,14 @@ function WorkspaceCanvas() {
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime, nextStore);
   }, [cycleEdgeBuffering, deleteEdge, persistWorkspaceSnapshot, setEdges, setNodes, stableNodeActions]);
+
+  const applySelectedToExecutionPlan = useCallback((additive: boolean) => {
+    if (selectedExecutionTargetNodeIds.length === 0) {
+      return;
+    }
+    const computedPlan = executionPlanForTargetNodeIds(selectedExecutionTargetNodeIds);
+    setExecutionPlan((current) => mergeExecutionPlans(current, computedPlan, additive));
+  }, [selectedExecutionTargetNodeIds]);
 
   const setSelectedEdgeBuffering = useCallback((buffering: BufferingMode) => {
     const selectedEdgeIds = new Set(
@@ -3876,6 +3895,29 @@ function WorkspaceCanvas() {
                 </div>
               )}
             </div>
+            <button
+              type="button"
+              className="selection-actions-plan-target"
+              onClick={(event) => applySelectedToExecutionPlan(event.shiftKey)}
+              disabled={selectedExecutionTargetNodeIds.length === 0}
+              title={
+                selectedExecutionTargetNodeIds.length === 0
+                  ? "select nodes or wires first"
+                  : "Set selected nodes/wires as execution target.\n\nShift+click to add/remove from execution target instead."
+              }
+            >
+              <span className="selection-actions-icon" aria-hidden="true">
+                <svg viewBox="0 0 16 16" focusable="false">
+                  <path d="M3 3.5h4" />
+                  <path d="M9 3.5h4" />
+                  <path d="M13 3.5v4" />
+                  <path d="M3 12.5h4" />
+                  <path d="M9 12.5h4" />
+                  <path d="M13 12.5v-4" />
+                </svg>
+              </span>
+              <span>exec target</span>
+            </button>
             <button type="button" onClick={clearSelectedMaterialized} disabled={selectedNodes.length === 0}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">

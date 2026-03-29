@@ -33,6 +33,15 @@ export function emptyExecutionPlan(): ExecutionPlanState {
   };
 }
 
+export function executionPlanForTargetNodeIds(nodeIds: Iterable<string>): ExecutionPlanState {
+  return {
+    targetNodeIds: sortedUnique(nodeIds),
+    providedMatoutIds: [],
+    seedNodeIds: [],
+    blockedNodeIds: [],
+  };
+}
+
 export function executionPlanFromRequest(request: ExecutionRequest): ExecutionPlanState {
   return {
     targetNodeIds: request.workspace.nodes.map((node) => node.id).sort(),
