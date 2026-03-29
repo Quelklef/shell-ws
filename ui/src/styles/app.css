@@ -16,6 +16,7 @@
   --danger: #de5d5d;
   --success: #8fcf9e;
   --selection: #8fcf9e;
+  --exec-plan-color: #9b6cff;
   --shadow: 0 24px 60px rgba(0, 0, 0, 0.28);
   font-family: "IBM Plex Sans", "Avenir Next", "Segoe UI", sans-serif;
 }
@@ -936,6 +937,41 @@ textarea {
   box-shadow: var(--shadow);
 }
 
+.exec-plan-panel {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--exec-plan-color) 46%, rgba(255, 255, 255, 0.12));
+  background: rgba(16, 12, 24, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.exec-plan-panel-summary {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--exec-plan-color) 72%, white 28%);
+}
+
+.exec-plan-panel-buttons {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.exec-plan-panel-buttons button {
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 8px;
+}
+
+.exec-plan-panel-buttons button.danger {
+  border-color: rgba(222, 93, 93, 0.5);
+  color: #f4c3c3;
+}
+
 .selection-actions {
   position: absolute;
   z-index: 30;
@@ -1057,6 +1093,113 @@ textarea {
   box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
 }
 
+.shell-node.is-execution-target .node-card {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
+}
+
+.shell-node.is-execution-target.is-selection-preview .node-card {
+  box-shadow:
+    0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent),
+    0 0 0 calc(6px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 20%, transparent),
+    var(--shadow);
+}
+
+.execution-plan-floating {
+  position: absolute;
+  right: 10px;
+  top: -42px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.execution-plan-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.execution-plan-toggle {
+  min-width: 52px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--exec-plan-color) 55%, rgba(255, 255, 255, 0.16));
+  background: rgba(18, 12, 29, 0.94);
+  color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.24);
+}
+
+.execution-plan-toggle svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.execution-plan-toggle.is-active,
+.execution-plan-toggle:hover {
+  color: white;
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  background: color-mix(in srgb, var(--exec-plan-color) 18%, rgba(18, 12, 29, 0.96));
+}
+
+.execution-plan-matvals {
+  max-width: min(320px, 70vw);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.execution-plan-matval,
+.execution-plan-matvals-empty {
+  min-height: 28px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--exec-plan-color) 40%, rgba(255, 255, 255, 0.12));
+  background: rgba(18, 12, 29, 0.9);
+  color: color-mix(in srgb, var(--exec-plan-color) 72%, white 28%);
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.2);
+}
+
+.execution-plan-matval {
+  cursor: pointer;
+}
+
+.execution-plan-matval:hover,
+.execution-plan-matval.is-included {
+  color: white;
+  border-color: color-mix(in srgb, var(--exec-plan-color) 74%, white 26%);
+  background: color-mix(in srgb, var(--exec-plan-color) 16%, rgba(18, 12, 29, 0.92));
+}
+
+.execution-plan-matval-kind {
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--exec-plan-color) 20%, transparent);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .node-toolbar {
   display: flex;
   align-items: center;
@@ -1086,6 +1229,13 @@ textarea {
   flex-wrap: wrap;
 }
 
+.node-action-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
 .node-action-button {
   width: 28px;
   height: 28px;
@@ -1108,6 +1258,18 @@ textarea {
   stroke-width: 1.6;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.node-action-select-button {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 54%, rgba(255, 255, 255, 0.14));
+  color: color-mix(in srgb, var(--exec-plan-color) 74%, white 26%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--exec-plan-color) 16%, rgba(255, 255, 255, 0.02)), rgba(15, 16, 19, 0.82));
+}
+
+.node-action-select-button:hover {
+  color: white;
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--exec-plan-color) 26%, rgba(255, 255, 255, 0.03)), rgba(15, 16, 19, 0.9));
 }
 
 .node-action-button:disabled {

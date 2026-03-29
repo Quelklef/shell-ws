@@ -241,6 +241,27 @@ export interface ExecutionRequest {
   blockedNodeIds: string[];
 }
 
+export interface ExecutionPlanState {
+  targetNodeIds: string[];
+  providedMatoutIds: MatOutId[];
+  seedNodeIds: string[];
+  blockedNodeIds: string[];
+}
+
+export interface ExecutionPlanNodeMatval {
+  id: MatOutId;
+  key: string;
+  source: "input" | "output";
+  included: boolean;
+}
+
+export interface NodeExecutionPlanState {
+  isTarget: boolean;
+  isSeed: boolean;
+  isBlocked: boolean;
+  matvals: ExecutionPlanNodeMatval[];
+}
+
 export interface NodeRuntimeState {
   running: boolean;
   lastExecId?: string;
@@ -273,9 +294,14 @@ export interface ShellNodeData extends Record<string, unknown> {
   previewControlsLocation?: PreviewControlsLocation;
   generation?: AiGenerationState;
   selectionPreview?: boolean;
+  executionPlan?: NodeExecutionPlanState;
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, action: ExecutionAction) => void;
+  onSelectExecutionTarget: (nodeId: string, action: ExecutionAction, additive: boolean) => void;
   getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
+  onToggleExecutionPlanSeed: (nodeId: string) => void;
+  onToggleExecutionPlanBlocked: (nodeId: string) => void;
+  onToggleExecutionPlanMatout: (nodeId: string, id: MatOutId) => void;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;

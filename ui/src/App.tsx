@@ -41,6 +41,14 @@ import {
 } from "./lib/api";
 import { collectAiScriptSamples } from "./lib/aiScript";
 import { compileExecutionRequest } from "./lib/compileExecutionRequest";
+import {
+  buildExecutionRequestFromPlan,
+  emptyExecutionPlan,
+  executionPlanFromRequest,
+  executionPlanMatvalsForNode,
+  mergeExecutionPlans,
+  trimExecutionPlan,
+} from "./lib/executionPlan";
 import { layoutSelectedNodes } from "./lib/layout";
 import { chooseNodePosition } from "./lib/nodePlacement";
 import { selectionRectToFlowRect } from "./lib/selectionRect";
@@ -51,6 +59,8 @@ import type {
   BufferingMode,
   ClientEvent,
   ExecutionAction,
+  ExecutionRequest,
+  ExecutionPlanState,
   FlowEdge,
   FlowNode,
   MaterializedOutputStore,
@@ -478,10 +488,11 @@ function toFlowNode(
   generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
+    "onUpdate" | "onRun" | "onSelectExecutionTarget" | "getActionReason" | "onToggleExecutionPlanSeed" | "onToggleExecutionPlanBlocked" | "onToggleExecutionPlanMatout" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
   >,
   edgeDerived: NodeEdgeDerivedData,
   previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
+  executionPlan: ExecutionPlanState,
 ): FlowNode {
   return {
     id: node.id,
@@ -492,12 +503,22 @@ function toFlowNode(
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
       generation: generation[node.id],
       selectionPreview: false,
+      executionPlan: {
+        isTarget: executionPlan.targetNodeIds.includes(node.id),
+        isSeed: executionPlan.seedNodeIds.includes(node.id),
+        isBlocked: executionPlan.blockedNodeIds.includes(node.id),
+        matvals: executionPlanMatvalsForNode(node, executionPlan),
+      },
       argvSlots: edgeDerived.argvSlots,
       previewTabs: edgeDerived.previewTabs,
       previewControlsLocation,
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
+      onSelectExecutionTarget: handlers.onSelectExecutionTarget,
       getActionReason: handlers.getActionReason,
+      onToggleExecutionPlanSeed: handlers.onToggleExecutionPlanSeed,
+      onToggleExecutionPlanBlocked: handlers.onToggleExecutionPlanBlocked,
+      onToggleExecutionPlanMatout: handlers.onToggleExecutionPlanMatout,
       onDelete: handlers.onDelete,
       onPickFile: handlers.onPickFile,
       onToggleAutorun: handlers.onToggleAutorun,
@@ -587,7 +608,11 @@ function flowNodeToPersistedWorkspaceNode(
 type ShellNodeActions = {
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, action: ExecutionAction) => void;
+  onSelectExecutionTarget: (nodeId: string, action: ExecutionAction, additive: boolean) => void;
   getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
+  onToggleExecutionPlanSeed: (nodeId: string) => void;
+  onToggleExecutionPlanBlocked: (nodeId: string) => void;
+  onToggleExecutionPlanMatout: (nodeId: string, id: string) => void;
   onDelete: (nodeId: string) => void;
   onPickFile: (nodeId: string) => Promise<void>;
   onToggleAutorun: (nodeId: string, next: AutoRunConfig) => void;
@@ -846,6 +871,7 @@ function WorkspaceCanvas() {
   const [generation, setGeneration] = useState<Record<string, AiGenerationState>>({});
   const [runtime, setRuntime] = useState<Record<string, NodeRuntimeState>>({});
   const [materializedOutputStore, setMaterializedOutputStore] = useState<MaterializedOutputStore>({});
+  const [executionPlan, setExecutionPlan] = useState<ExecutionPlanState>(() => emptyExecutionPlan());
   const [tuckspace, setTuckspace] = useState<TuckedSubgraph[]>([]);
   const [activeExecutions, setActiveExecutions] = useState<
     { execId: string; nodeId: string }[]
@@ -861,7 +887,11 @@ function WorkspaceCanvas() {
   const handlersFallback = useMemo<ShellNodeActions>(() => ({
     onUpdate: () => undefined,
     onRun: () => undefined,
+    onSelectExecutionTarget: () => undefined,
     getActionReason: () => null,
+    onToggleExecutionPlanSeed: () => undefined,
+    onToggleExecutionPlanBlocked: () => undefined,
+    onToggleExecutionPlanMatout: () => undefined,
     onDelete: () => undefined,
     onPickFile: async () => undefined,
     onToggleAutorun: () => undefined,
@@ -878,6 +908,7 @@ function WorkspaceCanvas() {
   const autorunRef = useRef<Map<string, AutorunHandle>>(new Map());
   const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
   const materializedOutputStoreRef = useRef<MaterializedOutputStore>({});
+  const executionPlanRef = useRef<ExecutionPlanState>(executionPlan);
   const persistTimerRef = useRef<number | null>(null);
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
@@ -901,7 +932,11 @@ function WorkspaceCanvas() {
   const stableNodeActions = useMemo<ShellNodeActions>(() => ({
     onUpdate: (...args) => (handlersRef.current ?? handlersFallback).onUpdate(...args),
     onRun: (...args) => (handlersRef.current ?? handlersFallback).onRun(...args),
+    onSelectExecutionTarget: (...args) => (handlersRef.current ?? handlersFallback).onSelectExecutionTarget(...args),
     getActionReason: (...args) => (handlersRef.current ?? handlersFallback).getActionReason(...args),
+    onToggleExecutionPlanSeed: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanSeed(...args),
+    onToggleExecutionPlanBlocked: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanBlocked(...args),
+    onToggleExecutionPlanMatout: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanMatout(...args),
     onDelete: (...args) => (handlersRef.current ?? handlersFallback).onDelete(...args),
     onPickFile: (...args) => (handlersRef.current ?? handlersFallback).onPickFile(...args),
     onToggleAutorun: (...args) => (handlersRef.current ?? handlersFallback).onToggleAutorun(...args),
@@ -972,6 +1007,18 @@ function WorkspaceCanvas() {
                 ...node.data.model,
                 materialized: nextMaterialized,
               },
+              executionPlan: {
+                isTarget: executionPlanRef.current.targetNodeIds.includes(node.id),
+                isSeed: executionPlanRef.current.seedNodeIds.includes(node.id),
+                isBlocked: executionPlanRef.current.blockedNodeIds.includes(node.id),
+                matvals: executionPlanMatvalsForNode(
+                  {
+                    ...node.data.model,
+                    materialized: nextMaterialized,
+                  },
+                  executionPlanRef.current,
+                ),
+              },
             },
           });
   }, [patchNodesById]);
@@ -988,6 +1035,42 @@ function WorkspaceCanvas() {
               runtime: runtimeData,
             },
           };
+    });
+  }, [patchNodesById]);
+
+  const updateNodeExecutionPlanData = useCallback((nextPlan: ExecutionPlanState) => {
+    patchNodesById(nodesRef.current.map((node) => node.id), (node) => {
+      const nextNodeExecutionPlan = {
+        isTarget: nextPlan.targetNodeIds.includes(node.id),
+        isSeed: nextPlan.seedNodeIds.includes(node.id),
+        isBlocked: nextPlan.blockedNodeIds.includes(node.id),
+        matvals: executionPlanMatvalsForNode(node.data.model, nextPlan),
+      };
+      const currentNodeExecutionPlan = node.data.executionPlan;
+      const sameMatvals = currentNodeExecutionPlan?.matvals.length === nextNodeExecutionPlan.matvals.length
+        && currentNodeExecutionPlan.matvals.every((entry, index) => {
+          const nextEntry = nextNodeExecutionPlan.matvals[index];
+          return nextEntry
+            && entry.id === nextEntry.id
+            && entry.key === nextEntry.key
+            && entry.source === nextEntry.source
+            && entry.included === nextEntry.included;
+        });
+      if (
+        currentNodeExecutionPlan?.isTarget === nextNodeExecutionPlan.isTarget
+        && currentNodeExecutionPlan?.isSeed === nextNodeExecutionPlan.isSeed
+        && currentNodeExecutionPlan?.isBlocked === nextNodeExecutionPlan.isBlocked
+        && sameMatvals
+      ) {
+        return node;
+      }
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          executionPlan: nextNodeExecutionPlan,
+        },
+      };
     });
   }, [patchNodesById]);
 
@@ -1056,6 +1139,14 @@ function WorkspaceCanvas() {
   useEffect(() => {
     materializedOutputStoreRef.current = materializedOutputStore;
   }, [materializedOutputStore]);
+
+  useEffect(() => {
+    executionPlanRef.current = executionPlan;
+  }, [executionPlan]);
+
+  useEffect(() => {
+    updateNodeExecutionPlanData(executionPlan);
+  }, [executionPlan, updateNodeExecutionPlanData]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1229,6 +1320,27 @@ function WorkspaceCanvas() {
     },
     [],
   );
+
+  useEffect(() => {
+    const workspace = buildWorkspace();
+    if (!workspace) {
+      return;
+    }
+    const trimmed = trimExecutionPlan(
+      executionPlanRef.current,
+      workspace,
+      Object.keys(materializedOutputStoreRef.current),
+    );
+    if (
+      sameArray(trimmed.targetNodeIds, executionPlanRef.current.targetNodeIds)
+      && sameArray(trimmed.providedMatoutIds, executionPlanRef.current.providedMatoutIds)
+      && sameArray(trimmed.seedNodeIds, executionPlanRef.current.seedNodeIds)
+      && sameArray(trimmed.blockedNodeIds, executionPlanRef.current.blockedNodeIds)
+    ) {
+      return;
+    }
+    setExecutionPlan(trimmed);
+  }, [buildWorkspace, materializedOutputStore, nodes]);
 
   const persistSoon = useCallback(
     (nextNodes: FlowNode[], nextEdges: FlowEdge[]) => {
@@ -1518,6 +1630,37 @@ function WorkspaceCanvas() {
     [buildWorkspace],
   );
 
+  const sendExecutionRequest = useCallback((
+    request: ExecutionRequest,
+    silenceIfDisconnected = false,
+  ) => {
+    const event: ClientEvent = {
+      type: "run_node",
+      request,
+    };
+    if (!socketRef.current?.ready) {
+      if (!silenceIfDisconnected) {
+        setToast("kernel websocket is not connected yet");
+      }
+      return false;
+    }
+    socketRef.current.send(event);
+    return true;
+  }, []);
+
+  const runCurrentExecutionPlan = useCallback(() => {
+    const workspace = buildWorkspace();
+    if (!workspace) {
+      return;
+    }
+    const request = buildExecutionRequestFromPlan(workspace, executionPlanRef.current);
+    if (request.workspace.nodes.length === 0) {
+      setToast("execution plan is empty");
+      return;
+    }
+    sendExecutionRequest(request);
+  }, [buildWorkspace, sendExecutionRequest]);
+
   const stopExecution = useCallback((execId: string) => {
     if (!socketRef.current?.ready) {
       setToast("kernel websocket is not connected yet");
@@ -1583,7 +1726,45 @@ function WorkspaceCanvas() {
       onRun: (nodeId, action) => {
         sendRunRequest(nodeId, action);
       },
+      onSelectExecutionTarget: (nodeId, action, additive) => {
+        const workspace = buildWorkspace();
+        if (!workspace) {
+          return;
+        }
+        try {
+          const computedPlan = executionPlanFromRequest(
+            compileExecutionRequest(workspace, nodeId, action),
+          );
+          setExecutionPlan((current) => mergeExecutionPlans(current, computedPlan, additive));
+        } catch (error) {
+          setToast(String(error));
+        }
+      },
       getActionReason,
+      onToggleExecutionPlanSeed: (nodeId) => {
+        setExecutionPlan((current) => ({
+          ...current,
+          seedNodeIds: current.seedNodeIds.includes(nodeId)
+            ? current.seedNodeIds.filter((id) => id !== nodeId)
+            : [...current.seedNodeIds, nodeId].sort(),
+        }));
+      },
+      onToggleExecutionPlanBlocked: (nodeId) => {
+        setExecutionPlan((current) => ({
+          ...current,
+          blockedNodeIds: current.blockedNodeIds.includes(nodeId)
+            ? current.blockedNodeIds.filter((id) => id !== nodeId)
+            : [...current.blockedNodeIds, nodeId].sort(),
+        }));
+      },
+      onToggleExecutionPlanMatout: (_nodeId, id) => {
+        setExecutionPlan((current) => ({
+          ...current,
+          providedMatoutIds: current.providedMatoutIds.includes(id)
+            ? current.providedMatoutIds.filter((candidate) => candidate !== id)
+            : [...current.providedMatoutIds, id].sort(),
+        }));
+      },
       onDelete: (nodeId) => {
         setNodes((current) => {
           const nextEdges = edgesRef.current.filter(
@@ -1694,6 +1875,7 @@ function WorkspaceCanvas() {
                   stableNodeActions,
                   deriveNodeEdgeData(cleared.node.kind, incomingEdgeSummaryRef.current.get(cleared.node.id)),
                   workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+                  executionPlanRef.current,
                 ),
                 selected: candidate.selected,
               }
@@ -1875,7 +2057,16 @@ function WorkspaceCanvas() {
         }
       },
     }),
-    [getActionReason, persistLayoutSoon, persistSoon, sendRunRequest, setNodes, stableNodeActions, updateNodeGenerationData],
+    [
+      buildWorkspace,
+      getActionReason,
+      persistLayoutSoon,
+      persistSoon,
+      sendRunRequest,
+      setNodes,
+      stableNodeActions,
+      updateNodeGenerationData,
+    ],
   );
 
   useEffect(() => {
@@ -2355,6 +2546,7 @@ function WorkspaceCanvas() {
         stableNodeActions,
         deriveNodeEdgeData(node.kind, incomingSummaries.get(node.id)),
         loaded.ui.previewControlsLocation,
+        emptyExecutionPlan(),
       ),
     );
 
@@ -2373,6 +2565,7 @@ function WorkspaceCanvas() {
     edgesRef.current = loadedEdges;
     runtimeRef.current = loadedRuntime;
     incomingEdgeSummaryRef.current = incomingSummaries;
+    executionPlanRef.current = emptyExecutionPlan();
 
     setWorkspaceSummaries((current) =>
       upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name, createdAt: loaded.createdAt, sortOrder: loaded.sortOrder }),
@@ -2380,6 +2573,7 @@ function WorkspaceCanvas() {
     setWorkspaceMeta(nextMeta);
     setGeneration({});
     setRuntime(loadedRuntime);
+    setExecutionPlan(emptyExecutionPlan());
     setActiveExecutions([]);
     setWorkspaceDeleteConfirmingId(null);
     setWorkspaceRenamingId(null);
@@ -2697,6 +2891,7 @@ function WorkspaceCanvas() {
           stableNodeActions,
           deriveNodeEdgeData(nextNodeModel.kind, incomingEdgeSummaryRef.current.get(nextNodeModel.id)),
           workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+          executionPlanRef.current,
         );
         const next = [...current, nextNode];
         persistSoon(next, edgesRef.current);
@@ -2796,6 +2991,7 @@ function WorkspaceCanvas() {
         stableNodeActions,
         deriveNodeEdgeData(node.kind, nextIncomingSummaries.get(node.id)),
         workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+        executionPlanRef.current,
       ),
       selected: true,
     }));
@@ -2873,6 +3069,14 @@ function WorkspaceCanvas() {
       openPreviewTabs: node.data.model.uiState?.openPreviewTabs ?? [],
     })),
     [selectedNodes],
+  );
+  const executionPlanHasTargets = executionPlan.targetNodeIds.length > 0;
+  const executionPlanSummary = useMemo(
+    () => ({
+      nodeCount: executionPlan.targetNodeIds.length,
+      matoutCount: executionPlan.providedMatoutIds.length,
+    }),
+    [executionPlan],
   );
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
@@ -2988,6 +3192,7 @@ function WorkspaceCanvas() {
               stableNodeActions,
               deriveNodeEdgeData(updated.kind, incomingEdgeSummaryRef.current.get(updated.id)),
               workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+              executionPlanRef.current,
             ),
             selected: node.selected,
           }
@@ -3071,6 +3276,7 @@ function WorkspaceCanvas() {
           stableNodeActions,
           deriveNodeEdgeData(node.kind, nextIncomingSummaries.get(node.id)),
           workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+          executionPlanRef.current,
         ),
         selected: true,
       })),
@@ -3543,6 +3749,25 @@ function WorkspaceCanvas() {
               </span>
             </ControlButton>
           </Controls>
+          {executionPlanHasTargets && (
+            <Panel position="top-right" className="exec-plan-panel">
+              <div className="exec-plan-panel-summary">
+                plan · {executionPlanSummary.nodeCount} nodes · {executionPlanSummary.matoutCount} matvals
+              </div>
+              <div className="exec-plan-panel-buttons">
+                <button type="button" onClick={runCurrentExecutionPlan}>
+                  play
+                </button>
+                <button
+                  type="button"
+                  className="danger"
+                  onClick={() => setExecutionPlan(emptyExecutionPlan())}
+                >
+                  reset
+                </button>
+              </div>
+            </Panel>
+          )}
           <Panel position="bottom-left" className="zoom-controls-note">
             <div className="zoom-wheel-note">scroll wheel: zoom</div>
           </Panel>

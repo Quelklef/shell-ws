@@ -27,6 +27,21 @@ const PORT_STACK_TOP = 48;
 const PREVIEW_WIDTH_SAMPLE = "MMMMMMMMMM";
 const PREVIEW_SCROLLBAR_BUFFER = 16;
 
+function selectionActionTitle(action: ExecutionAction) {
+  switch (action) {
+    case "pull_inputs":
+      return "Select upstream closure as execution target.\n\nShift+click to add/remove from execution target instead.";
+    case "pull_run":
+      return "Select upstream closure and target node as execution target.\n\nShift+click to add/remove from execution target instead.";
+    case "rerun":
+      return "Select this node as execution target.\n\nShift+click to add/remove from execution target instead.";
+    case "rerun_push":
+      return "Select this node and downstream push scope as execution target.\n\nShift+click to add/remove from execution target instead.";
+    case "repush":
+      return "Select this node and replay push scope as execution target.\n\nShift+click to add/remove from execution target instead.";
+  }
+}
+
 function tabExpandedLength(line: string, tabSize: number) {
   let width = 0;
   for (const char of line) {
@@ -141,6 +156,12 @@ function outputHandle(
 export default function ShellNode({ data }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
+  const executionPlan = typedData.executionPlan ?? {
+    isTarget: false,
+    isSeed: false,
+    isBlocked: false,
+    matvals: [],
+  };
   const refreshNodeInternals = useUpdateNodeInternals();
   const shellExtensions = useMemo(() => [StreamLanguage.define(shell)], []);
   const autoRun = model.autoRun ?? {
@@ -481,8 +502,52 @@ export default function ShellNode({ data }: NodeProps) {
 
   return (
     <div
-      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""}`}
+      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""} ${executionPlan.isTarget ? "is-execution-target" : ""}`}
     >
+      {executionPlan.isTarget && (
+        <div className="execution-plan-floating nodrag nopan">
+          <div className="execution-plan-toggle-row">
+            <button
+              type="button"
+              className={`execution-plan-toggle nodrag nopan ${executionPlan.isSeed ? "is-active" : ""}`}
+              onClick={() => typedData.onToggleExecutionPlanSeed(model.id)}
+              title={executionPlan.isSeed ? "remove execution seed" : "mark as execution seed"}
+            >
+              seed
+            </button>
+            <button
+              type="button"
+              className={`execution-plan-toggle nodrag nopan ${executionPlan.isBlocked ? "is-active" : ""}`}
+              onClick={() => typedData.onToggleExecutionPlanBlocked(model.id)}
+              title={executionPlan.isBlocked ? "unblock execution at this node" : "block execution at this node"}
+              aria-label={executionPlan.isBlocked ? "unblock execution at this node" : "block execution at this node"}
+            >
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                <path d="M5.2 7V5.4a2.8 2.8 0 1 1 5.6 0V7" />
+                <rect x="3.5" y="7" width="9" height="6.5" rx="1.2" />
+              </svg>
+            </button>
+          </div>
+          <div className="execution-plan-matvals">
+            {executionPlan.matvals.length > 0 ? (
+              executionPlan.matvals.map((entry) => (
+                <button
+                  key={`${entry.source}:${entry.key}:${entry.id}`}
+                  type="button"
+                  className={`execution-plan-matval nodrag nopan ${entry.included ? "is-included" : ""}`}
+                  onClick={() => typedData.onToggleExecutionPlanMatout(model.id, entry.id)}
+                  title={`${entry.source === "input" ? "input" : "output"} ${entry.key}`}
+                >
+                  <span className="execution-plan-matval-kind">{entry.source === "input" ? "in" : "out"}</span>
+                  <span>{entry.key}</span>
+                </button>
+              ))
+            ) : (
+              <div className="execution-plan-matvals-empty">no matvals</div>
+            )}
+          </div>
+        </div>
+      )}
       {leftPorts.map(({ key, port, activeAt }, index) => {
         const active = activeAt ? Date.now() - activeAt < 800 : false;
         return (
@@ -835,17 +900,27 @@ export default function ShellNode({ data }: NodeProps) {
             const reason = typedData.getActionReason(model.id, action);
             const disabled = reason !== null;
             return (
-              <button
-                key={action}
-                className="nodrag nopan node-action-button"
-                type="button"
-                disabled={disabled}
-                title={disabled ? `${label}: ${reason}` : label}
-                aria-label={label}
-                onClick={() => typedData.onRun(model.id, action)}
-              >
-                {icon}
-              </button>
+              <div key={action} className="node-action-stack">
+                <button
+                  className="nodrag nopan node-action-button node-action-select-button"
+                  type="button"
+                  title={selectionActionTitle(action)}
+                  aria-label={`${label} target selector`}
+                  onClick={(event) => typedData.onSelectExecutionTarget(model.id, action, event.shiftKey)}
+                >
+                  {icon}
+                </button>
+                <button
+                  className="nodrag nopan node-action-button"
+                  type="button"
+                  disabled={disabled}
+                  title={disabled ? `${label}: ${reason}` : label}
+                  aria-label={label}
+                  onClick={() => typedData.onRun(model.id, action)}
+                >
+                  {icon}
+                </button>
+              </div>
             );
           })}
           <button
