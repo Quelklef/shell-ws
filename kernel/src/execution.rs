@@ -20,11 +20,12 @@ use tracing::error;
 
 use crate::formula;
 use crate::materialized_outputs::{
-    create_output_entries, decode_entry_bytes, set_node_input_ref, MaterializedMutation,
+    create_output_entries, decode_entry_bytes, set_materialized_input_ref_for_node_id,
+    MaterializedMutation,
 };
 use crate::model::{
     default_cwd, BufferingMode, Edge, ExecutionRequest, MaterializedOutputStore, Node, NodeKind,
-    NodeMaterialized, PortKind, ServerEvent, Workspace,
+    NodeMaterialized, PortKind, PortRef, ServerEvent, Workspace,
 };
 use crate::port_schema::node_port_schema;
 
@@ -34,10 +35,6 @@ fn node_label(node: &Node) -> &str {
     } else {
         &node.title
     }
-}
-
-fn source_output_ports(kind: &NodeKind) -> &'static [PortKind] {
-    node_port_schema(kind).source_outputs
 }
 
 fn materialized_output_ports(kind: &NodeKind) -> &'static [PortKind] {
@@ -66,6 +63,15 @@ fn input_key(port: PortKind, slot: Option<usize>) -> String {
         PortKind::Argv => format!("argv-{}", slot.unwrap_or(1)),
         PortKind::Stdout | PortKind::Stderr => unreachable!("input ports only"),
     }
+}
+
+fn parse_request_port_ref_key(value: &str) -> Result<PortRef, String> {
+    serde_json::from_str(value).map_err(|_| format!("invalid execution matout key {value:?}"))
+}
+
+#[cfg(test)]
+fn request_port_ref_key(port_ref: &PortRef) -> String {
+    serde_json::to_string(port_ref).expect("serialize port ref key")
 }
 
 fn encode_bytes(bytes: &[u8]) -> String {
@@ -103,7 +109,7 @@ impl ExecutionManager {
         let cancel = CancellationToken::new();
         let manager = self.clone();
         let node_for_handle = request
-            .workspace
+            .graph
             .nodes
             .first()
             .map(|node| node.id.clone())
@@ -183,12 +189,10 @@ struct ExecutionHandle {
 
 struct StreamingExecutionPlan {
     scope: HashSet<String>,
-    executable_nodes: HashSet<String>,
 }
 
 struct ExecutionContext {
     exec_id: String,
-    request: ExecutionRequest,
     workspace: Workspace,
     broadcaster: broadcast::Sender<ServerEvent>,
     cancel: CancellationToken,
@@ -198,10 +202,10 @@ struct ExecutionContext {
     materialized_values: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
     materialized_nodes: Arc<Mutex<HashMap<String, NodeMaterialized>>>,
     materialized_output_store: Arc<Mutex<MaterializedOutputStore>>,
-    available_matout_ids: HashSet<String>,
+    request_matouts: HashMap<PortRef, String>,
+    active_request_matouts: HashMap<PortRef, String>,
     last_exit_codes: Arc<Mutex<HashMap<String, Option<i32>>>>,
     execution_scope: Arc<Mutex<HashSet<String>>>,
-    executable_nodes: Arc<Mutex<HashSet<String>>>,
 }
 
 impl ExecutionContext {
@@ -212,7 +216,7 @@ impl ExecutionContext {
         broadcaster: broadcast::Sender<ServerEvent>,
         cancel: CancellationToken,
     ) -> Result<Self, String> {
-        let workspace = request.workspace.clone();
+        let workspace = request.graph.clone();
         let nodes: HashMap<String, Node> = workspace
             .nodes
             .iter()
@@ -223,9 +227,6 @@ impl ExecutionContext {
         let mut incoming: HashMap<String, Vec<Edge>> = HashMap::new();
 
         for edge in &workspace.edges {
-            if !nodes.contains_key(&edge.from.node_id) || !nodes.contains_key(&edge.to.node_id) {
-                return Err(format!("Edge {} references a missing node", edge.id));
-            }
             outgoing
                 .entry(edge.from.node_id.clone())
                 .or_default()
@@ -284,59 +285,67 @@ impl ExecutionContext {
             }
         }
 
-        let provided_ids = request
-            .provided_matout_ids
-            .iter()
-            .cloned()
-            .collect::<HashSet<_>>();
-        for id in &provided_ids {
+        let mut request_matouts = HashMap::new();
+        for (key, id) in &request.matouts {
+            let port_ref = parse_request_port_ref_key(key)?;
+            request_matouts.insert(port_ref, id.clone());
+        }
+        let mut active_request_matouts = HashMap::new();
+        for key in &request.active_matouts {
+            let port_ref = parse_request_port_ref_key(key)?;
+            let Some(id) = request_matouts.get(&port_ref) else {
+                return Err(format!(
+                    "active execution matout {} is missing from request matouts",
+                    key
+                ));
+            };
+            active_request_matouts.insert(port_ref, id.clone());
+        }
+        for id in request_matouts.values() {
             if !materialized_output_store.contains_key(id) {
                 return Err(format!("missing materialized output {id}"));
             }
         }
-        let referenced_ids = workspace
-            .nodes
+        let replayable_exit_nodes = request_matouts
             .iter()
-            .flat_map(|node| {
-                node.materialized
-                    .inputs
-                    .values()
-                    .chain(node.materialized.outputs.values())
-                    .cloned()
-                    .collect::<Vec<_>>()
+            .filter_map(|(port_ref, id)| match port_ref.port {
+                PortKind::Stdout | PortKind::Stderr => materialized_output_store
+                    .get(id)
+                    .map(|entry| (port_ref.node_id.clone(), entry.exit_code)),
+                PortKind::Stdin | PortKind::Argv => None,
             })
-            .collect::<HashSet<_>>();
-        for id in &provided_ids {
-            if !referenced_ids.contains(id) {
-                return Err(format!("unused provided materialized output {id}"));
+            .collect::<HashMap<_, _>>();
+        let mut materialized_nodes = HashMap::<String, NodeMaterialized>::new();
+        for (port_ref, id) in &request_matouts {
+            let state = materialized_nodes
+                .entry(port_ref.node_id.clone())
+                .or_default();
+            match port_ref.port {
+                PortKind::Stdin | PortKind::Argv => {
+                    state
+                        .inputs
+                        .insert(input_key(port_ref.port, port_ref.slot), id.clone());
+                }
+                PortKind::Stdout | PortKind::Stderr => {
+                    state
+                        .outputs
+                        .insert(output_key(port_ref.port).to_string(), id.clone());
+                    state.last_exit_code = materialized_output_store.get(id).and_then(|entry| entry.exit_code);
+                }
             }
         }
-
-        let replayable_exit_nodes = workspace
-            .nodes
+        let materialized_values = materialized_nodes
             .iter()
-            .filter(|node| has_available_output(node, &provided_ids))
-            .map(|node| (node.id.clone(), node.materialized.last_exit_code))
-            .collect();
-        let materialized_values = workspace
-            .nodes
-            .iter()
-            .map(|node| {
+            .map(|(node_id, state)| {
                 (
-                    node.id.clone(),
-                    materialized_value_map(node, &materialized_output_store, &provided_ids),
+                    node_id.clone(),
+                    materialized_value_map_for_state(state, &materialized_output_store),
                 )
             })
-            .collect();
-        let materialized_nodes = workspace
-            .nodes
-            .iter()
-            .map(|node| (node.id.clone(), node.materialized.clone()))
             .collect();
 
         Ok(Self {
             exec_id,
-            request,
             workspace,
             broadcaster,
             cancel,
@@ -346,10 +355,10 @@ impl ExecutionContext {
             materialized_values: Arc::new(Mutex::new(materialized_values)),
             materialized_nodes: Arc::new(Mutex::new(materialized_nodes)),
             materialized_output_store: Arc::new(Mutex::new(materialized_output_store)),
-            available_matout_ids: provided_ids,
+            request_matouts,
+            active_request_matouts,
             last_exit_codes: Arc::new(Mutex::new(replayable_exit_nodes)),
             execution_scope: Arc::new(Mutex::new(HashSet::new())),
-            executable_nodes: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
@@ -365,63 +374,46 @@ impl ExecutionContext {
             .iter()
             .map(|node| node.id.clone())
             .collect::<HashSet<_>>();
-        let executable_nodes = self
-            .request
-            .executable_node_ids
-            .iter()
-            .cloned()
-            .collect::<HashSet<_>>();
-        let requested_edge_ids = self.request.edge_ids.iter().cloned().collect::<HashSet<_>>();
-        let workspace_edge_ids = self
+
+        if scope.is_empty() && self.workspace.edges.is_empty() {
+            return Err("request has no outputs to push".to_string());
+        }
+
+        let relevant_node_ids = self
             .workspace
             .edges
             .iter()
-            .map(|edge| edge.id.clone())
+            .flat_map(|edge| [edge.from.node_id.clone(), edge.to.node_id.clone()])
+            .chain(scope.iter().cloned())
             .collect::<HashSet<_>>();
 
-        for node_id in executable_nodes.iter() {
-            if !scope.contains(node_id) {
-                return Err(format!("node {node_id} is not in the execution graph"));
-            }
-        }
-        if requested_edge_ids != workspace_edge_ids {
-            return Err("execution request wires do not match the request workspace".to_string());
-        }
-
-        let roots = self.roots_in_scope(&scope);
-
-        for node_id in scope.iter().filter(|node_id| !executable_nodes.contains(*node_id)) {
-            let has_upstream = self
-                .incoming
-                .get(node_id)
-                .map(|edges| edges.iter().any(|edge| scope.contains(&edge.from.node_id)))
-                .unwrap_or(false);
-            let has_downstream = self
-                .outgoing
-                .get(node_id)
-                .map(|edges| edges.iter().any(|edge| scope.contains(&edge.to.node_id)))
-                .unwrap_or(false);
-            if has_upstream && has_downstream {
+        for port_ref in self.request_matouts.keys() {
+            if !relevant_node_ids.contains(&port_ref.node_id) {
                 return Err(format!(
-                    "non-executable node {node_id} cannot sit between included upstream and downstream wires"
-                ));
-            }
-            if has_downstream && !self.node_has_replayable_outputs(node_id) {
-                return Err(format!(
-                    "non-executable node {node_id} cannot feed downstream execution without provided outputs"
+                    "request matout for {} is not used by the request workspace",
+                    port_ref.node_id
                 ));
             }
         }
-        for node_id in roots.iter().filter(|node_id| !executable_nodes.contains(*node_id)) {
-            if !self.node_has_replayable_outputs(node_id) {
-                let node = self.nodes.get(node_id).expect("root node");
-                return Err(format!("{} has no outputs to push.", node_label(node)));
+
+        for edge in &self.workspace.edges {
+            if edge.from.port != PortKind::Stdout && edge.from.port != PortKind::Stderr {
+                return Err(format!("edge {} has a non-output source port", edge.id));
+            }
+            if edge.to.port != PortKind::Stdin && edge.to.port != PortKind::Argv {
+                return Err(format!("edge {} has a non-input target port", edge.id));
+            }
+            let from_present = scope.contains(&edge.from.node_id);
+            if !from_present && !self.active_request_matouts.contains_key(&edge.from) {
+                return Err(format!(
+                    "edge {} is missing a source matout for {}",
+                    edge.id, edge.from.node_id
+                ));
             }
         }
 
         Ok(StreamingExecutionPlan {
             scope,
-            executable_nodes,
         })
     }
 
@@ -448,30 +440,33 @@ impl ExecutionContext {
     }
 
     fn node_available_materialized_inputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
-        let nodes = self.materialized_nodes.lock();
-        let Some(materialized) = nodes.get(node_id) else {
-            return HashMap::new();
-        };
         let store = self.materialized_output_store.lock();
-        materialized
-            .inputs
+        self.active_request_matouts
             .iter()
-            .filter(|(_, id)| self.available_matout_ids.contains(*id))
-            .filter_map(|(key, id)| store.get(id).map(|entry| (key.clone(), decode_entry_bytes(entry))))
+            .filter(|(port_ref, _)| {
+                port_ref.node_id == node_id
+                    && (port_ref.port == PortKind::Stdin || port_ref.port == PortKind::Argv)
+            })
+            .filter_map(|(port_ref, id)| {
+                let key = input_key(port_ref.port, port_ref.slot);
+                store.get(id).map(|entry| (key, decode_entry_bytes(entry)))
+            })
             .collect()
     }
 
     fn node_available_materialized_outputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
-        let nodes = self.materialized_nodes.lock();
-        let Some(materialized) = nodes.get(node_id) else {
-            return HashMap::new();
-        };
         let store = self.materialized_output_store.lock();
-        materialized
-            .outputs
+        self.active_request_matouts
             .iter()
-            .filter(|(_, id)| self.available_matout_ids.contains(*id))
-            .filter_map(|(key, id)| store.get(id).map(|entry| (key.clone(), decode_entry_bytes(entry))))
+            .filter(|(port_ref, _)| {
+                port_ref.node_id == node_id
+                    && (port_ref.port == PortKind::Stdout || port_ref.port == PortKind::Stderr)
+            })
+            .filter_map(|(port_ref, id)| {
+                store
+                    .get(id)
+                    .map(|entry| (output_key(port_ref.port).to_string(), decode_entry_bytes(entry)))
+            })
             .collect()
     }
 
@@ -489,7 +484,7 @@ impl ExecutionContext {
             .filter(|node_id| {
                 self.incoming
                     .get(node_id.as_str())
-                    .map(|edges| !edges.iter().any(|edge| scope.contains(&edge.from.node_id)))
+                    .map(Vec::is_empty)
                     .unwrap_or(true)
             })
             .cloned()
@@ -499,7 +494,7 @@ impl ExecutionContext {
     }
 
     fn should_execute_node_in_scope(&self, node_id: &str) -> bool {
-        self.executable_nodes.lock().contains(node_id)
+        self.execution_scope.lock().contains(node_id)
     }
 
     // Keep planning separate from execution so every action can share one forward engine.
@@ -557,6 +552,14 @@ impl ExecutionContext {
             .cloned()
     }
 
+    fn edge_source_matout_id(&self, edge: &Edge) -> Option<String> {
+        if self.nodes.contains_key(&edge.from.node_id) {
+            self.node_output_matout_id(&edge.from.node_id, edge.from.port)
+        } else {
+            self.active_request_matouts.get(&edge.from).cloned()
+        }
+    }
+
     fn emit_materialized_state(&self, node_id: &str, mutation: MaterializedMutation) {
         let materialized = self
             .materialized_nodes
@@ -583,14 +586,9 @@ impl ExecutionContext {
         self.set_materialized_input_bytes(node_id, key, bytes);
         let mut nodes = self.materialized_nodes.lock();
         let mut store = self.materialized_output_store.lock();
-        let Some(node) = self.nodes.get(node_id) else {
-            return;
-        };
         let state = nodes.entry(node_id.to_string()).or_default();
-        let mut shadow = node.clone();
-        shadow.materialized = state.clone();
-        let mutation = set_node_input_ref(&mut shadow, key, matout_id, &mut store);
-        *state = shadow.materialized.clone();
+        let mutation =
+            set_materialized_input_ref_for_node_id(node_id, state, key, matout_id, &mut store);
         drop(store);
         drop(nodes);
         self.emit_materialized_state(node_id, mutation);
@@ -615,7 +613,7 @@ impl ExecutionContext {
         let mut shadow = node.clone();
         shadow.materialized = state.clone();
         shadow.materialized.last_exit_code = exit_code;
-        let mutation = create_output_entries(&mut shadow, &self.exec_id, outputs, &mut store);
+        let mutation = create_output_entries(&mut shadow, &self.exec_id, outputs, exit_code, &mut store);
         *state = shadow.materialized.clone();
         drop(store);
         drop(nodes);
@@ -722,6 +720,7 @@ impl RunController {
         for root in self.context.roots_in_scope(&self.plan.scope) {
             self.start_root(root).await?;
         }
+        self.start_source_open_replays()?;
 
         loop {
             if self.context.cancel.is_cancelled() {
@@ -745,13 +744,39 @@ impl RunController {
         Ok(())
     }
 
+    fn start_source_open_replays(&mut self) -> Result<(), String> {
+        let store = self.context.materialized_output_store.lock();
+        let mut deliveries = Vec::new();
+        for edge in self
+            .context
+            .workspace
+            .edges
+            .iter()
+            .filter(|edge| !self.plan.scope.contains(&edge.from.node_id))
+        {
+            let Some(id) = self.context.active_request_matouts.get(&edge.from) else {
+                return Err(format!("edge {} is missing a source matout", edge.id));
+            };
+            let Some(entry) = store.get(id) else {
+                return Err(format!("missing materialized output {id}"));
+            };
+            deliveries.push((
+                edge.clone(),
+                edge.from.port,
+                decode_entry_bytes(entry),
+                entry.exit_code == Some(0),
+            ));
+        }
+        drop(store);
+        for (edge, port, payload, success) in deliveries {
+            self.schedule_delivery(edge, port, payload, true, true, success);
+        }
+        Ok(())
+    }
+
     fn init(&mut self) {
         *self.context.execution_scope.lock() = self.plan.scope.clone();
-        *self.context.executable_nodes.lock() = self.plan.executable_nodes.clone();
-        for edge in self.context.workspace.edges.iter().filter(|edge| {
-            self.plan.scope.contains(&edge.from.node_id)
-                && self.plan.scope.contains(&edge.to.node_id)
-        }) {
+        for edge in &self.context.workspace.edges {
             self.edge_buffers.insert(
                 edge.id.clone(),
                 EdgeBufferState {
@@ -886,9 +911,7 @@ impl RunController {
             .get(node_id)
             .and_then(|inputs| inputs.get(key).cloned())
             .unwrap_or_default();
-        let matout_id = self
-            .context
-            .node_output_matout_id(&edge.from.node_id, edge.from.port);
+        let matout_id = self.context.edge_source_matout_id(edge);
         self.context
             .set_materialized_input_ref(node_id, key, bytes, matout_id);
     }
@@ -1103,28 +1126,6 @@ impl RunController {
         }
     }
 
-    async fn start_replay_root(&mut self, node_id: String) -> Result<(), String> {
-        let node = self
-            .context
-            .nodes
-            .get(&node_id)
-            .cloned()
-            .ok_or_else(|| format!("Unknown node {node_id}"))?;
-        self.begin_node(&node.id);
-        self.state_mut(&node.id).replaying_materialized = true;
-        let outputs = self.context.node_available_materialized_outputs(&node.id);
-        for port in source_output_ports(&node.kind) {
-            let Some(bytes) = outputs.get(output_key(*port)).cloned() else {
-                continue;
-            };
-            self.handle_output_chunk(&node.id, *port, bytes).await?;
-        }
-        // Repush replays the materialized result, including its exit status, so downstream
-        // propagation follows the same success/failure rules as a fresh execution.
-        self.handle_node_exit(&node.id, self.context.node_last_exit_code(&node.id))
-            .await
-    }
-
     async fn start_ready_node(&mut self, node_id: String) -> Result<(), String> {
         if self
             .stream_states
@@ -1137,11 +1138,27 @@ impl RunController {
         if !self.context.should_execute_node_in_scope(&node_id) {
             return Ok(());
         }
-        if self.context.node_has_replayable_outputs(&node_id) {
-            self.start_replay_root(node_id).await
-        } else {
-            self.start_node_execute(node_id).await
+        self.start_node_execute(node_id).await
+    }
+
+    async fn start_replay_root(&mut self, node_id: String) -> Result<(), String> {
+        let node = self
+            .context
+            .nodes
+            .get(&node_id)
+            .cloned()
+            .ok_or_else(|| format!("Unknown node {node_id}"))?;
+        self.begin_node(&node.id);
+        self.state_mut(&node.id).replaying_materialized = true;
+        let outputs = self.context.node_available_materialized_outputs(&node.id);
+        for port in materialized_output_ports(&node.kind) {
+            let Some(bytes) = outputs.get(output_key(*port)).cloned() else {
+                continue;
+            };
+            self.handle_output_chunk(&node.id, *port, bytes).await?;
         }
+        self.handle_node_exit(&node.id, self.context.node_last_exit_code(&node.id))
+            .await
     }
 
     fn begin_node(&mut self, node_id: &str) {
@@ -1413,7 +1430,7 @@ impl RunController {
             .cloned()
             .unwrap_or_default()
             .into_iter()
-            .filter(|edge| self.plan.scope.contains(&edge.to.node_id) && edge.from.port == port)
+            .filter(|edge| edge.from.port == port)
             .collect::<Vec<_>>();
 
         for edge in edges {
@@ -1465,10 +1482,7 @@ impl RunController {
             .outgoing
             .get(node_id)
             .cloned()
-            .unwrap_or_default()
-            .into_iter()
-            .filter(|edge| self.plan.scope.contains(&edge.to.node_id))
-            .collect::<Vec<_>>();
+            .unwrap_or_default();
 
         for edge in edges {
             let flushed = {
@@ -1577,21 +1591,20 @@ impl RunController {
             return Ok(());
         }
 
-        let target = self
-            .context
-            .nodes
-            .get(&edge.to.node_id)
-            .cloned()
-            .ok_or_else(|| format!("Unknown target node {}", edge.to.node_id))?;
         let key = input_key(edge.to.port, edge.to.slot);
+        let target = self.context.nodes.get(&edge.to.node_id).cloned();
+        let target_id = target
+            .as_ref()
+            .map(|node| node.id.clone())
+            .unwrap_or_else(|| edge.to.node_id.clone());
 
         if !payload.is_empty() {
             self.context
-                .emit_port_activity(&target.id, edge.to.port, payload.len());
-            self.append_live_input(&target.id, &key, &payload);
+                .emit_port_activity(&target_id, edge.to.port, payload.len());
+            self.append_live_input(&target_id, &key, &payload);
         } else if completed {
             self.live_inputs
-                .entry(target.id.clone())
+                .entry(target_id.clone())
                 .or_default()
                 .entry(key.clone())
                 .or_insert_with(Vec::new);
@@ -1599,12 +1612,18 @@ impl RunController {
 
         if completed {
             if success {
-                self.commit_live_input(&edge, &target.id, &key);
+                self.commit_live_input(&edge, &target_id, &key);
             } else {
-                self.discard_live_input(&target.id, &key);
-                self.state_mut(&target.id).tainted = true;
+                self.discard_live_input(&target_id, &key);
+                if target.is_some() {
+                    self.state_mut(&target_id).tainted = true;
+                }
             }
         }
+
+        let Some(target) = target else {
+            return Ok(());
+        };
 
         if !self.context.should_execute_node_in_scope(&target.id) {
             return Ok(());
@@ -1789,34 +1808,20 @@ enum StdinMessage {
     Close,
 }
 
-fn materialized_value_map(
-    node: &Node,
+fn materialized_value_map_for_state(
+    state: &NodeMaterialized,
     store: &MaterializedOutputStore,
-    available_ids: &HashSet<String>,
 ) -> HashMap<String, Vec<u8>> {
-    let mut values: HashMap<String, Vec<u8>> = HashMap::new();
-    for (key, id) in &node.materialized.inputs {
-        if available_ids.contains(id) {
-            if let Some(entry) = store.get(id) {
-                values.insert(key.clone(), decode_entry_bytes(entry));
-            }
-        }
-    }
-    for (key, id) in &node.materialized.outputs {
-        if available_ids.contains(id) {
-            if let Some(entry) = store.get(id) {
-                values.insert(key.clone(), decode_entry_bytes(entry));
-            }
-        }
-    }
-    values
-}
-
-fn has_available_output(node: &Node, available_ids: &HashSet<String>) -> bool {
-    node.materialized
-        .outputs
-        .values()
-        .any(|id| available_ids.contains(id))
+    state
+        .inputs
+        .iter()
+        .chain(state.outputs.iter())
+        .filter_map(|(key, id)| {
+            store
+                .get(id)
+                .map(|entry| (key.clone(), decode_entry_bytes(entry)))
+        })
+        .collect()
 }
 
 fn now_ms() -> u64 {
@@ -1936,21 +1941,26 @@ mod tests {
         visited
     }
 
+    fn executable_roots(workspace: &Workspace, executable: &HashSet<String>) -> HashSet<String> {
+        executable
+            .iter()
+            .filter(|node_id| {
+                !workspace.edges.iter().any(|edge| {
+                    executable.contains(&edge.from.node_id)
+                        && executable.contains(&edge.to.node_id)
+                        && edge.to.node_id == node_id.as_str()
+                })
+            })
+            .cloned()
+            .collect()
+    }
+
     fn edge_input_key(edge: &Edge) -> Option<String> {
         match edge.to.port {
             PortKind::Stdin => Some("stdin".to_string()),
             PortKind::Argv => Some(format!("argv-{}", edge.to.slot.unwrap_or(1))),
             PortKind::Stdout | PortKind::Stderr => None,
         }
-    }
-
-    fn connected_input_keys(workspace: &Workspace, node_id: &str) -> HashSet<String> {
-        workspace
-            .edges
-            .iter()
-            .filter(|edge| edge.to.node_id == node_id)
-            .filter_map(edge_input_key)
-            .collect()
     }
 
     fn connected_output_ports(
@@ -1979,7 +1989,7 @@ mod tests {
                 .find(|node| node.id == node_id)
                 .expect("target node");
             ports.extend(
-                source_output_ports(&node.kind)
+                materialized_output_ports(&node.kind)
                     .iter()
                     .map(|port| output_key(*port).to_string()),
             );
@@ -1990,21 +2000,27 @@ mod tests {
     fn prepare_workspace_materialized(
         workspace: &Workspace,
         scope: &HashSet<String>,
-        target_node_id: &str,
-        allowed_output_ports: Option<&HashSet<String>>,
+        executable_nodes: &HashSet<String>,
     ) -> Workspace {
         let mut next = workspace.clone();
-        next.nodes.retain(|node| scope.contains(&node.id));
-        for node in &mut next.nodes {
-            if node.id == target_node_id {
-                if let Some(ports) = allowed_output_ports {
-                    node.materialized.outputs.retain(|key, _| ports.contains(key));
-                }
-            }
-        }
-        next.edges
-            .retain(|edge| scope.contains(&edge.from.node_id) && scope.contains(&edge.to.node_id));
+        next.nodes.retain(|node| executable_nodes.contains(&node.id));
+        next.edges.retain(|edge| scope.contains(&edge.from.node_id) && scope.contains(&edge.to.node_id));
         next
+    }
+
+    fn add_all_node_matouts(node: &Node, matouts: &mut HashMap<String, String>) {
+        add_node_input_matouts(node, matouts);
+        add_node_output_matouts(
+            node,
+            &HashSet::from(["stdout".to_string(), "stderr".to_string()]),
+            matouts,
+        );
+    }
+
+    fn sorted_keys(map: &HashMap<String, String>) -> Vec<String> {
+        let mut keys = map.keys().cloned().collect::<Vec<_>>();
+        keys.sort();
+        keys
     }
 
     fn push_runnable_scope(workspace: &Workspace, start_node_id: &str) -> HashSet<String> {
@@ -2051,25 +2067,45 @@ mod tests {
         included
     }
 
-    fn ids_for_external_dependencies(
-        workspace: &Workspace,
-        scope: &HashSet<String>,
-    ) -> HashSet<String> {
-        let mut ids = HashSet::new();
-        for node in workspace.nodes.iter().filter(|node| scope.contains(&node.id)) {
-            for edge in workspace.edges.iter().filter(|edge| edge.to.node_id == node.id) {
-                if scope.contains(&edge.from.node_id) {
-                    continue;
-                }
-                let Some(key) = edge_input_key(edge) else {
-                    continue;
-                };
-                if let Some(id) = node.materialized.inputs.get(&key) {
-                    ids.insert(id.clone());
-                }
+    fn add_node_input_matouts(node: &Node, matouts: &mut HashMap<String, String>) {
+        for (key, id) in &node.materialized.inputs {
+            let port_ref = match key.as_str() {
+                "stdin" => PortRef {
+                    node_id: node.id.clone(),
+                    port: PortKind::Stdin,
+                    slot: None,
+                },
+                _ => PortRef {
+                    node_id: node.id.clone(),
+                    port: PortKind::Argv,
+                    slot: key
+                        .strip_prefix("argv-")
+                        .and_then(|value| value.parse::<usize>().ok()),
+                },
+            };
+            matouts.insert(request_port_ref_key(&port_ref), id.clone());
+        }
+    }
+
+    fn add_node_output_matouts(
+        node: &Node,
+        ports: &HashSet<String>,
+        matouts: &mut HashMap<String, String>,
+    ) {
+        for port in ports {
+            let port_ref = PortRef {
+                node_id: node.id.clone(),
+                port: match port.as_str() {
+                    "stdout" => PortKind::Stdout,
+                    "stderr" => PortKind::Stderr,
+                    _ => continue,
+                },
+                slot: None,
+            };
+            if let Some(id) = node.materialized.outputs.get(port) {
+                matouts.insert(request_port_ref_key(&port_ref), id.clone());
             }
         }
-        ids
     }
 
     fn request_for_action(
@@ -2082,75 +2118,133 @@ mod tests {
             .iter()
             .find(|node| node.id == node_id)
             .expect("target node");
-        let mut provided_ids = HashSet::new();
-        let mut allowed_output_ports = None;
-        let (executable_node_ids, scope) = match action {
+        let mut active_matout_map = HashMap::new();
+        let executable_node_ids = match action {
             ExecutionAction::PullInputs => {
                 let scope = upstream_closure(workspace, node_id);
-                (
-                    scope.iter().filter(|id| id.as_str() != node_id).cloned().collect::<Vec<_>>(),
-                    scope,
-                )
+                let executable = scope
+                    .iter()
+                    .filter(|id| id.as_str() != node_id)
+                    .cloned()
+                    .collect::<HashSet<_>>();
+                for node in workspace.nodes.iter().filter(|node| executable.contains(&node.id)) {
+                    add_node_input_matouts(node, &mut active_matout_map);
+                }
+                add_node_input_matouts(target, &mut active_matout_map);
+                add_node_output_matouts(
+                    target,
+                    &HashSet::from(["stdout".to_string(), "stderr".to_string()]),
+                    &mut active_matout_map,
+                );
+                let workspace = prepare_workspace_materialized(workspace, &scope, &executable);
+                let mut matouts = HashMap::new();
+                for node in &workspace.nodes {
+                    add_all_node_matouts(node, &mut matouts);
+                }
+                matouts.extend(active_matout_map.clone());
+                return ExecutionRequest {
+                    graph: workspace,
+                    matouts,
+                    active_matouts: sorted_keys(&active_matout_map),
+                };
             }
             ExecutionAction::PullRun => {
                 let scope = upstream_closure(workspace, node_id);
-                (scope.iter().cloned().collect::<Vec<_>>(), scope)
+                for node in workspace.nodes.iter().filter(|node| scope.contains(&node.id)) {
+                    add_node_input_matouts(node, &mut active_matout_map);
+                }
+                let roots = executable_roots(workspace, &scope);
+                for node in workspace
+                    .nodes
+                    .iter()
+                    .filter(|node| scope.contains(&node.id) && !roots.contains(&node.id))
+                {
+                    add_node_output_matouts(
+                        node,
+                        &HashSet::from(["stdout".to_string(), "stderr".to_string()]),
+                        &mut active_matout_map,
+                    );
+                }
+                scope.iter().cloned().collect::<HashSet<_>>()
             }
             ExecutionAction::Rerun => {
-                let keys = connected_input_keys(workspace, node_id);
-                for key in &keys {
-                    if let Some(id) = target.materialized.inputs.get(key) {
-                        provided_ids.insert(id.clone());
-                    }
-                }
-                (
-                    vec![node_id.to_string()],
-                    HashSet::from([node_id.to_string()]),
-                )
+                add_node_input_matouts(target, &mut active_matout_map);
+                HashSet::from([node_id.to_string()])
             }
             ExecutionAction::RerunPush => {
                 let scope = push_runnable_scope(workspace, node_id);
-                provided_ids.extend(ids_for_external_dependencies(workspace, &scope));
-                (
-                    scope.iter().cloned().collect::<Vec<_>>(),
-                    scope,
-                )
+                for node in workspace.nodes.iter().filter(|node| scope.contains(&node.id)) {
+                    add_node_input_matouts(node, &mut active_matout_map);
+                }
+                let roots = executable_roots(workspace, &scope);
+                for node in workspace
+                    .nodes
+                    .iter()
+                    .filter(|node| scope.contains(&node.id) && !roots.contains(&node.id))
+                {
+                    add_node_output_matouts(
+                        node,
+                        &HashSet::from(["stdout".to_string(), "stderr".to_string()]),
+                        &mut active_matout_map,
+                    );
+                }
+                scope.iter().cloned().collect::<HashSet<_>>()
             }
             ExecutionAction::Repush => {
                 let scope = push_runnable_scope(workspace, node_id);
                 let ports = connected_output_ports(workspace, &scope, node_id);
-                for port in &ports {
-                    if let Some(id) = target.materialized.outputs.get(port) {
-                        provided_ids.insert(id.clone());
+                let has_outputs = ports
+                    .iter()
+                    .any(|port| target.materialized.outputs.contains_key(port));
+                for node in workspace.nodes.iter().filter(|node| scope.contains(&node.id)) {
+                    if node.id == node_id {
+                        add_node_input_matouts(node, &mut active_matout_map);
+                        add_node_output_matouts(node, &ports, &mut active_matout_map);
+                    } else {
+                        add_node_input_matouts(node, &mut active_matout_map);
+                        add_node_output_matouts(
+                            node,
+                            &HashSet::from(["stdout".to_string(), "stderr".to_string()]),
+                            &mut active_matout_map,
+                        );
                     }
                 }
-                provided_ids.extend(ids_for_external_dependencies(workspace, &scope));
-                allowed_output_ports = Some(ports);
-                (
-                    scope.iter().filter(|id| id.as_str() != node_id).cloned().collect::<Vec<_>>(),
-                    scope,
-                )
+                for port in &ports {
+                    if let Some(id) = target.materialized.outputs.get(port) {
+                        let port_ref = PortRef {
+                            node_id: node_id.to_string(),
+                            port: match port.as_str() {
+                                "stdout" => PortKind::Stdout,
+                                "stderr" => PortKind::Stderr,
+                                _ => continue,
+                            },
+                            slot: None,
+                        };
+                        active_matout_map.insert(request_port_ref_key(&port_ref), id.clone());
+                    }
+                }
+                scope.iter()
+                    .filter(|id| has_outputs || id.as_str() != node_id)
+                    .cloned()
+                    .collect::<HashSet<_>>()
             }
         };
-        let workspace = prepare_workspace_materialized(
-            workspace,
-            &scope,
-            node_id,
-            allowed_output_ports.as_ref(),
-        );
+        let scope = match action {
+            ExecutionAction::PullRun => upstream_closure(workspace, node_id),
+            ExecutionAction::Rerun => HashSet::from([node_id.to_string()]),
+            ExecutionAction::RerunPush | ExecutionAction::Repush => push_runnable_scope(workspace, node_id),
+            ExecutionAction::PullInputs => unreachable!(),
+        };
+        let request_graph = prepare_workspace_materialized(workspace, &scope, &executable_node_ids);
+        let mut matouts = HashMap::new();
+        for node in &request_graph.nodes {
+            add_all_node_matouts(node, &mut matouts);
+        }
+        matouts.extend(active_matout_map.clone());
         ExecutionRequest {
-            executable_node_ids: {
-                let mut ids = executable_node_ids;
-                ids.sort();
-                ids
-            },
-            edge_ids: workspace.edges.iter().map(|edge| edge.id.clone()).collect(),
-            workspace,
-            provided_matout_ids: {
-                let mut ids = provided_ids.into_iter().collect::<Vec<_>>();
-                ids.sort();
-                ids
-            },
+            graph: request_graph,
+            matouts,
+            active_matouts: sorted_keys(&active_matout_map),
         }
     }
 
@@ -2195,6 +2289,7 @@ mod tests {
                     node_id: node.id.clone(),
                     port,
                 },
+                exit_code: node.materialized.last_exit_code,
                 referrers: vec![MaterializedReferrer {
                     node_id: node.id.clone(),
                     key: key.to_string(),
@@ -2205,6 +2300,14 @@ mod tests {
             node.materialized.outputs.insert(key.to_string(), id);
         } else {
             node.materialized.inputs.insert(key.to_string(), id);
+        }
+    }
+
+    fn sync_output_exit_codes(node: &Node, store: &mut MaterializedOutputStore) {
+        for id in node.materialized.outputs.values() {
+            if let Some(entry) = store.get_mut(id) {
+                entry.exit_code = node.materialized.last_exit_code;
+            }
         }
     }
 
@@ -2534,19 +2637,25 @@ mod tests {
             let materialized_nodes = context.materialized_nodes.lock();
             let store = context.materialized_output_store.lock();
             let mut snapshot = BTreeMap::new();
-            for node in &context.workspace.nodes {
+            let mut node_ids = materialized_nodes.keys().cloned().collect::<BTreeSet<_>>();
+            node_ids.extend(context.workspace.nodes.iter().map(|node| node.id.clone()));
+            for node_id in node_ids {
+                let materialized = materialized_nodes.get(&node_id).cloned().unwrap_or_default();
                 let mut ports = BTreeSet::new();
-                ports.extend(node.materialized.inputs.keys().cloned());
-                ports.extend(
-                    materialized_output_ports(&node.kind)
-                        .iter()
-                        .map(|port| output_key(*port).to_string()),
-                );
+                ports.extend(materialized.inputs.keys().cloned());
+                ports.extend(materialized.outputs.keys().cloned());
+                if let Some(node) = context.workspace.nodes.iter().find(|node| node.id == node_id) {
+                    ports.extend(
+                        materialized_output_ports(&node.kind)
+                            .iter()
+                            .map(|port| output_key(*port).to_string()),
+                    );
+                }
                 let values = ports
                     .into_iter()
                     .map(|port| {
                         let bytes = materialized_nodes
-                            .get(&node.id)
+                            .get(&node_id)
                             .cloned()
                             .unwrap_or_default()
                             .inputs
@@ -2555,7 +2664,7 @@ mod tests {
                             .map(decode_entry_bytes)
                             .or_else(|| {
                                 materialized_nodes
-                                    .get(&node.id)
+                                    .get(&node_id)
                                     .cloned()
                                     .unwrap_or_default()
                                     .outputs
@@ -2570,7 +2679,7 @@ mod tests {
                         )
                     })
                     .collect();
-                snapshot.insert(node.id.clone(), values);
+                snapshot.insert(node_id, values);
             }
             snapshot
         }
@@ -2739,7 +2848,7 @@ mod tests {
                         BTreeMap::from([
                             ("stdin".to_string(), "old-b-in".to_string()),
                             ("stdout".to_string(), "old-b-out".to_string()),
-                            ("stderr".to_string(), "".to_string()),
+                            ("stderr".to_string(), "old-b-err".to_string()),
                         ]),
                     ),
                     (
@@ -3243,13 +3352,19 @@ mod tests {
     }
 
     #[test]
-    fn request_rejects_missing_provided_matout_ids() {
+    fn request_rejects_missing_matouts() {
         let target = node(NodeKind::Script, "target");
         let request = ExecutionRequest {
-            workspace: workspace(vec![target], vec![]),
-            executable_node_ids: vec!["target".to_string()],
-            edge_ids: Vec::new(),
-            provided_matout_ids: vec!["missing".to_string()],
+            graph: workspace(vec![target], vec![]),
+            matouts: HashMap::from([(
+                request_port_ref_key(&PortRef {
+                    node_id: "target".to_string(),
+                    port: PortKind::Stdin,
+                    slot: None,
+                }),
+                "missing".to_string(),
+            )]),
+            active_matouts: vec![],
         };
         let error = ExecutionContext::new(
             "missing-provided".to_string(),
@@ -3264,7 +3379,7 @@ mod tests {
     }
 
     #[test]
-    fn context_only_preloads_provided_materialized_bytes() {
+    fn context_preloads_materialized_bytes_from_request_matouts() {
         let mut store = HashMap::new();
         let mut source = node(NodeKind::Text, "source");
         source.text = Some("source".to_string());
@@ -3272,8 +3387,20 @@ mod tests {
         sink.script = Some("cat".to_string());
         seed_materialized_text(&mut source, &mut store, "stdout", "old-source\n");
         seed_materialized_text(&mut sink, &mut store, "stdin", "old-sink\n");
+        let source_stdout = source
+            .materialized
+            .outputs
+            .get("stdout")
+            .cloned()
+            .expect("stdout id");
+        let sink_stdin = sink
+            .materialized
+            .inputs
+            .get("stdin")
+            .cloned()
+            .expect("stdin id");
         let request = ExecutionRequest {
-            workspace: workspace(
+            graph: workspace(
                 vec![source, sink],
                 vec![edge(
                     "edge-1",
@@ -3284,9 +3411,25 @@ mod tests {
                     None,
                 )],
             ),
-            executable_node_ids: vec!["source".to_string(), "sink".to_string()],
-            edge_ids: vec!["edge-1".to_string()],
-            provided_matout_ids: Vec::new(),
+            matouts: HashMap::from([
+                (
+                    request_port_ref_key(&PortRef {
+                        node_id: "source".to_string(),
+                        port: PortKind::Stdout,
+                        slot: None,
+                    }),
+                    source_stdout,
+                ),
+                (
+                    request_port_ref_key(&PortRef {
+                        node_id: "sink".to_string(),
+                        port: PortKind::Stdin,
+                        slot: None,
+                    }),
+                    sink_stdin,
+                ),
+            ]),
+            active_matouts: vec![],
         };
         let context = ExecutionContext::new(
             "no-preload".to_string(),
@@ -3297,29 +3440,18 @@ mod tests {
         )
         .expect("context");
 
-        assert!(
-            context
-                .materialized_values
-                .lock()
-                .get("source")
-                .is_none_or(HashMap::is_empty)
-        );
-        assert!(
-            context
-                .materialized_values
-                .lock()
-                .get("sink")
-                .is_none_or(HashMap::is_empty)
-        );
+        assert_eq!(materialized_text(&context, "source", "stdout"), "old-source\n");
+        assert_eq!(materialized_text(&context, "sink", "stdin"), "old-sink\n");
     }
 
     #[test]
-    fn context_only_preloads_exit_codes_for_available_outputs() {
+    fn context_reads_exit_codes_from_request_matouts_and_active_replay() {
         let mut store = HashMap::new();
         let mut source = node(NodeKind::Script, "source");
         source.script = Some("echo hi".to_string());
         seed_materialized_text(&mut source, &mut store, "stdout", "hi\n");
         source.materialized.last_exit_code = Some(7);
+        sync_output_exit_codes(&source, &mut store);
         let provided = source
             .materialized
             .outputs
@@ -3330,10 +3462,9 @@ mod tests {
         let no_replay = ExecutionContext::new(
             "no-replay-exit".to_string(),
             ExecutionRequest {
-                workspace: workspace(vec![source.clone()], vec![]),
-                executable_node_ids: vec!["source".to_string()],
-                edge_ids: Vec::new(),
-                provided_matout_ids: Vec::new(),
+                graph: workspace(vec![source.clone()], vec![]),
+                matouts: HashMap::new(),
+                active_matouts: vec![],
             },
             store.clone(),
             broadcast::channel(8).0,
@@ -3345,10 +3476,20 @@ mod tests {
         let replay = ExecutionContext::new(
             "replay-exit".to_string(),
             ExecutionRequest {
-                workspace: workspace(vec![source], vec![]),
-                executable_node_ids: Vec::new(),
-                edge_ids: Vec::new(),
-                provided_matout_ids: vec![provided],
+                graph: workspace(vec![source], vec![]),
+                matouts: HashMap::from([(
+                    request_port_ref_key(&PortRef {
+                        node_id: "source".to_string(),
+                        port: PortKind::Stdout,
+                        slot: None,
+                    }),
+                    provided,
+                )]),
+                active_matouts: vec![request_port_ref_key(&PortRef {
+                    node_id: "source".to_string(),
+                    port: PortKind::Stdout,
+                    slot: None,
+                })],
             },
             store,
             broadcast::channel(8).0,
@@ -3361,13 +3502,12 @@ mod tests {
     #[test]
     fn request_accepts_disconnected_scope() {
         let request = ExecutionRequest {
-            workspace: workspace(
+            graph: workspace(
                 vec![node(NodeKind::Text, "a"), node(NodeKind::Text, "b")],
                 vec![],
             ),
-            executable_node_ids: vec!["a".to_string(), "b".to_string()],
-            edge_ids: Vec::new(),
-            provided_matout_ids: Vec::new(),
+            matouts: HashMap::new(),
+            active_matouts: vec![],
         };
         let context = ExecutionContext::new(
             "disconnected-scope".to_string(),
@@ -3394,7 +3534,7 @@ mod tests {
         let mut right_sink = node(NodeKind::Script, "right-sink");
         right_sink.script = Some("cat".to_string());
         let request = ExecutionRequest {
-            workspace: workspace(
+            graph: workspace(
                 vec![left_root, left_sink, right_root, right_sink],
                 vec![
                     edge(
@@ -3415,14 +3555,8 @@ mod tests {
                     ),
                 ],
             ),
-            executable_node_ids: vec![
-                "left-root".to_string(),
-                "left-sink".to_string(),
-                "right-root".to_string(),
-                "right-sink".to_string(),
-            ],
-            edge_ids: vec!["edge-left".to_string(), "edge-right".to_string()],
-            provided_matout_ids: Vec::new(),
+            matouts: HashMap::new(),
+            active_matouts: vec![],
         };
         let context = Arc::new(
             ExecutionContext::new(
@@ -3460,15 +3594,15 @@ mod tests {
         let request = request_for_action(&workspace, "b", ExecutionAction::RerunPush);
         assert_eq!(
             request
-                .workspace
+                .graph
                 .nodes
                 .iter()
                 .map(|node| node.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["b"]
         );
-        assert!(request.workspace.edges.is_empty());
-        assert!(request.provided_matout_ids.is_empty());
+        assert!(request.graph.edges.is_empty());
+        assert!(request.matouts.is_empty());
     }
 
     #[test]
@@ -3492,7 +3626,7 @@ mod tests {
         let request = request_for_action(&workspace, "b", ExecutionAction::RerunPush);
         assert_eq!(
             request
-                .workspace
+                .graph
                 .nodes
                 .iter()
                 .map(|node| node.id.as_str())
@@ -3501,28 +3635,14 @@ mod tests {
         );
         assert_eq!(
             request
-                .workspace
+                .graph
                 .edges
                 .iter()
                 .map(|edge| edge.id.as_str())
                 .collect::<Vec<_>>(),
             vec!["e2"]
         );
-        assert_eq!(request.provided_matout_ids.len(), 1);
-        assert_eq!(
-            request
-                .workspace
-                .nodes
-                .iter()
-                .find(|node| node.id == "c")
-                .expect("c")
-                .materialized
-                .inputs
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>(),
-            vec!["argv-1".to_string()]
-        );
+        assert_eq!(request.matouts.len(), 1);
     }
 
     #[tokio::test]
@@ -3533,6 +3653,7 @@ mod tests {
         seed_materialized_text(&mut source, &mut store, "stdout", "watch me\n");
         seed_materialized_text(&mut source, &mut store, "stderr", "");
         source.materialized.last_exit_code = Some(1);
+        sync_output_exit_codes(&source, &mut store);
         let mut sink = node(NodeKind::Script, "sink");
         sink.script = Some("cat".to_string());
         seed_materialized_text(&mut sink, &mut store, "stdin", "old-input\n");

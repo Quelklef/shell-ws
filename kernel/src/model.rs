@@ -221,6 +221,10 @@ pub struct ProducedBy {
 pub struct MatOutEntry {
     pub data_base64: String,
     pub produced_by: ProducedBy,
+    // Replayed outputs can originate from any active materialized binding, even when no
+    // node execution happens in this request, so the materialized value itself must carry
+    // the exit status needed for downstream semantics.
+    pub exit_code: Option<i32>,
     #[serde(default)]
     pub referrers: Vec<MaterializedReferrer>,
 }
@@ -443,16 +447,19 @@ pub enum ClientEvent {
     },
 }
 
+// Execution requests operate on a scoped execution graph, not a persisted workspace.
+// Included wires imply endpoint participation even when one endpoint node is omitted
+// from `graph.nodes`.
+pub type ExecutionGraph = Workspace;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExecutionRequest {
-    pub workspace: Workspace,
+    pub graph: ExecutionGraph,
     #[serde(default)]
-    pub executable_node_ids: Vec<String>,
+    pub matouts: HashMap<String, String>,
     #[serde(default)]
-    pub provided_matout_ids: Vec<String>,
-    #[serde(default)]
-    pub edge_ids: Vec<String>,
+    pub active_matouts: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -719,16 +726,17 @@ mod tests {
         let payload = serde_json::json!({
             "type": "run_node",
             "request": {
-                "workspace": workspace,
-                "executableNodeIds": [],
-                "providedMatoutIds": [],
-                "edgeIds": []
+                "graph": workspace,
+                "matouts": {}
             }
         });
 
         let event: ClientEvent = serde_json::from_value(payload).expect("deserialize run event");
         match event {
-            ClientEvent::RunNode { request } => assert!(request.provided_matout_ids.is_empty()),
+            ClientEvent::RunNode { request } => {
+                assert!(request.matouts.is_empty());
+                assert!(request.active_matouts.is_empty());
+            }
             _ => panic!("unexpected client event"),
         }
     }

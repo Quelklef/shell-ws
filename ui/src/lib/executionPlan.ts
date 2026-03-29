@@ -3,10 +3,14 @@ import type {
   ExecutionPlanState,
   ExecutionRequest,
   MatOutId,
+  PortRef,
   Workspace,
   WorkspaceEdge,
   WorkspaceNode,
 } from "./types";
+import { nodeHasArgvPort, nodeHasInputPort } from "./nodePorts";
+import { outputPortsForKind } from "./portSchema";
+import { inputPortRefForKey, outputPortRefForKey, portRefKey } from "./portRefs";
 
 function sortedUnique(values: Iterable<string>) {
   return Array.from(new Set(values)).sort();
@@ -15,13 +19,11 @@ function sortedUnique(values: Iterable<string>) {
 function cloneNodeForExecutionPlan(node: WorkspaceNode): WorkspaceNode {
   return {
     ...node,
-    materialized: node.materialized
-      ? {
-          inputs: { ...(node.materialized.inputs ?? {}) },
-          outputs: { ...(node.materialized.outputs ?? {}) },
-          lastExitCode: node.materialized.lastExitCode ?? null,
-        }
-      : node.materialized,
+    materialized: {
+      inputs: {},
+      outputs: {},
+      lastExitCode: null,
+    },
   };
 }
 
@@ -46,9 +48,13 @@ export function executionPlanForSelection(
 
 export function executionPlanFromRequest(request: ExecutionRequest): ExecutionPlanState {
   return {
-    executableNodeIds: [...request.executableNodeIds].sort(),
-    edgeIds: [...request.edgeIds].sort(),
-    providedMatoutIds: [...request.providedMatoutIds].sort(),
+    executableNodeIds: request.graph.nodes.map((node) => node.id).sort(),
+    edgeIds: request.graph.edges.map((edge) => edge.id).sort(),
+    providedMatoutIds: sortedUnique(
+      request.activeMatouts
+        .map((key) => request.matouts[key])
+        .filter((value): value is MatOutId => Boolean(value)),
+    ),
   };
 }
 
@@ -131,43 +137,68 @@ export function buildExecutionRequestFromPlan(
   plan: ExecutionPlanState,
 ): ExecutionRequest {
   const selectedEdgeIds = new Set(plan.edgeIds);
-  const scopedEdgeIds = workspace.edges
-    .filter((edge) => selectedEdgeIds.has(edge.id))
-    .map((edge) => edge.id);
   const scopedNodeIds = new Set(plan.executableNodeIds);
+  const participatingPortKeys = new Set<string>();
   for (const edge of workspace.edges) {
     if (!selectedEdgeIds.has(edge.id)) {
       continue;
     }
-    scopedNodeIds.add(edge.from.nodeId);
-    scopedNodeIds.add(edge.to.nodeId);
+    participatingPortKeys.add(portRefKey(edge.from));
+    participatingPortKeys.add(portRefKey(edge.to));
   }
   // The UI may keep extra matout state around while the user edits a plan.
-  // Kernel requests must be pruned back down to the nodes and wires currently in scope.
+  // Kernel requests must be pruned back down to the nodes, wires, and materialized
+  // ports currently in scope.
   const scopedWorkspace: Workspace = {
     ...workspace,
     nodes: workspace.nodes
       .filter((node) => scopedNodeIds.has(node.id))
       .map(cloneNodeForExecutionPlan),
-    edges: workspace.edges.filter(
-      (edge) => selectedEdgeIds.has(edge.id) && scopedNodeIds.has(edge.from.nodeId) && scopedNodeIds.has(edge.to.nodeId),
-    ),
+    edges: workspace.edges.filter((edge) => selectedEdgeIds.has(edge.id)),
     tuckspace: [],
   };
-  const referencedIds = new Set<MatOutId>();
-  for (const node of scopedWorkspace.nodes) {
-    for (const id of Object.values(node.materialized?.inputs ?? {})) {
-      referencedIds.add(id);
+  for (const node of workspace.nodes) {
+    if (!scopedNodeIds.has(node.id)) {
+      continue;
     }
-    for (const id of Object.values(node.materialized?.outputs ?? {})) {
-      referencedIds.add(id);
+    participatingPortKeys.add(portRefKey({ nodeId: node.id, port: "stdin" }));
+    participatingPortKeys.add(portRefKey({ nodeId: node.id, port: "stdout" }));
+    participatingPortKeys.add(portRefKey({ nodeId: node.id, port: "stderr" }));
+    for (const key of Object.keys(node.materialized?.inputs ?? {})) {
+      const ref = inputPortRefForKey(node.id, key);
+      if (ref) {
+        participatingPortKeys.add(portRefKey(ref));
+      }
+    }
+  }
+  const includedIds = new Set(plan.providedMatoutIds);
+  const matouts: Record<string, MatOutId> = {};
+  const activeMatouts = new Set<string>();
+  const addPortMatout = (ref: PortRef | null, id: MatOutId | undefined) => {
+    if (!ref || !id) {
+      return;
+    }
+    const key = portRefKey(ref);
+    if (!participatingPortKeys.has(key) && !scopedNodeIds.has(ref.nodeId)) {
+      return;
+    }
+    matouts[key] = id;
+    if (includedIds.has(id) && participatingPortKeys.has(key)) {
+      activeMatouts.add(key);
+    }
+  };
+  for (const node of workspace.nodes) {
+    for (const [key, id] of Object.entries(node.materialized?.inputs ?? {})) {
+      addPortMatout(inputPortRefForKey(node.id, key), id);
+    }
+    for (const [key, id] of Object.entries(node.materialized?.outputs ?? {})) {
+      addPortMatout(outputPortRefForKey(node.id, key), id);
     }
   }
   return {
-    workspace: scopedWorkspace,
-    executableNodeIds: plan.executableNodeIds.filter((id) => scopedNodeIds.has(id)).sort(),
-    edgeIds: scopedEdgeIds.sort(),
-    providedMatoutIds: plan.providedMatoutIds.filter((id) => referencedIds.has(id)).sort(),
+    graph: scopedWorkspace,
+    matouts,
+    activeMatouts: Array.from(activeMatouts).sort(),
   };
 }
 
@@ -192,4 +223,51 @@ export function executionPlanMatvalsForNode(
     }
     return left.key.localeCompare(right.key);
   });
+}
+
+function localPortKey(ref: PortRef) {
+  if (ref.port === "argv") {
+    return `argv-${ref.slot ?? 1}`;
+  }
+  return ref.port;
+}
+
+export function executionPlanPortKeysForNode(
+  node: WorkspaceNode,
+  argvSlots: number[] | undefined,
+  plan: ExecutionPlanState,
+  edges: WorkspaceEdge[],
+): string[] {
+  const portKeys = new Set<string>();
+  if (plan.executableNodeIds.includes(node.id)) {
+    if (nodeHasInputPort(node.kind)) {
+      portKeys.add("stdin");
+    }
+    if (nodeHasArgvPort(node.kind)) {
+      for (const slot of argvSlots?.length ? argvSlots : [1]) {
+        portKeys.add(`argv-${slot}`);
+      }
+    }
+    for (const port of outputPortsForKind(node.kind)) {
+      portKeys.add(port);
+    }
+  }
+  const includedEdgeIds = new Set(plan.edgeIds);
+  for (const edge of edges) {
+    if (!includedEdgeIds.has(edge.id)) {
+      continue;
+    }
+    if (edge.from.nodeId === node.id) {
+      portKeys.add(localPortKey(edge.from));
+    }
+    if (edge.to.nodeId === node.id) {
+      portKeys.add(localPortKey(edge.to));
+    }
+  }
+  for (const entry of executionPlanMatvalsForNode(node, plan)) {
+    if (entry.included) {
+      portKeys.add(entry.key);
+    }
+  }
+  return Array.from(portKeys).sort();
 }

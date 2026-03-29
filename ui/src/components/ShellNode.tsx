@@ -139,6 +139,7 @@ function outputHandle(
   top: number,
   handleId: string,
   activeAt?: number,
+  inExecutionPlan?: boolean,
 ) {
   const active = activeAt ? Date.now() - activeAt < 800 : false;
   return (
@@ -147,7 +148,7 @@ function outputHandle(
       id={handleId}
       type="source"
       position={Position.Right}
-      className={`shell-handle shell-handle-${port} ${active ? "is-active" : ""}`}
+      className={`shell-handle shell-handle-${port} ${active ? "is-active" : ""} ${inExecutionPlan ? "is-execution-target" : ""}`}
       style={{ top }}
     />
   );
@@ -159,8 +160,10 @@ export default function ShellNode({ data }: NodeProps) {
   const executionPlan = typedData.executionPlan ?? {
     isExecutable: false,
     isParticipating: false,
+    portKeys: [],
     matvals: [],
   };
+  const executionPlanPortKeys = useMemo(() => new Set(executionPlan.portKeys), [executionPlan.portKeys]);
   const refreshNodeInternals = useUpdateNodeInternals();
   const shellExtensions = useMemo(() => [StreamLanguage.define(shell)], []);
   const autoRun = model.autoRun ?? {
@@ -533,13 +536,13 @@ export default function ShellNode({ data }: NodeProps) {
             id={key}
             type="target"
             position={Position.Left}
-            className={`shell-handle shell-handle-${port} ${active ? "is-active" : ""}`}
+            className={`shell-handle shell-handle-${port} ${active ? "is-active" : ""} ${executionPlanPortKeys.has(key) ? "is-execution-target" : ""}`}
             style={{ top: PORT_STACK_TOP + index * PORT_SPACING }}
           />
         );
       })}
       {rightPorts.map(({ key, port, activeAt }, index) =>
-        outputHandle(port, PORT_STACK_TOP + index * PORT_SPACING, key, activeAt),
+        outputHandle(port, PORT_STACK_TOP + index * PORT_SPACING, key, activeAt, executionPlanPortKeys.has(key)),
       )}
 
       <div className="node-comment-floating">

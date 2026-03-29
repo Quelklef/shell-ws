@@ -1,13 +1,18 @@
 import type {
   ExecutionAction,
   ExecutionRequest,
-  MatOutId,
   MaterializedOutputPort,
   Workspace,
   WorkspaceEdge,
   WorkspaceNode,
 } from "./types";
 import { outputPortsForKind } from "./portSchema";
+import {
+  inputKeyForPortRef,
+  inputPortRefForKey,
+  outputPortRefForKey,
+  portRefKey,
+} from "./portRefs";
 
 function incomingEdges(edges: WorkspaceEdge[], nodeId: string) {
   return edges.filter((edge) => edge.to.nodeId === nodeId);
@@ -49,20 +54,24 @@ function downstreamClosure(edges: WorkspaceEdge[], startNodeId: string) {
   return visited;
 }
 
-function inputKeyForEdge(edge: WorkspaceEdge) {
-  if (edge.to.port === "stdin") {
-    return "stdin";
-  }
-  if (edge.to.port === "argv") {
-    return `argv-${edge.to.slot ?? 1}`;
-  }
-  return null;
+function executableRoots(edges: WorkspaceEdge[], executableNodeIds: Set<string>) {
+  return new Set(
+    Array.from(executableNodeIds).filter(
+      (nodeId) =>
+        !edges.some(
+          (edge) =>
+            executableNodeIds.has(edge.to.nodeId)
+            && executableNodeIds.has(edge.from.nodeId)
+            && edge.to.nodeId === nodeId,
+        ),
+    ),
+  );
 }
 
 function connectedInputKeys(edges: WorkspaceEdge[], nodeId: string) {
   const keys = new Set<string>();
   for (const edge of incomingEdges(edges, nodeId)) {
-    const key = inputKeyForEdge(edge);
+    const key = inputKeyForPortRef(edge.to);
     if (key) {
       keys.add(key);
     }
@@ -80,76 +89,62 @@ function connectedOutputPorts(edges: WorkspaceEdge[], nodeId: string) {
   return ports;
 }
 
-function prepareNodeMaterialized(
-  node: WorkspaceNode,
-  allowedOutputPorts: Set<MaterializedOutputPort> | null,
-): WorkspaceNode {
-  const inputs = { ...(node.materialized?.inputs ?? {}) };
-  const outputs =
-    allowedOutputPorts === null
-      ? { ...(node.materialized?.outputs ?? {}) }
-      : Object.fromEntries(
-          Object.entries(node.materialized?.outputs ?? {}).filter(([key]) =>
-            allowedOutputPorts.has(key as MaterializedOutputPort),
-          ),
-        );
+function requestNode(node: WorkspaceNode): WorkspaceNode {
   return {
     ...node,
     materialized: {
-      inputs,
-      outputs,
-      lastExitCode: node.materialized?.lastExitCode ?? null,
+      inputs: {},
+      outputs: {},
+      lastExitCode: null,
     },
   };
 }
 
+function addNodeInputMatouts(node: WorkspaceNode, matouts: Record<string, string>) {
+  for (const [key, id] of Object.entries(node.materialized?.inputs ?? {})) {
+    setMatout(matouts, inputPortRefForKey(node.id, key), id);
+  }
+}
+
+function addNodeOutputMatouts(
+  node: WorkspaceNode,
+  ports: Iterable<MaterializedOutputPort>,
+  matouts: Record<string, string>,
+) {
+  for (const port of ports) {
+    setMatout(matouts, outputPortRefForKey(node.id, port), node.materialized?.outputs?.[port]);
+  }
+}
+
 function filterWorkspaceToScope(
   workspace: Workspace,
-  scopeNodeIds: Set<string>,
+  executableNodeIds: Set<string>,
   includedEdgeIds: Set<string>,
-  targetNodeId: string | null,
-  allowedOutputPorts: Set<MaterializedOutputPort> | null,
 ): Workspace {
   return {
     ...workspace,
     nodes: workspace.nodes
-      .filter((node) => scopeNodeIds.has(node.id))
-      .map((node) =>
-        prepareNodeMaterialized(
-          node,
-          node.id === targetNodeId ? allowedOutputPorts : null,
-        ),
-      ),
-    edges: workspace.edges.filter(
-      (edge) =>
-        includedEdgeIds.has(edge.id)
-        && scopeNodeIds.has(edge.from.nodeId)
-        && scopeNodeIds.has(edge.to.nodeId),
-    ),
+      .filter((node) => executableNodeIds.has(node.id))
+      .map(requestNode),
+    edges: workspace.edges.filter((edge) => includedEdgeIds.has(edge.id)),
     tuckspace: [],
   };
 }
 
-function idsForInputKeys(node: WorkspaceNode, keys: Set<string>) {
-  const ids = new Set<MatOutId>();
-  for (const key of keys) {
-    const id = node.materialized?.inputs?.[key];
-    if (id) {
-      ids.add(id);
-    }
+function setMatout(
+  matouts: Record<string, string>,
+  portRef: ReturnType<typeof inputPortRefForKey> | ReturnType<typeof outputPortRefForKey>,
+  id: string | undefined | null,
+) {
+  if (!portRef || !id) {
+    return;
   }
-  return ids;
+  matouts[portRefKey(portRef)] = id;
 }
 
-function idsForOutputPorts(node: WorkspaceNode, ports: Set<MaterializedOutputPort>) {
-  const ids = new Set<MatOutId>();
-  for (const port of ports) {
-    const id = node.materialized?.outputs?.[port];
-    if (id) {
-      ids.add(id);
-    }
-  }
-  return ids;
+function addAllNodeMatouts(node: WorkspaceNode, matouts: Record<string, string>) {
+  addNodeInputMatouts(node, matouts);
+  addNodeOutputMatouts(node, ["stdout", "stderr"], matouts);
 }
 
 function pushRunnableScope(workspace: Workspace, startNodeId: string) {
@@ -170,13 +165,11 @@ function pushRunnableScope(workspace: Workspace, startNodeId: string) {
       if (!deps.some((edge) => included.has(edge.from.nodeId))) {
         continue;
       }
-      // Push-style requests only keep downstream nodes whose omitted sibling inputs
-      // can be satisfied from cached materialized refs carried in the request.
       const missingExternalInput = deps.some((edge) => {
         if (included.has(edge.from.nodeId)) {
           return false;
         }
-        const key = inputKeyForEdge(edge);
+        const key = inputKeyForPortRef(edge.to);
         return key ? !candidate.materialized?.inputs?.[key] : false;
       });
       if (!missingExternalInput) {
@@ -188,8 +181,11 @@ function pushRunnableScope(workspace: Workspace, startNodeId: string) {
   return included;
 }
 
-function idsForExternalDependencies(workspace: Workspace, scopeNodeIds: Set<string>) {
-  const ids = new Set<MatOutId>();
+function addExternalDependencyMatouts(
+  workspace: Workspace,
+  scopeNodeIds: Set<string>,
+  matouts: Record<string, string>,
+) {
   for (const node of workspace.nodes) {
     if (!scopeNodeIds.has(node.id)) {
       continue;
@@ -198,14 +194,10 @@ function idsForExternalDependencies(workspace: Workspace, scopeNodeIds: Set<stri
       if (scopeNodeIds.has(edge.from.nodeId)) {
         continue;
       }
-      const key = inputKeyForEdge(edge);
-      const id = key ? node.materialized?.inputs?.[key] : null;
-      if (id) {
-        ids.add(id);
-      }
+      const key = inputKeyForPortRef(edge.to);
+      setMatout(matouts, inputPortRefForKey(node.id, key ?? ""), key ? node.materialized?.inputs?.[key] : null);
     }
   }
-  return ids;
 }
 
 export function compileExecutionRequest(
@@ -218,52 +210,45 @@ export function compileExecutionRequest(
     throw new Error(`node ${nodeId} is unavailable`);
   }
 
-  let scopeNodeIds: Set<string>;
-  let executableNodeIds: string[] = [];
-  const providedMatoutIds = new Set<MatOutId>();
+  let participatingNodeIds: Set<string>;
+  let executableNodeIds = new Set<string>();
   let includedEdgeIds = new Set<string>();
-  let allowedOutputPorts: Set<MaterializedOutputPort> | null = null;
+  const activeMatouts: Record<string, string> = {};
 
   if (action === "pull_inputs" || action === "pull_run") {
-    scopeNodeIds = upstreamClosure(workspace.edges, nodeId);
+    participatingNodeIds = upstreamClosure(workspace.edges, nodeId);
     includedEdgeIds = new Set(
       workspace.edges
-        .filter((edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId))
+        .filter((edge) => participatingNodeIds.has(edge.from.nodeId) && participatingNodeIds.has(edge.to.nodeId))
         .map((edge) => edge.id),
     );
-    executableNodeIds = Array.from(scopeNodeIds)
-      .filter((id) => action === "pull_run" || id !== nodeId)
-      .sort();
+    executableNodeIds = new Set(
+      Array.from(participatingNodeIds).filter((id) => action === "pull_run" || id !== nodeId),
+    );
   } else if (action === "rerun") {
-    scopeNodeIds = new Set([nodeId]);
-    executableNodeIds = [nodeId];
-    for (const id of idsForInputKeys(target, connectedInputKeys(workspace.edges, nodeId))) {
-      providedMatoutIds.add(id);
+    participatingNodeIds = new Set([nodeId]);
+    executableNodeIds = new Set([nodeId]);
+    for (const key of connectedInputKeys(workspace.edges, nodeId)) {
+      setMatout(activeMatouts, inputPortRefForKey(nodeId, key), target.materialized?.inputs?.[key]);
     }
   } else if (action === "rerun_push") {
-    scopeNodeIds = pushRunnableScope(workspace, nodeId);
+    participatingNodeIds = pushRunnableScope(workspace, nodeId);
     includedEdgeIds = new Set(
       workspace.edges
-        .filter((edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId))
+        .filter((edge) => participatingNodeIds.has(edge.from.nodeId) && participatingNodeIds.has(edge.to.nodeId))
         .map((edge) => edge.id),
     );
-    executableNodeIds = Array.from(scopeNodeIds).sort();
-    for (const id of idsForExternalDependencies(workspace, scopeNodeIds)) {
-      providedMatoutIds.add(id);
-    }
+    executableNodeIds = new Set(participatingNodeIds);
   } else {
-    scopeNodeIds = pushRunnableScope(workspace, nodeId);
+    participatingNodeIds = pushRunnableScope(workspace, nodeId);
     includedEdgeIds = new Set(
       workspace.edges
-        .filter((edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId))
+        .filter((edge) => participatingNodeIds.has(edge.from.nodeId) && participatingNodeIds.has(edge.to.nodeId))
         .map((edge) => edge.id),
     );
-    executableNodeIds = Array.from(scopeNodeIds)
-      .filter((id) => id !== nodeId)
-      .sort();
-    allowedOutputPorts = connectedOutputPorts(
+    const allowedOutputPorts = connectedOutputPorts(
       workspace.edges.filter(
-        (edge) => scopeNodeIds.has(edge.from.nodeId) && scopeNodeIds.has(edge.to.nodeId),
+        (edge) => participatingNodeIds.has(edge.from.nodeId) && participatingNodeIds.has(edge.to.nodeId),
       ),
       nodeId,
     );
@@ -274,23 +259,80 @@ export function compileExecutionRequest(
         }
       }
     }
-    for (const id of idsForOutputPorts(target, allowedOutputPorts)) {
-      providedMatoutIds.add(id);
-    }
-    for (const id of idsForExternalDependencies(workspace, scopeNodeIds)) {
-      providedMatoutIds.add(id);
+    const hasOutputs = Array.from(allowedOutputPorts).some((port) => Boolean(target.materialized?.outputs?.[port]));
+    executableNodeIds = new Set(
+      Array.from(participatingNodeIds).filter((id) => hasOutputs || id !== nodeId),
+    );
+    for (const port of allowedOutputPorts) {
+      setMatout(activeMatouts, outputPortRefForKey(nodeId, port), target.materialized?.outputs?.[port]);
     }
   }
+  if (action === "pull_run") {
+    for (const node of workspace.nodes.filter((candidate) => participatingNodeIds.has(candidate.id))) {
+      addNodeInputMatouts(node, activeMatouts);
+    }
+    const roots = executableRoots(
+      workspace.edges.filter((edge) => includedEdgeIds.has(edge.id)),
+      executableNodeIds,
+    );
+    for (const node of workspace.nodes.filter((candidate) => executableNodeIds.has(candidate.id) && !roots.has(candidate.id))) {
+      addNodeOutputMatouts(node, ["stdout", "stderr"], activeMatouts);
+    }
+  }
+  if (action === "pull_inputs") {
+    for (const node of workspace.nodes.filter((candidate) => executableNodeIds.has(candidate.id))) {
+      addNodeInputMatouts(node, activeMatouts);
+    }
+    for (const key of connectedInputKeys(workspace.edges, nodeId)) {
+      setMatout(activeMatouts, inputPortRefForKey(nodeId, key), target.materialized?.inputs?.[key]);
+    }
+    addNodeOutputMatouts(target, ["stdout", "stderr"], activeMatouts);
+  }
+  if (action === "rerun") {
+    addNodeInputMatouts(target, activeMatouts);
+  }
+  if (action === "rerun_push") {
+    for (const node of workspace.nodes.filter((candidate) => participatingNodeIds.has(candidate.id))) {
+      addNodeInputMatouts(node, activeMatouts);
+    }
+    const roots = executableRoots(
+      workspace.edges.filter((edge) => includedEdgeIds.has(edge.id)),
+      executableNodeIds,
+    );
+    for (const node of workspace.nodes.filter((candidate) => executableNodeIds.has(candidate.id) && !roots.has(candidate.id))) {
+      addNodeOutputMatouts(node, ["stdout", "stderr"], activeMatouts);
+    }
+  }
+  if (action === "repush") {
+    for (const node of workspace.nodes.filter((candidate) => participatingNodeIds.has(candidate.id))) {
+      if (node.id === nodeId) {
+        addNodeInputMatouts(node, activeMatouts);
+        const ports = connectedOutputPorts(workspace.edges, nodeId);
+        if (ports.size === 0) {
+          for (const port of outputPortsForKind(node.kind)) {
+            if (port === "stdout" || port === "stderr") {
+              ports.add(port);
+            }
+          }
+        }
+        addNodeOutputMatouts(node, ports, activeMatouts);
+      } else {
+        addNodeInputMatouts(node, activeMatouts);
+        addNodeOutputMatouts(node, ["stdout", "stderr"], activeMatouts);
+      }
+    }
+  }
+
+  const requestWorkspace = filterWorkspaceToScope(workspace, executableNodeIds, includedEdgeIds);
+  const matouts: Record<string, string> = {};
+  for (const node of workspace.nodes.filter((candidate) => executableNodeIds.has(candidate.id))) {
+    addAllNodeMatouts(node, matouts);
+  }
+  Object.assign(matouts, activeMatouts);
+
   return {
-    workspace: filterWorkspaceToScope(
-      workspace,
-      scopeNodeIds,
-      includedEdgeIds,
-      nodeId,
-      allowedOutputPorts,
-    ),
-    executableNodeIds,
-    edgeIds: Array.from(includedEdgeIds).sort(),
-    providedMatoutIds: Array.from(providedMatoutIds).sort(),
+    graph: requestWorkspace,
+    matouts,
+    activeMatouts: Object.keys(activeMatouts).sort(),
   };
 }

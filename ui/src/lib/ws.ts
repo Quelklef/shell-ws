@@ -7,7 +7,7 @@ function wsLog(direction: "->" | "<-", summary: string) {
 function summarizeClientEvent(event: ClientEvent) {
   switch (event.type) {
     case "run_node":
-      return `run nodes=${event.request.workspace.nodes.length} exec=${event.request.executableNodeIds.length} wires=${event.request.edgeIds.length}`;
+      return `run nodes=${event.request.graph.nodes.length} wires=${event.request.graph.edges.length} matouts=${Object.keys(event.request.matouts).length} active=${event.request.activeMatouts.length}`;
     case "stop_execution":
       return `stop exec=${event.exec_id ?? "-"} node=${event.node_id ?? "-"}`;
   }

@@ -23,6 +23,7 @@ export type ExecutionAction =
 
 export type MaterializedOutputPort = "stdout" | "stderr";
 export type MatOutId = string;
+export type PortRefKey = string;
 
 export interface MaterializedReferrer {
   nodeId: string;
@@ -38,6 +39,10 @@ export interface ProducedBy {
 export interface MatOutEntry {
   dataBase64: string;
   producedBy: ProducedBy;
+  // Replayed outputs can originate from any active materialized binding, even when no
+  // node execution happens in this request, so the materialized value itself must carry
+  // the exit status needed for downstream semantics.
+  exitCode: number | null;
   referrers: MaterializedReferrer[];
 }
 
@@ -130,6 +135,12 @@ export interface WorkspaceNode {
   uiState?: NodeUiState | null;
 }
 
+export interface PortRef {
+  nodeId: string;
+  port: PortKind;
+  slot?: number | null;
+}
+
 export interface AutoRunConfig {
   enabled: boolean;
   mode: ExecutionAction;
@@ -138,8 +149,8 @@ export interface AutoRunConfig {
 
 export interface WorkspaceEdge {
   id: string;
-  from: { nodeId: string; port: PortKind; slot?: number | null };
-  to: { nodeId: string; port: PortKind; slot?: number | null };
+  from: PortRef;
+  to: PortRef;
   buffering: BufferingMode;
 }
 
@@ -234,11 +245,15 @@ export interface DisplayState {
   completed: boolean;
 }
 
+// Execution requests use a scoped execution graph, not a persisted workspace.
+// Included wires imply that both endpoint ports participate even if one endpoint
+// node is omitted from `graph.nodes`.
+export type ExecutionGraph = Workspace;
+
 export interface ExecutionRequest {
-  workspace: Workspace;
-  executableNodeIds: string[];
-  providedMatoutIds: MatOutId[];
-  edgeIds: string[];
+  graph: ExecutionGraph;
+  matouts: Record<PortRefKey, MatOutId>;
+  activeMatouts: PortRefKey[];
 }
 
 export interface ExecutionPlanState {
@@ -257,6 +272,7 @@ export interface ExecutionPlanNodeMatval {
 export interface NodeExecutionPlanState {
   isExecutable: boolean;
   isParticipating: boolean;
+  portKeys: string[];
   matvals: ExecutionPlanNodeMatval[];
 }
 

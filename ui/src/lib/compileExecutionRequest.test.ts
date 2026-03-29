@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { compileExecutionRequest } from "./compileExecutionRequest";
+import { portRefKey } from "./portRefs";
 import type { Workspace, WorkspaceNode } from "./types";
 
 function node(id: string, kind: WorkspaceNode["kind"]): WorkspaceNode {
@@ -42,11 +43,11 @@ function workspace(nodes: WorkspaceNode[], edges: Workspace["edges"]): Workspace
 }
 
 function nodeIds(request: ReturnType<typeof compileExecutionRequest>) {
-  return request.workspace.nodes.map((item) => item.id);
+  return request.graph.nodes.map((item) => item.id);
 }
 
 function edgeIds(request: ReturnType<typeof compileExecutionRequest>) {
-  return request.workspace.edges.map((item) => item.id);
+  return request.graph.edges.map((item) => item.id);
 }
 
 describe("compileExecutionRequest", () => {
@@ -74,15 +75,22 @@ describe("compileExecutionRequest", () => {
       "pull_inputs",
     );
 
-    expect(nodeIds(request)).toEqual(["a", "b"]);
+    expect(nodeIds(request)).toEqual(["a"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.executableNodeIds).toEqual(["a"]);
-    expect(request.edgeIds).toEqual(["e1"]);
-    expect(request.providedMatoutIds).toEqual([]);
-    expect(request.workspace.nodes.find((item) => item.id === "b")?.materialized).toEqual({
-      inputs: { stdin: "old-b-in" },
-      outputs: { stdout: "old-b-out", stderr: "old-b-err" },
-      lastExitCode: 0,
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "b", port: "stdin" })]: "old-b-in",
+      [portRefKey({ nodeId: "b", port: "stdout" })]: "old-b-out",
+      [portRefKey({ nodeId: "b", port: "stderr" })]: "old-b-err",
+    });
+    expect(request.activeMatouts).toEqual([
+      portRefKey({ nodeId: "b", port: "stderr" }),
+      portRefKey({ nodeId: "b", port: "stdin" }),
+      portRefKey({ nodeId: "b", port: "stdout" }),
+    ]);
+    expect(request.graph.nodes.find((item) => item.id === "a")?.materialized).toEqual({
+      inputs: {},
+      outputs: {},
+      lastExitCode: null,
     });
   });
 
@@ -107,9 +115,8 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["a", "b"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.executableNodeIds).toEqual(["a", "b"]);
-    expect(request.edgeIds).toEqual(["e1"]);
-    expect(request.providedMatoutIds).toEqual([]);
+    expect(request.activeMatouts).toEqual([]);
+    expect(request.matouts).toEqual({});
   });
 
   it("compiles rerun to a target-only graph with provided materialized inputs", () => {
@@ -141,13 +148,17 @@ describe("compileExecutionRequest", () => {
       "rerun",
     );
 
-    expect(request.executableNodeIds).toEqual(["target"]);
-    expect(request.edgeIds).toEqual([]);
-    expect(request.providedMatoutIds).toEqual(["mat-in"]);
-    expect(request.workspace.nodes.map((item) => item.id)).toEqual(["target"]);
-    expect(request.workspace.edges).toEqual([]);
-    expect(request.workspace.nodes[0].materialized?.inputs).toEqual({ stdin: "mat-in" });
-    expect(request.workspace.nodes[0].materialized?.outputs).toEqual({ stdout: "mat-out" });
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "target", port: "stdout" })]: "mat-out",
+      [portRefKey({ nodeId: "target", port: "stdin" })]: "mat-in",
+    });
+    expect(request.activeMatouts).toEqual([
+      portRefKey({ nodeId: "target", port: "stdin" }),
+    ]);
+    expect(request.graph.nodes.map((item) => item.id)).toEqual(["target"]);
+    expect(request.graph.edges).toEqual([]);
+    expect(request.graph.nodes[0].materialized?.inputs).toEqual({});
+    expect(request.graph.nodes[0].materialized?.outputs).toEqual({});
   });
 
   it("compiles repush to a downstream graph with non-executable source and provided outputs", () => {
@@ -174,11 +185,14 @@ describe("compileExecutionRequest", () => {
       "repush",
     );
 
-    expect(request.executableNodeIds).toEqual(["sink"]);
-    expect(request.edgeIds).toEqual(["e1"]);
-    expect(request.providedMatoutIds).toEqual(["mat-stdout"]);
-    expect(request.workspace.nodes.map((item) => item.id)).toEqual(["source", "sink"]);
-    expect(request.workspace.nodes[0].materialized?.outputs).toEqual({ stdout: "mat-stdout" });
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "source", port: "stdout" })]: "mat-stdout",
+      [portRefKey({ nodeId: "source", port: "stderr" })]: "mat-stderr",
+    });
+    expect(request.activeMatouts).toEqual([
+      portRefKey({ nodeId: "source", port: "stdout" }),
+    ]);
+    expect(request.graph.nodes.map((item) => item.id)).toEqual(["source", "sink"]);
   });
 
   it("prunes repush downstream nodes that are missing sibling inputs", () => {
@@ -214,8 +228,12 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["source"]);
     expect(edgeIds(request)).toEqual([]);
-    expect(request.executableNodeIds).toEqual([]);
-    expect(request.providedMatoutIds).toEqual(["source-out"]);
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "source", port: "stdout" })]: "source-out",
+    });
+    expect(request.activeMatouts).toEqual([
+      portRefKey({ nodeId: "source", port: "stdout" }),
+    ]);
   });
 
   it("keeps repush downstream nodes when cached sibling inputs are available", () => {
@@ -256,11 +274,14 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["source", "sink"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.executableNodeIds).toEqual(["sink"]);
-    expect(request.providedMatoutIds).toEqual(["cached-sibling", "source-out"]);
-    expect(request.workspace.nodes.find((item) => item.id === "sink")?.materialized?.inputs).toEqual({
-      "argv-2": "cached-sibling",
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "source", port: "stdout" })]: "source-out",
+      [portRefKey({ nodeId: "sink", port: "argv", slot: 2 })]: "cached-sibling",
     });
+    expect(request.activeMatouts).toEqual([
+      portRefKey({ nodeId: "sink", port: "argv", slot: 2 }),
+      portRefKey({ nodeId: "source", port: "stdout" }),
+    ]);
   });
 
   it("prunes rerun_push downstream nodes that are missing sibling inputs", () => {
@@ -296,8 +317,10 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["b"]);
     expect(edgeIds(request)).toEqual([]);
-    expect(request.executableNodeIds).toEqual(["b"]);
-    expect(request.providedMatoutIds).toEqual([]);
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "b", port: "stdout" })]: "mat-b",
+    });
+    expect(request.activeMatouts).toEqual([]);
   });
 
   it("keeps rerun_push downstream nodes when cached sibling inputs are available", () => {
@@ -338,7 +361,12 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["b", "c"]);
     expect(edgeIds(request)).toEqual(["e2"]);
-    expect(request.executableNodeIds).toEqual(["b", "c"]);
-    expect(request.providedMatoutIds).toEqual(["mat-a"]);
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "b", port: "stdout" })]: "mat-b",
+      [portRefKey({ nodeId: "c", port: "argv", slot: 1 })]: "mat-a",
+    });
+    expect(request.activeMatouts).toEqual([
+      portRefKey({ nodeId: "c", port: "argv", slot: 1 }),
+    ]);
   });
 });

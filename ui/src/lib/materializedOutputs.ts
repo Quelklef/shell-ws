@@ -174,12 +174,14 @@ export function resolveNodeMaterializedValue(node: WorkspaceNode, key: string, s
 export function createMatOutEntry(
   bytes: Uint8Array,
   producedBy: MatOutEntry["producedBy"],
+  exitCode: number | null,
   initialReferrer: MaterializedReferrer,
 ) {
   const id = encodeId("matout");
   const entry: MatOutEntry = {
     dataBase64: toBase64(bytes),
     producedBy,
+    exitCode,
     referrers: [initialReferrer],
   };
   return { id, entry };

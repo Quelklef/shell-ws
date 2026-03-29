@@ -9,6 +9,7 @@ import {
   mergeExecutionPlans,
   participatingNodeIdsForPlan,
 } from "./executionPlan";
+import { portRefKey } from "./portRefs";
 import type { ExecutionRequest, Workspace, WorkspaceNode } from "./types";
 
 function node(id: string, kind: WorkspaceNode["kind"]): WorkspaceNode {
@@ -60,8 +61,8 @@ describe("executionPlan", () => {
 
   it("derives a plan snapshot from an execution request", () => {
     const request: ExecutionRequest = {
-      workspace: workspace(
-        [node("a", "text"), node("b", "script"), node("c", "display")],
+      graph: workspace(
+        [node("b", "script")],
         [
           {
             id: "e1",
@@ -71,9 +72,10 @@ describe("executionPlan", () => {
           },
         ],
       ),
-      executableNodeIds: ["b"],
-      edgeIds: ["e1"],
-      providedMatoutIds: ["out-1"],
+      matouts: {
+        [portRefKey({ nodeId: "a", port: "stdout" })]: "out-1",
+      },
+      activeMatouts: [portRefKey({ nodeId: "a", port: "stdout" })],
     };
 
     expect(executionPlanFromRequest(request)).toEqual({
@@ -195,11 +197,14 @@ describe("executionPlan", () => {
       },
     );
 
-    expect(request.workspace.nodes.map((item) => item.id)).toEqual(["b", "c"]);
-    expect(request.workspace.edges.map((item) => item.id)).toEqual(["e2"]);
-    expect(request.executableNodeIds).toEqual(["c"]);
-    expect(request.edgeIds).toEqual(["e2"]);
-    expect(request.providedMatoutIds).toEqual(["a-out", "b-out"]);
+    expect(request.graph.nodes.map((item) => item.id)).toEqual(["c"]);
+    expect(request.graph.edges.map((item) => item.id)).toEqual(["e2"]);
+    expect(request.matouts).toEqual({
+      [portRefKey({ nodeId: "b", port: "stdout" })]: "b-out",
+    });
+    expect(request.activeMatouts).toEqual([
+      portRefKey({ nodeId: "b", port: "stdout" }),
+    ]);
   });
 
   it("reports node matvals and whether they are included", () => {

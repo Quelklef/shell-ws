@@ -47,6 +47,7 @@ import {
   executionPlanForSelection,
   executionPlanFromRequest,
   executionPlanMatvalsForNode,
+  executionPlanPortKeysForNode,
   mergeExecutionPlans,
   participatingNodeIdsForPlan,
   trimExecutionPlan,
@@ -509,6 +510,7 @@ function toFlowNode(
       executionPlan: {
         isExecutable: executionPlan.executableNodeIds.includes(node.id),
         isParticipating: participatingNodeIds.has(node.id),
+        portKeys: executionPlanPortKeysForNode(node, edgeDerived.argvSlots, executionPlan, []),
         matvals: executionPlanMatvalsForNode(node, executionPlan),
       },
       argvSlots: edgeDerived.argvSlots,
@@ -1002,6 +1004,7 @@ function WorkspaceCanvas() {
 
   const updateNodeMaterializedData = useCallback((nodeId: string, nextMaterialized: NodeMaterialized | undefined) => {
     const participatingNodeIds = participatingNodeIdsForCurrentPlan(executionPlanRef.current);
+    const workspaceEdges = edgesRef.current.map(flowEdgeToWorkspaceEdge);
     patchNodesById([nodeId], (node) =>
       node.data.model.materialized === nextMaterialized
         ? node
@@ -1016,6 +1019,15 @@ function WorkspaceCanvas() {
               executionPlan: {
                 isExecutable: executionPlanRef.current.executableNodeIds.includes(node.id),
                 isParticipating: participatingNodeIds.has(node.id),
+                portKeys: executionPlanPortKeysForNode(
+                  {
+                    ...node.data.model,
+                    materialized: nextMaterialized,
+                  },
+                  node.data.argvSlots,
+                  executionPlanRef.current,
+                  workspaceEdges,
+                ),
                 matvals: executionPlanMatvalsForNode(
                   {
                     ...node.data.model,
@@ -1045,13 +1057,17 @@ function WorkspaceCanvas() {
 
   const updateNodeExecutionPlanData = useCallback((nextPlan: ExecutionPlanState) => {
     const participatingNodeIds = participatingNodeIdsForCurrentPlan(nextPlan);
+    const workspaceEdges = edgesRef.current.map(flowEdgeToWorkspaceEdge);
     patchNodesById(nodesRef.current.map((node) => node.id), (node) => {
       const nextNodeExecutionPlan = {
         isExecutable: nextPlan.executableNodeIds.includes(node.id),
         isParticipating: participatingNodeIds.has(node.id),
+        portKeys: executionPlanPortKeysForNode(node.data.model, node.data.argvSlots, nextPlan, workspaceEdges),
         matvals: executionPlanMatvalsForNode(node.data.model, nextPlan),
       };
       const currentNodeExecutionPlan = node.data.executionPlan;
+      const samePortKeys = currentNodeExecutionPlan?.portKeys.length === nextNodeExecutionPlan.portKeys.length
+        && currentNodeExecutionPlan.portKeys.every((entry, index) => entry === nextNodeExecutionPlan.portKeys[index]);
       const sameMatvals = currentNodeExecutionPlan?.matvals.length === nextNodeExecutionPlan.matvals.length
         && currentNodeExecutionPlan.matvals.every((entry, index) => {
           const nextEntry = nextNodeExecutionPlan.matvals[index];
@@ -1064,6 +1080,7 @@ function WorkspaceCanvas() {
       if (
         currentNodeExecutionPlan?.isExecutable === nextNodeExecutionPlan.isExecutable
         && currentNodeExecutionPlan?.isParticipating === nextNodeExecutionPlan.isParticipating
+        && samePortKeys
         && sameMatvals
       ) {
         return node;
@@ -1094,12 +1111,21 @@ function WorkspaceCanvas() {
   }, [patchNodesById]);
 
   const updateNodeEdgeDerivedData = useCallback((nodeIds: Iterable<string>) => {
+    const workspaceEdges = edgesRef.current.map(flowEdgeToWorkspaceEdge);
     patchNodesById(nodeIds, (node) => {
       const derived = deriveNodeEdgeData(
         node.data.model.kind,
         incomingEdgeSummaryRef.current.get(node.id),
       );
-      return sameArray(node.data.argvSlots, derived.argvSlots) && sameArray(node.data.previewTabs, derived.previewTabs)
+      const nextPortKeys = executionPlanPortKeysForNode(
+        node.data.model,
+        derived.argvSlots,
+        executionPlanRef.current,
+        workspaceEdges,
+      );
+      return sameArray(node.data.argvSlots, derived.argvSlots)
+        && sameArray(node.data.previewTabs, derived.previewTabs)
+        && sameArray(node.data.executionPlan?.portKeys, nextPortKeys)
         ? node
         : {
             ...node,
@@ -1107,6 +1133,12 @@ function WorkspaceCanvas() {
               ...node.data,
               argvSlots: derived.argvSlots,
               previewTabs: derived.previewTabs,
+              executionPlan: node.data.executionPlan
+                ? {
+                    ...node.data.executionPlan,
+                    portKeys: nextPortKeys,
+                  }
+                : node.data.executionPlan,
             },
           };
     });
@@ -1685,7 +1717,7 @@ function WorkspaceCanvas() {
       return;
     }
     const request = buildExecutionRequestFromPlan(workspace, executionPlanRef.current);
-    if (request.workspace.nodes.length === 0) {
+    if (request.graph.nodes.length === 0) {
       setToast("execution plan is empty");
       return;
     }

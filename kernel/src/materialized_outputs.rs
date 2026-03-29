@@ -87,25 +87,35 @@ pub fn set_node_input_ref(
     id: Option<String>,
     store: &mut MaterializedOutputStore,
 ) -> MaterializedMutation {
+    set_materialized_input_ref_for_node_id(&node.id, &mut node.materialized, key, id, store)
+}
+
+pub fn set_materialized_input_ref_for_node_id(
+    node_id: &str,
+    materialized: &mut NodeMaterialized,
+    key: &str,
+    id: Option<String>,
+    store: &mut MaterializedOutputStore,
+) -> MaterializedMutation {
     let mut mutation = MaterializedMutation::default();
-    if let Some(current_id) = node.materialized.inputs.remove(key) {
+    if let Some(current_id) = materialized.inputs.remove(key) {
         remove_referrer(
             store,
             &current_id,
             &MaterializedReferrer {
-                node_id: node.id.clone(),
+                node_id: node_id.to_string(),
                 key: key.to_string(),
             },
             &mut mutation,
         );
     }
     if let Some(id) = id {
-        node.materialized.inputs.insert(key.to_string(), id.clone());
+        materialized.inputs.insert(key.to_string(), id.clone());
         add_referrer(
             store,
             &id,
             MaterializedReferrer {
-                node_id: node.id.clone(),
+                node_id: node_id.to_string(),
                 key: key.to_string(),
             },
             &mut mutation,
@@ -120,27 +130,35 @@ pub fn set_node_output_ref(
     id: Option<String>,
     store: &mut MaterializedOutputStore,
 ) -> MaterializedMutation {
+    set_materialized_output_ref_for_node_id(&node.id, &mut node.materialized, port, id, store)
+}
+
+pub fn set_materialized_output_ref_for_node_id(
+    node_id: &str,
+    materialized: &mut NodeMaterialized,
+    port: &str,
+    id: Option<String>,
+    store: &mut MaterializedOutputStore,
+) -> MaterializedMutation {
     let mut mutation = MaterializedMutation::default();
-    if let Some(current_id) = node.materialized.outputs.remove(port) {
+    if let Some(current_id) = materialized.outputs.remove(port) {
         remove_referrer(
             store,
             &current_id,
             &MaterializedReferrer {
-                node_id: node.id.clone(),
+                node_id: node_id.to_string(),
                 key: port.to_string(),
             },
             &mut mutation,
         );
     }
     if let Some(id) = id {
-        node.materialized
-            .outputs
-            .insert(port.to_string(), id.clone());
+        materialized.outputs.insert(port.to_string(), id.clone());
         add_referrer(
             store,
             &id,
             MaterializedReferrer {
-                node_id: node.id.clone(),
+                node_id: node_id.to_string(),
                 key: port.to_string(),
             },
             &mut mutation,
@@ -201,6 +219,7 @@ pub fn create_output_entries(
     node: &mut Node,
     exec_id: &str,
     outputs: HashMap<String, Vec<u8>>,
+    exit_code: Option<i32>,
     store: &mut MaterializedOutputStore,
 ) -> MaterializedMutation {
     let mut mutation = MaterializedMutation::default();
@@ -220,6 +239,7 @@ pub fn create_output_entries(
                     node_id: node.id.clone(),
                     port: port_kind,
                 },
+                exit_code,
                 referrers: Vec::new(),
             },
         );

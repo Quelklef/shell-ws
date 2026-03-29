@@ -1776,6 +1776,19 @@ textarea {
   opacity: 1;
 }
 
+.shell-handle.is-execution-target {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 0 2px color-mix(in srgb, var(--exec-plan-color) 44%, transparent),
+    0 0 10px color-mix(in srgb, var(--exec-plan-color) 34%, transparent);
+}
+
+.shell-handle.is-execution-target::before {
+  opacity: 0.7;
+  background: color-mix(in srgb, var(--exec-plan-color) 24%, transparent);
+}
+
 .shell-handle-stdout {
   --handle-rgb: 143, 207, 158;
 }
@@ -1878,6 +1891,13 @@ textarea {
 .shell-handle-argv.is-active {
   background: rgba(120, 184, 242, 0.56);
   box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45), 0 0 16px rgba(120, 184, 242, 0.85);
+}
+
+.shell-handle.is-execution-target.is-active {
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.45),
+    0 0 0 2px color-mix(in srgb, var(--exec-plan-color) 44%, transparent),
+    0 0 16px color-mix(in srgb, var(--exec-plan-color) 34%, transparent);
 }
 
 .node-palette button {
