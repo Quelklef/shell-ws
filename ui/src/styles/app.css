@@ -1109,10 +1109,8 @@ textarea {
 }
 
 .shell-node.is-execution-target.is-selection-preview .node-card {
-  box-shadow:
-    0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent),
-    0 0 0 calc(6px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 20%, transparent),
-    var(--shadow);
+  border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
+  box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
 }
 
 .execution-plan-floating {
