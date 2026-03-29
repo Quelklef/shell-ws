@@ -40,6 +40,7 @@ import {
   saveWorkspace,
 } from "./lib/api";
 import { collectAiScriptSamples } from "./lib/aiScript";
+import { compileExecutionRequest } from "./lib/compileExecutionRequest";
 import { layoutSelectedNodes } from "./lib/layout";
 import { chooseNodePosition } from "./lib/nodePlacement";
 import { selectionRectToFlowRect } from "./lib/selectionRect";
@@ -1495,12 +1496,16 @@ function WorkspaceCanvas() {
       if (!workspace) {
         return;
       }
+      let request;
+      try {
+        request = compileExecutionRequest(workspace, nodeId, action);
+      } catch (error) {
+        setToast(String(error));
+        return;
+      }
       const event: ClientEvent = {
         type: "run_node",
-        workspace,
-        materialized_output_store: materializedOutputStoreRef.current,
-        node_id: nodeId,
-        action,
+        request,
       };
       if (!socketRef.current?.ready) {
         if (!silenceIfDisconnected) {

@@ -435,16 +435,24 @@ pub struct WorkspaceSidebarState {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientEvent {
     RunNode {
-        workspace: Workspace,
-        #[serde(default)]
-        materialized_output_store: MaterializedOutputStore,
-        node_id: String,
-        action: ExecutionAction,
+        request: ExecutionRequest,
     },
     StopExecution {
         exec_id: Option<String>,
         node_id: Option<String>,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionRequest {
+    pub workspace: Workspace,
+    #[serde(default)]
+    pub seed_node_ids: Vec<String>,
+    #[serde(default)]
+    pub provided_matout_ids: Vec<String>,
+    #[serde(default)]
+    pub blocked_node_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -574,7 +582,7 @@ fn default_tuckspace_sidebar() -> WorkspaceSidebarState {
 
 #[cfg(test)]
 mod tests {
-    use super::{default_cwd, ClientEvent, ExecutionAction, Workspace};
+    use super::{default_cwd, ClientEvent, Workspace};
 
     #[test]
     fn buffering_mode_serializes_with_expected_underscore() {
@@ -710,14 +718,17 @@ mod tests {
         let workspace = Workspace::example();
         let payload = serde_json::json!({
             "type": "run_node",
-            "workspace": workspace,
-            "node_id": "text-1",
-            "action": "rerun_push"
+            "request": {
+                "workspace": workspace,
+                "seedNodeIds": ["text-1"],
+                "providedMatoutIds": [],
+                "blockedNodeIds": []
+            }
         });
 
         let event: ClientEvent = serde_json::from_value(payload).expect("deserialize run event");
         match event {
-            ClientEvent::RunNode { action, .. } => assert_eq!(action, ExecutionAction::RerunPush),
+            ClientEvent::RunNode { request } => assert_eq!(request.seed_node_ids, vec!["text-1"]),
             _ => panic!("unexpected client event"),
         }
     }

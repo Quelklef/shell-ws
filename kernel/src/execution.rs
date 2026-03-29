@@ -23,7 +23,7 @@ use crate::materialized_outputs::{
     create_output_entries, decode_entry_bytes, set_node_input_ref, MaterializedMutation,
 };
 use crate::model::{
-    default_cwd, BufferingMode, Edge, ExecutionAction, MaterializedOutputStore, Node, NodeKind,
+    default_cwd, BufferingMode, Edge, ExecutionRequest, MaterializedOutputStore, Node, NodeKind,
     NodeMaterialized, PortKind, ServerEvent, Workspace,
 };
 use crate::port_schema::node_port_schema;
@@ -96,24 +96,26 @@ impl ExecutionManager {
 
     pub fn run(
         &self,
-        workspace: Workspace,
+        request: ExecutionRequest,
         materialized_output_store: MaterializedOutputStore,
-        node_id: String,
-        action: ExecutionAction,
     ) -> String {
         let exec_id = crate::id::encode_exec_id();
         let cancel = CancellationToken::new();
         let manager = self.clone();
-        let node_for_handle = node_id.clone();
+        let node_for_handle = request
+            .seed_node_ids
+            .first()
+            .cloned()
+            .or_else(|| request.workspace.nodes.first().map(|node| node.id.clone()))
+            .unwrap_or_default();
         let exec_id_for_task = exec_id.clone();
         let exec_id_for_remove = exec_id.clone();
         let cancel_for_task = cancel.clone();
         let task = tokio::spawn(async move {
             let context = match ExecutionContext::new(
                 exec_id_for_task.clone(),
-                workspace,
+                request,
                 materialized_output_store,
-                action,
                 manager.broadcaster.clone(),
                 cancel_for_task.clone(),
             ) {
@@ -127,7 +129,7 @@ impl ExecutionManager {
                 }
             };
 
-            if let Err(message) = context.clone().run(node_id).await {
+            if let Err(message) = context.clone().run().await {
                 if !context.cancel.is_cancelled() {
                     let _ = manager.broadcaster.send(ServerEvent::Error {
                         message,
@@ -179,28 +181,16 @@ struct ExecutionHandle {
     _task: JoinHandle<()>,
 }
 
-#[derive(Clone, Copy)]
-enum StreamingSeedMode {
-    Execute,
-    MaterializedOutputs,
-}
-
-#[derive(Clone)]
-struct StreamingSeed {
-    node_id: String,
-    seed: StreamingSeedMode,
-}
-
 struct StreamingExecutionPlan {
     scope: HashSet<String>,
-    seeds: Vec<StreamingSeed>,
+    seeds: Vec<String>,
     blocked_nodes: HashSet<String>,
 }
 
 struct ExecutionContext {
     exec_id: String,
+    request: ExecutionRequest,
     workspace: Workspace,
-    action: ExecutionAction,
     broadcaster: broadcast::Sender<ServerEvent>,
     cancel: CancellationToken,
     nodes: HashMap<String, Node>,
@@ -209,6 +199,7 @@ struct ExecutionContext {
     materialized_values: Arc<Mutex<HashMap<String, HashMap<String, Vec<u8>>>>>,
     materialized_nodes: Arc<Mutex<HashMap<String, NodeMaterialized>>>,
     materialized_output_store: Arc<Mutex<MaterializedOutputStore>>,
+    available_matout_ids: HashSet<String>,
     last_exit_codes: Arc<Mutex<HashMap<String, Option<i32>>>>,
     execution_scope: Arc<Mutex<HashSet<String>>>,
     blocked_nodes: Arc<Mutex<HashSet<String>>>,
@@ -217,12 +208,12 @@ struct ExecutionContext {
 impl ExecutionContext {
     fn new(
         exec_id: String,
-        workspace: Workspace,
+        request: ExecutionRequest,
         materialized_output_store: MaterializedOutputStore,
-        action: ExecutionAction,
         broadcaster: broadcast::Sender<ServerEvent>,
         cancel: CancellationToken,
     ) -> Result<Self, String> {
+        let workspace = request.workspace.clone();
         let nodes: HashMap<String, Node> = workspace
             .nodes
             .iter()
@@ -294,6 +285,34 @@ impl ExecutionContext {
             }
         }
 
+        let provided_ids = request
+            .provided_matout_ids
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+        for id in &provided_ids {
+            if !materialized_output_store.contains_key(id) {
+                return Err(format!("missing materialized output {id}"));
+            }
+        }
+        let referenced_ids = workspace
+            .nodes
+            .iter()
+            .flat_map(|node| {
+                node.materialized
+                    .inputs
+                    .values()
+                    .chain(node.materialized.outputs.values())
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+            .collect::<HashSet<_>>();
+        for id in &provided_ids {
+            if !referenced_ids.contains(id) {
+                return Err(format!("unused provided materialized output {id}"));
+            }
+        }
+
         let materialized_values = workspace
             .nodes
             .iter()
@@ -317,8 +336,8 @@ impl ExecutionContext {
 
         Ok(Self {
             exec_id,
+            request,
             workspace,
-            action,
             broadcaster,
             cancel,
             nodes,
@@ -327,33 +346,88 @@ impl ExecutionContext {
             materialized_values: Arc::new(Mutex::new(materialized_values)),
             materialized_nodes: Arc::new(Mutex::new(materialized_nodes)),
             materialized_output_store: Arc::new(Mutex::new(materialized_output_store)),
+            available_matout_ids: provided_ids,
             last_exit_codes: Arc::new(Mutex::new(last_exit_codes)),
             execution_scope: Arc::new(Mutex::new(HashSet::new())),
             blocked_nodes: Arc::new(Mutex::new(HashSet::new())),
         })
     }
 
-    async fn run(self: Arc<Self>, node_id: String) -> Result<(), String> {
-        if !self.nodes.contains_key(&node_id) {
-            return Err(format!("Node {node_id} does not exist"));
-        }
-        let plan = match self.action {
-            ExecutionAction::PullInputs => self.compute_streaming_pull_plan(&node_id, false)?,
-            ExecutionAction::PullRun => self.compute_streaming_pull_plan(&node_id, true)?,
-            ExecutionAction::Rerun => {
-                self.ensure_rerunnable(&node_id)?;
-                self.compute_streaming_rerun_plan(&node_id)
-            }
-            ExecutionAction::RerunPush => {
-                self.ensure_rerunnable(&node_id)?;
-                self.compute_streaming_push_plan(&node_id)
-            }
-            ExecutionAction::Repush => {
-                self.ensure_repushable(&node_id)?;
-                self.compute_streaming_repush_plan(&node_id)
-            }
-        };
+    async fn run(self: Arc<Self>) -> Result<(), String> {
+        let plan = self.validate_request()?;
         self.clone().execute_streaming_plan(plan).await
+    }
+
+    fn validate_request(&self) -> Result<StreamingExecutionPlan, String> {
+        if self.request.seed_node_ids.is_empty() {
+            return Err("execution request has no seeds".to_string());
+        }
+
+        let scope = self
+            .workspace
+            .nodes
+            .iter()
+            .map(|node| node.id.clone())
+            .collect::<HashSet<_>>();
+        let seeds = self.request.seed_node_ids.iter().cloned().collect::<HashSet<_>>();
+        let blocked_nodes = self
+            .request
+            .blocked_node_ids
+            .iter()
+            .cloned()
+            .collect::<HashSet<_>>();
+
+        for node_id in seeds.iter().chain(blocked_nodes.iter()) {
+            if !scope.contains(node_id) {
+                return Err(format!("node {node_id} is not in the execution graph"));
+            }
+        }
+
+        let roots = self.roots_in_scope(&scope).into_iter().collect::<HashSet<_>>();
+        for seed in &seeds {
+            if !roots.contains(seed) {
+                return Err(format!("seed node {seed} is not a graph-theoretic root"));
+            }
+        }
+        for root in &roots {
+            if !seeds.contains(root) {
+                return Err(format!("graph root {root} is missing from the seed set"));
+            }
+        }
+
+        let reachable = self.forward_reachable_from(&seeds);
+        for node_id in &scope {
+            if !reachable.contains(node_id) {
+                return Err(format!("node {node_id} is unreachable from the provided seeds"));
+            }
+        }
+
+        for node_id in &blocked_nodes {
+            let has_downstream = self
+                .outgoing
+                .get(node_id)
+                .map(|edges| edges.iter().any(|edge| scope.contains(&edge.to.node_id)))
+                .unwrap_or(false);
+            if has_downstream
+                && (!seeds.contains(node_id) || !self.node_has_replayable_outputs(node_id))
+            {
+                return Err(format!(
+                    "blocked node {node_id} cannot feed downstream execution without provided outputs"
+                ));
+            }
+        }
+        for node_id in seeds.intersection(&blocked_nodes) {
+            if !self.node_has_replayable_outputs(node_id) {
+                let node = self.nodes.get(node_id).expect("seed node");
+                return Err(format!("{} has no outputs to push.", node_label(node)));
+            }
+        }
+
+        Ok(StreamingExecutionPlan {
+            scope,
+            seeds: self.request.seed_node_ids.clone(),
+            blocked_nodes,
+        })
     }
 
     fn workspace_cwd(&self) -> PathBuf {
@@ -378,25 +452,31 @@ impl ExecutionContext {
         self.incoming.get(node_id).cloned().unwrap_or_default()
     }
 
-    fn node_materialized_values(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
-        self.materialized_values
-            .lock()
-            .get(node_id)
-            .cloned()
-            .unwrap_or_default()
-    }
-
-    fn node_materialized_inputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
-        self.node_materialized_values(node_id)
-            .into_iter()
-            .filter(|(key, _)| key == "stdin" || key.starts_with("argv-"))
+    fn node_available_materialized_inputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
+        let nodes = self.materialized_nodes.lock();
+        let Some(materialized) = nodes.get(node_id) else {
+            return HashMap::new();
+        };
+        let store = self.materialized_output_store.lock();
+        materialized
+            .inputs
+            .iter()
+            .filter(|(_, id)| self.available_matout_ids.contains(*id))
+            .filter_map(|(key, id)| store.get(id).map(|entry| (key.clone(), decode_entry_bytes(entry))))
             .collect()
     }
 
-    fn node_materialized_outputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
-        self.node_materialized_values(node_id)
-            .into_iter()
-            .filter(|(key, _)| key == "stdout" || key == "stderr")
+    fn node_available_materialized_outputs(&self, node_id: &str) -> HashMap<String, Vec<u8>> {
+        let nodes = self.materialized_nodes.lock();
+        let Some(materialized) = nodes.get(node_id) else {
+            return HashMap::new();
+        };
+        let store = self.materialized_output_store.lock();
+        materialized
+            .outputs
+            .iter()
+            .filter(|(_, id)| self.available_matout_ids.contains(*id))
+            .filter_map(|(key, id)| store.get(id).map(|entry| (key.clone(), decode_entry_bytes(entry))))
             .collect()
     }
 
@@ -404,132 +484,13 @@ impl ExecutionContext {
         self.last_exit_codes.lock().get(node_id).copied().flatten()
     }
 
-    fn ensure_rerunnable(&self, node_id: &str) -> Result<(), String> {
-        let available = self.node_materialized_inputs(node_id);
-        let mut missing = HashSet::new();
-        for edge in self.connected_input_edges(node_id) {
-            let key = input_key(edge.to.port, edge.to.slot);
-            if !available.contains_key(&key) {
-                missing.insert(key);
-            }
-        }
-        let mut missing: Vec<String> = missing.into_iter().collect();
-        missing.sort();
-        if missing.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "{} is missing materialized {}.",
-                node_label(self.nodes.get(node_id).expect("node")),
-                missing.join(", "),
-            ))
-        }
+    fn node_has_replayable_outputs(&self, node_id: &str) -> bool {
+        !self.node_available_materialized_outputs(node_id).is_empty()
     }
 
-    fn ensure_repushable(&self, node_id: &str) -> Result<(), String> {
-        let node = self.nodes.get(node_id).expect("node");
-        let required = source_output_ports(&node.kind);
-        if required.is_empty() {
-            return Err(format!("{} has no outputs to push.", node_label(node)));
-        }
-        let available = self.node_materialized_outputs(node_id);
-        let missing: Vec<String> = required
-            .iter()
-            .map(|port| output_key(*port).to_string())
-            .filter(|key| !available.contains_key(key))
-            .collect();
-        if missing.is_empty() {
-            Ok(())
-        } else {
-            Err(format!(
-                "{} is missing materialized {}.",
-                node_label(node),
-                missing.join(", "),
-            ))
-        }
-    }
-
-    fn compute_streaming_push_plan(&self, node_id: &str) -> StreamingExecutionPlan {
-        StreamingExecutionPlan {
-            scope: self.compute_forward_scope(node_id),
-            seeds: vec![StreamingSeed {
-                node_id: node_id.to_string(),
-                seed: StreamingSeedMode::Execute,
-            }],
-            blocked_nodes: HashSet::new(),
-        }
-    }
-
-    fn compute_streaming_rerun_plan(&self, node_id: &str) -> StreamingExecutionPlan {
-        StreamingExecutionPlan {
-            scope: HashSet::from([node_id.to_string()]),
-            seeds: vec![StreamingSeed {
-                node_id: node_id.to_string(),
-                seed: StreamingSeedMode::Execute,
-            }],
-            blocked_nodes: HashSet::new(),
-        }
-    }
-
-    fn compute_streaming_repush_plan(&self, node_id: &str) -> StreamingExecutionPlan {
-        StreamingExecutionPlan {
-            scope: self.compute_forward_scope(node_id),
-            seeds: vec![StreamingSeed {
-                node_id: node_id.to_string(),
-                seed: StreamingSeedMode::MaterializedOutputs,
-            }],
-            blocked_nodes: HashSet::new(),
-        }
-    }
-
-    fn compute_streaming_pull_plan(
-        &self,
-        target_node_id: &str,
-        run_target: bool,
-    ) -> Result<StreamingExecutionPlan, String> {
-        // Pull still runs through the forward executor; the only difference is that planning
-        // walks backward first to find the dependency closure and the seed nodes that should start it.
-        let scope = self.compute_backward_scope(target_node_id);
-        let root_ids = self.roots_in_scope(&scope);
-        let mut seeds = root_ids
-            .iter()
-            .filter(|node_id| run_target || node_id.as_str() != target_node_id)
-            .cloned()
-            .map(|node_id| StreamingSeed {
-                node_id,
-                seed: StreamingSeedMode::Execute,
-            })
-            .collect::<Vec<_>>();
-        let blocked_nodes = if run_target {
-            HashSet::new()
-        } else {
-            HashSet::from([target_node_id.to_string()])
-        };
-
-        if seeds.is_empty() {
-            if run_target
-                && scope.contains(target_node_id)
-                && root_ids.contains(&target_node_id.to_string())
-            {
-                seeds.push(StreamingSeed {
-                    node_id: target_node_id.to_string(),
-                    seed: StreamingSeedMode::Execute,
-                });
-            } else if scope.len() > 1 {
-                return Err(format!("pull cycle detected at {target_node_id}"));
-            }
-        }
-
-        Ok(StreamingExecutionPlan {
-            scope,
-            seeds,
-            blocked_nodes,
-        })
-    }
-
-    fn compute_forward_scope(&self, start_node_id: &str) -> HashSet<String> {
+    fn forward_reachable_from(&self, seeds: &HashSet<String>) -> HashSet<String> {
         let mut visited = HashSet::new();
-        let mut queue = VecDeque::from([start_node_id.to_string()]);
+        let mut queue = seeds.iter().cloned().collect::<VecDeque<_>>();
         while let Some(node_id) = queue.pop_front() {
             if !visited.insert(node_id.clone()) {
                 continue;
@@ -537,22 +498,6 @@ impl ExecutionContext {
             if let Some(edges) = self.outgoing.get(&node_id) {
                 for edge in edges {
                     queue.push_back(edge.to.node_id.clone());
-                }
-            }
-        }
-        visited
-    }
-
-    fn compute_backward_scope(&self, start_node_id: &str) -> HashSet<String> {
-        let mut visited = HashSet::new();
-        let mut queue = VecDeque::from([start_node_id.to_string()]);
-        while let Some(node_id) = queue.pop_front() {
-            if !visited.insert(node_id.clone()) {
-                continue;
-            }
-            if let Some(edges) = self.incoming.get(&node_id) {
-                for edge in edges {
-                    queue.push_back(edge.from.node_id.clone());
                 }
             }
         }
@@ -607,12 +552,6 @@ impl ExecutionContext {
             success,
             timestamp: now_ms(),
         });
-    }
-
-    fn has_connected_stdin(&self, node_id: &str) -> bool {
-        self.connected_input_edges(node_id)
-            .iter()
-            .any(|edge| edge.to.port == PortKind::Stdin)
     }
 
     fn set_materialized_input_bytes(&self, node_id: &str, key: &str, bytes: Vec<u8>) {
@@ -843,12 +782,13 @@ impl RunController {
         }
     }
 
-    async fn start_seed(&mut self, seed: StreamingSeed) -> Result<(), String> {
-        match seed.seed {
-            StreamingSeedMode::Execute => self.start_node_execute(seed.node_id).await,
-            StreamingSeedMode::MaterializedOutputs => {
-                self.start_materialized_seed(seed.node_id).await
-            }
+    async fn start_seed(&mut self, node_id: String) -> Result<(), String> {
+        if self.context.node_has_replayable_outputs(&node_id) {
+            self.start_materialized_seed(node_id).await
+        } else if self.context.should_execute_node_in_scope(&node_id) {
+            self.start_node_execute(node_id).await
+        } else {
+            Ok(())
         }
     }
 
@@ -998,8 +938,46 @@ impl RunController {
             })
     }
 
+    fn required_materialized_input_keys(&self, node_id: &str) -> HashSet<String> {
+        self.context
+            .materialized_nodes
+            .lock()
+            .get(node_id)
+            .map(|materialized| materialized.inputs.keys().cloned().collect())
+            .unwrap_or_default()
+    }
+
+    fn has_required_stdin(&self, node_id: &str) -> bool {
+        self.context
+            .connected_input_edges(node_id)
+            .iter()
+            .any(|edge| edge.to.port == PortKind::Stdin)
+            || self.required_materialized_input_keys(node_id).contains("stdin")
+    }
+
+    fn required_argv_slots(&self, node_id: &str) -> Vec<usize> {
+        let mut slots = self
+            .context
+            .connected_input_edges(node_id)
+            .into_iter()
+            .filter(|edge| edge.to.port == PortKind::Argv)
+            .filter_map(|edge| edge.to.slot)
+            .collect::<HashSet<_>>();
+        for key in self.required_materialized_input_keys(node_id) {
+            if let Some(slot) = key
+                .strip_prefix("argv-")
+                .and_then(|raw| raw.parse::<usize>().ok())
+            {
+                slots.insert(slot);
+            }
+        }
+        let mut ordered = slots.into_iter().collect::<Vec<_>>();
+        ordered.sort_unstable();
+        ordered
+    }
+
     fn streaming_command_ready(&self, node_id: &str) -> bool {
-        let inputs = self.context.node_materialized_inputs(node_id);
+        let inputs = self.context.node_available_materialized_inputs(node_id);
         let state = self.stream_states.get(node_id).cloned().unwrap_or_default();
 
         if state.tainted {
@@ -1027,26 +1005,41 @@ impl RunController {
             }
         }
 
+        let fresh_keys = self
+            .context
+            .connected_input_edges(node_id)
+            .into_iter()
+            .filter(|edge| self.plan.scope.contains(&edge.from.node_id))
+            .map(|edge| input_key(edge.to.port, edge.to.slot))
+            .collect::<HashSet<_>>();
+        for key in self.required_materialized_input_keys(node_id) {
+            if !fresh_keys.contains(&key) && !inputs.contains_key(&key) {
+                return false;
+            }
+        }
+
         true
     }
 
     fn take_streaming_command_inputs(&mut self, node_id: &str) -> (Vec<u8>, bool, Vec<String>) {
-        let committed = self.context.node_materialized_inputs(node_id);
-        let has_connected_stdin = self.context.has_connected_stdin(node_id);
-        let mut argv_edges = self
+        let committed = self.context.node_available_materialized_inputs(node_id);
+        let has_connected_stdin = self.has_required_stdin(node_id);
+        let argv_slots = self.required_argv_slots(node_id);
+        let fresh_argv_edges = self
             .context
             .connected_input_edges(node_id)
             .into_iter()
             .filter(|edge| edge.to.port == PortKind::Argv)
-            .collect::<Vec<_>>();
-        argv_edges.sort_by_key(|edge| edge.to.slot.unwrap_or(usize::MAX));
-        let fresh_argv_edges = argv_edges
-            .iter()
-            .map(|edge| {
-                (
-                    edge.id.clone(),
-                    self.plan.scope.contains(&edge.from.node_id),
-                )
+            .filter_map(|edge| {
+                edge.to.slot.map(|slot| {
+                    (
+                        slot,
+                        (
+                            self.plan.scope.contains(&edge.from.node_id),
+                            edge.id.clone(),
+                        ),
+                    )
+                })
             })
             .collect::<HashMap<_, _>>();
 
@@ -1074,15 +1067,15 @@ impl RunController {
         state.buffered_stdin_closed = false;
         state.stdin_seen = false;
 
-        let argv = argv_edges
+        let argv = argv_slots
             .into_iter()
-            .map(|edge| {
-                let key = input_key(PortKind::Argv, edge.to.slot);
-                if fresh_argv_edges.get(&edge.id).copied().unwrap_or(false) {
+            .map(|slot| {
+                let key = input_key(PortKind::Argv, Some(slot));
+                if let Some((true, edge_id)) = fresh_argv_edges.get(&slot).cloned() {
                     parse_argv_value(
                         state
                             .argv_inputs
-                            .remove(&edge.id)
+                            .remove(&edge_id)
                             .unwrap_or_default()
                             .as_slice(),
                     )
@@ -1138,15 +1131,36 @@ impl RunController {
             .ok_or_else(|| format!("Unknown node {node_id}"))?;
         self.begin_node(&node.id);
         self.state_mut(&node.id).replaying_materialized = true;
-        let outputs = self.context.node_materialized_outputs(&node.id);
+        let outputs = self.context.node_available_materialized_outputs(&node.id);
         for port in source_output_ports(&node.kind) {
-            let bytes = outputs.get(output_key(*port)).cloned().unwrap_or_default();
+            let Some(bytes) = outputs.get(output_key(*port)).cloned() else {
+                continue;
+            };
             self.handle_output_chunk(&node.id, *port, bytes).await?;
         }
         // Repush replays the materialized result, including its exit status, so downstream
         // propagation follows the same success/failure rules as a fresh execution.
         self.handle_node_exit(&node.id, self.context.node_last_exit_code(&node.id))
             .await
+    }
+
+    async fn start_ready_node(&mut self, node_id: String) -> Result<(), String> {
+        if self
+            .stream_states
+            .get(&node_id)
+            .map(|state| state.running)
+            .unwrap_or(false)
+        {
+            return Ok(());
+        }
+        if !self.context.should_execute_node_in_scope(&node_id) {
+            return Ok(());
+        }
+        if self.context.node_has_replayable_outputs(&node_id) {
+            self.start_materialized_seed(node_id).await
+        } else {
+            self.start_node_execute(node_id).await
+        }
     }
 
     fn begin_node(&mut self, node_id: &str) {
@@ -1172,9 +1186,9 @@ impl RunController {
 
     async fn run_display_root(&mut self, node: Node) -> Result<(), String> {
         self.begin_node(&node.id);
-        let stdin = if self.context.has_connected_stdin(&node.id) {
+        let stdin = if self.has_required_stdin(&node.id) {
             self.context
-                .node_materialized_inputs(&node.id)
+                .node_available_materialized_inputs(&node.id)
                 .remove("stdin")
                 .unwrap_or_default()
         } else {
@@ -1660,7 +1674,7 @@ impl RunController {
                             state.tainted = true;
                         }
                         if completed && self.streaming_command_ready(&target.id) {
-                            self.start_node_execute(target.id.clone()).await?;
+                            self.start_ready_node(target.id.clone()).await?;
                         }
                     }
                     PortKind::Stdin => {
@@ -1686,7 +1700,7 @@ impl RunController {
                                 let _ = writer.send(StdinMessage::Close);
                             }
                         } else if self.streaming_command_ready(&target.id) {
-                            self.start_node_execute(target.id.clone()).await?;
+                            self.start_ready_node(target.id.clone()).await?;
                         }
                     }
                     _ => {}
@@ -1823,8 +1837,8 @@ fn now_ms() -> u64 {
 mod tests {
     use super::*;
     use crate::model::{
-        AutoRunConfig, MatOutEntry, MaterializedReferrer, PortKind as ModelPortKind, Position,
-        ProducedBy, Size, WorkspaceUi,
+        AutoRunConfig, ExecutionAction, ExecutionRequest, MatOutEntry, MaterializedReferrer,
+        PortKind as ModelPortKind, Position, ProducedBy, Size, WorkspaceUi,
     };
     use tokio::time::{timeout, Duration};
 
@@ -1898,6 +1912,226 @@ mod tests {
             tuckspace: Vec::new(),
             ui: WorkspaceUi::default(),
         }
+    }
+
+    fn upstream_closure(workspace: &Workspace, start: &str) -> HashSet<String> {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::from([start.to_string()]);
+        while let Some(node_id) = queue.pop_front() {
+            if !visited.insert(node_id.clone()) {
+                continue;
+            }
+            for edge in workspace.edges.iter().filter(|edge| edge.to.node_id == node_id) {
+                queue.push_back(edge.from.node_id.clone());
+            }
+        }
+        visited
+    }
+
+    fn downstream_closure(workspace: &Workspace, start: &str) -> HashSet<String> {
+        let mut visited = HashSet::new();
+        let mut queue = VecDeque::from([start.to_string()]);
+        while let Some(node_id) = queue.pop_front() {
+            if !visited.insert(node_id.clone()) {
+                continue;
+            }
+            for edge in workspace.edges.iter().filter(|edge| edge.from.node_id == node_id) {
+                queue.push_back(edge.to.node_id.clone());
+            }
+        }
+        visited
+    }
+
+    fn root_ids(workspace: &Workspace, scope: &HashSet<String>) -> Vec<String> {
+        let mut roots = scope
+            .iter()
+            .filter(|node_id| {
+                !workspace
+                    .edges
+                    .iter()
+                    .any(|edge| edge.to.node_id == **node_id && scope.contains(&edge.from.node_id))
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        roots.sort();
+        roots
+    }
+
+    fn connected_input_keys(workspace: &Workspace, node_id: &str) -> HashSet<String> {
+        workspace
+            .edges
+            .iter()
+            .filter(|edge| edge.to.node_id == node_id)
+            .filter_map(|edge| match edge.to.port {
+                PortKind::Stdin => Some("stdin".to_string()),
+                PortKind::Argv => Some(format!("argv-{}", edge.to.slot.unwrap_or(1))),
+                PortKind::Stdout | PortKind::Stderr => None,
+            })
+            .collect()
+    }
+
+    fn connected_output_ports(
+        workspace: &Workspace,
+        scope: &HashSet<String>,
+        node_id: &str,
+    ) -> HashSet<String> {
+        let mut ports = workspace
+            .edges
+            .iter()
+            .filter(|edge| {
+                edge.from.node_id == node_id
+                    && scope.contains(&edge.from.node_id)
+                    && scope.contains(&edge.to.node_id)
+            })
+            .filter_map(|edge| match edge.from.port {
+                PortKind::Stdout => Some("stdout".to_string()),
+                PortKind::Stderr => Some("stderr".to_string()),
+                PortKind::Stdin | PortKind::Argv => None,
+            })
+            .collect::<HashSet<_>>();
+        if ports.is_empty() {
+            let node = workspace
+                .nodes
+                .iter()
+                .find(|node| node.id == node_id)
+                .expect("target node");
+            ports.extend(
+                source_output_ports(&node.kind)
+                    .iter()
+                    .map(|port| output_key(*port).to_string()),
+            );
+        }
+        ports
+    }
+
+    fn prepare_workspace_materialized(
+        workspace: &Workspace,
+        scope: &HashSet<String>,
+        target_node_id: &str,
+        allowed_input_keys: Option<&HashSet<String>>,
+        allowed_output_ports: Option<&HashSet<String>>,
+    ) -> Workspace {
+        let mut next = workspace.clone();
+        next.nodes.retain(|node| scope.contains(&node.id));
+        for node in &mut next.nodes {
+            if node.id == target_node_id {
+                if let Some(keys) = allowed_input_keys {
+                    node.materialized.inputs.retain(|key, _| keys.contains(key));
+                }
+                if let Some(ports) = allowed_output_ports {
+                    node.materialized.outputs.retain(|key, _| ports.contains(key));
+                }
+            }
+        }
+        next.edges
+            .retain(|edge| scope.contains(&edge.from.node_id) && scope.contains(&edge.to.node_id));
+        next
+    }
+
+    fn request_for_action(
+        workspace: &Workspace,
+        node_id: &str,
+        action: ExecutionAction,
+    ) -> ExecutionRequest {
+        let target = workspace
+            .nodes
+            .iter()
+            .find(|node| node.id == node_id)
+            .expect("target node");
+        let mut provided_ids = HashSet::new();
+        let mut allowed_input_keys = None;
+        let mut allowed_output_ports = None;
+        let (scope, seeds, blocked_node_ids) = match action {
+            ExecutionAction::PullInputs => {
+                let scope = upstream_closure(workspace, node_id);
+                let seeds = root_ids(workspace, &scope);
+                (scope, seeds, vec![node_id.to_string()])
+            }
+            ExecutionAction::PullRun => {
+                let scope = upstream_closure(workspace, node_id);
+                let seeds = root_ids(workspace, &scope);
+                (scope, seeds, Vec::new())
+            }
+            ExecutionAction::Rerun => {
+                let keys = connected_input_keys(workspace, node_id);
+                for key in &keys {
+                    if let Some(id) = target.materialized.inputs.get(key) {
+                        provided_ids.insert(id.clone());
+                    }
+                }
+                allowed_input_keys = Some(keys);
+                (
+                    HashSet::from([node_id.to_string()]),
+                    vec![node_id.to_string()],
+                    Vec::new(),
+                )
+            }
+            ExecutionAction::RerunPush => {
+                let keys = connected_input_keys(workspace, node_id);
+                for key in &keys {
+                    if let Some(id) = target.materialized.inputs.get(key) {
+                        provided_ids.insert(id.clone());
+                    }
+                }
+                allowed_input_keys = Some(keys);
+                (
+                    downstream_closure(workspace, node_id),
+                    vec![node_id.to_string()],
+                    Vec::new(),
+                )
+            }
+            ExecutionAction::Repush => {
+                let scope = downstream_closure(workspace, node_id);
+                let ports = connected_output_ports(workspace, &scope, node_id);
+                for port in &ports {
+                    if let Some(id) = target.materialized.outputs.get(port) {
+                        provided_ids.insert(id.clone());
+                    }
+                }
+                allowed_output_ports = Some(ports);
+                (
+                    scope,
+                    vec![node_id.to_string()],
+                    vec![node_id.to_string()],
+                )
+            }
+        };
+        ExecutionRequest {
+            workspace: prepare_workspace_materialized(
+                workspace,
+                &scope,
+                node_id,
+                allowed_input_keys.as_ref(),
+                allowed_output_ports.as_ref(),
+            ),
+            seed_node_ids: seeds,
+            provided_matout_ids: {
+                let mut ids = provided_ids.into_iter().collect::<Vec<_>>();
+                ids.sort();
+                ids
+            },
+            blocked_node_ids,
+        }
+    }
+
+    fn context_for_action(
+        exec_id: &str,
+        workspace: Workspace,
+        store: MaterializedOutputStore,
+        node_id: &str,
+        action: ExecutionAction,
+        broadcaster: broadcast::Sender<ServerEvent>,
+    ) -> Arc<ExecutionContext> {
+        Arc::new(
+            ExecutionContext::new(
+                exec_id.to_string(),
+                request_for_action(&workspace, node_id, action),
+                store,
+                broadcaster,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        )
     }
 
     fn seed_materialized_text(
@@ -1979,33 +2213,34 @@ mod tests {
             source.script = Some("printf 'testing\n'".to_string());
             let mut target = node(NodeKind::Script, "b");
             target.script = Some("printf '%s' \"$1\"".to_string());
-            Arc::new(
-                ExecutionContext::new(
-                    "argv-exec".to_string(),
-                    workspace(
-                        vec![source, target],
-                        vec![edge(
-                            "edge-ab",
-                            "a",
-                            PortKind::Stdout,
-                            "b",
-                            PortKind::Argv,
-                            Some(1),
-                        )],
-                    ),
-                    HashMap::new(),
-                    action,
-                    broadcast::channel(64).0,
-                    CancellationToken::new(),
-                )
-                .expect("context"),
+            context_for_action(
+                "argv-exec",
+                workspace(
+                    vec![source, target],
+                    vec![edge(
+                        "edge-ab",
+                        "a",
+                        PortKind::Stdout,
+                        "b",
+                        PortKind::Argv,
+                        Some(1),
+                    )],
+                ),
+                HashMap::new(),
+                if matches!(action, ExecutionAction::PullRun) {
+                    "b"
+                } else {
+                    "a"
+                },
+                action,
+                broadcast::channel(64).0,
             )
         }
 
         #[tokio::test]
         async fn argv_test_delivery_ordering() {
             let context = argv_context(ExecutionAction::RerunPush);
-            let plan = context.compute_streaming_push_plan("a");
+            let plan = context.validate_request().expect("plan");
             let edge = context.workspace.edges[0].clone();
             let mut controller = RunController::new(context, plan);
             controller.init();
@@ -2058,7 +2293,7 @@ mod tests {
         #[tokio::test]
         async fn argv_test_pull_run() {
             let context = argv_context(ExecutionAction::PullRun);
-            context.clone().run("b".to_string()).await.expect("run");
+            context.clone().run().await.expect("run");
 
             assert_eq!(materialized_text(&context, "a", "stdout"), "testing\n");
             assert_eq!(materialized_text(&context, "b", "argv-1"), "testing\n");
@@ -2070,7 +2305,7 @@ mod tests {
         async fn argv_test_rerun_push() {
             for iteration in 0..50 {
                 let context = argv_context(ExecutionAction::RerunPush);
-                context.clone().run("a".to_string()).await.expect("run");
+                context.clone().run().await.expect("run");
 
                 assert_eq!(
                     materialized_text(&context, "a", "stdout"),
@@ -2110,29 +2345,26 @@ mod tests {
                     value: "fixed".to_string(),
                 },
             ]);
-            let context = Arc::new(
-                ExecutionContext::new(
-                    "exec-configured-args".to_string(),
-                    workspace(
-                        vec![source, target],
-                        vec![edge(
-                            "edge-ab",
-                            "a",
-                            PortKind::Stdout,
-                            "b",
-                            PortKind::Argv,
-                            Some(1),
-                        )],
-                    ),
-                    HashMap::new(),
-                    ExecutionAction::PullRun,
-                    broadcast::channel(64).0,
-                    CancellationToken::new(),
-                )
-                .expect("context"),
+            let context = context_for_action(
+                "exec-configured-args",
+                workspace(
+                    vec![source, target],
+                    vec![edge(
+                        "edge-ab",
+                        "a",
+                        PortKind::Stdout,
+                        "b",
+                        PortKind::Argv,
+                        Some(1),
+                    )],
+                ),
+                HashMap::new(),
+                "b",
+                ExecutionAction::PullRun,
+                broadcast::channel(64).0,
             );
 
-            context.clone().run("b".to_string()).await.expect("run");
+            context.clone().run().await.expect("run");
 
             assert_eq!(materialized_text(&context, "b", "stdout"), "wired|fixed");
         }
@@ -2145,29 +2377,26 @@ mod tests {
             seed_materialized_text(&mut source, &mut store, "stderr", "");
             let mut target = node(NodeKind::Script, "b");
             target.script = Some("printf '%s' \"$1\"".to_string());
-            let context = Arc::new(
-                ExecutionContext::new(
-                    "argv-repush".to_string(),
-                    workspace(
-                        vec![source, target],
-                        vec![edge(
-                            "edge-ab",
-                            "a",
-                            PortKind::Stdout,
-                            "b",
-                            PortKind::Argv,
-                            Some(1),
-                        )],
-                    ),
-                    store,
-                    ExecutionAction::Repush,
-                    broadcast::channel(64).0,
-                    CancellationToken::new(),
-                )
-                .expect("context"),
+            let context = context_for_action(
+                "argv-repush",
+                workspace(
+                    vec![source, target],
+                    vec![edge(
+                        "edge-ab",
+                        "a",
+                        PortKind::Stdout,
+                        "b",
+                        PortKind::Argv,
+                        Some(1),
+                    )],
+                ),
+                store,
+                "a",
+                ExecutionAction::Repush,
+                broadcast::channel(64).0,
             );
 
-            context.clone().run("a".to_string()).await.expect("run");
+            context.clone().run().await.expect("run");
 
             assert_eq!(materialized_text(&context, "b", "argv-1"), "testing\n");
             assert_eq!(materialized_text(&context, "b", "stdout"), "testing");
@@ -2197,37 +2426,9 @@ mod tests {
             seed_materialized_text(node, store, key, value);
         }
 
-        fn seeded_snapshot() -> Snapshot {
-            BTreeMap::from([
-                (
-                    "a".to_string(),
-                    BTreeMap::from([
-                        ("stdout".to_string(), "old-a".to_string()),
-                        ("stderr".to_string(), "old-a-err".to_string()),
-                    ]),
-                ),
-                (
-                    "b".to_string(),
-                    BTreeMap::from([
-                        ("stdin".to_string(), "old-b-in".to_string()),
-                        ("stdout".to_string(), "old-b-out".to_string()),
-                        ("stderr".to_string(), "old-b-err".to_string()),
-                    ]),
-                ),
-                (
-                    "c".to_string(),
-                    BTreeMap::from([
-                        ("stdin".to_string(), "old-c-in".to_string()),
-                        ("stdout".to_string(), "old-c-out".to_string()),
-                        ("stderr".to_string(), "old-c-err".to_string()),
-                    ]),
-                ),
-            ])
-        }
-
         fn build_smoke_context(
             action: ExecutionAction,
-        ) -> (Arc<ExecutionContext>, tempfile::TempDir, Snapshot) {
+        ) -> (Arc<ExecutionContext>, tempfile::TempDir) {
             let tempdir = tempdir().expect("tempdir");
             let mut store = HashMap::new();
             let mut a = smoke_script("a", "printf 'A' >> trace.log; printf 'a'");
@@ -2257,18 +2458,9 @@ mod tests {
                 ],
             );
             ws.cwd = tempdir.path().to_string_lossy().into_owned();
-            let context = Arc::new(
-                ExecutionContext::new(
-                    "smoke-exec".to_string(),
-                    ws,
-                    store,
-                    action,
-                    broadcast::channel(64).0,
-                    CancellationToken::new(),
-                )
-                .expect("context"),
-            );
-            (context, tempdir, seeded_snapshot())
+            let context =
+                context_for_action("smoke-exec", ws, store, "b", action, broadcast::channel(64).0);
+            (context, tempdir)
         }
 
         fn trace_recomputed_nodes(tempdir: &tempfile::TempDir) -> BTreeSet<String> {
@@ -2288,26 +2480,29 @@ mod tests {
         fn final_snapshot(context: &ExecutionContext) -> Snapshot {
             let materialized = context.materialized_values.lock();
             let mut snapshot = BTreeMap::new();
-            for (node_id, ports) in [
-                ("a", ["stdout", "stderr"].as_slice()),
-                ("b", ["stdin", "stdout", "stderr"].as_slice()),
-                ("c", ["stdin", "stdout", "stderr"].as_slice()),
-            ] {
+            for node in &context.workspace.nodes {
+                let mut ports = BTreeSet::new();
+                ports.extend(node.materialized.inputs.keys().cloned());
+                ports.extend(
+                    materialized_output_ports(&node.kind)
+                        .iter()
+                        .map(|port| output_key(*port).to_string()),
+                );
                 let values = ports
-                    .iter()
+                    .into_iter()
                     .map(|port| {
                         let bytes = materialized
-                            .get(node_id)
-                            .and_then(|node_ports| node_ports.get(*port))
+                            .get(&node.id)
+                            .and_then(|node_ports| node_ports.get(&port))
                             .cloned()
                             .unwrap_or_default();
                         (
-                            (*port).to_string(),
+                            port,
                             String::from_utf8(bytes).expect("materialized utf8"),
                         )
                     })
                     .collect();
-                snapshot.insert(node_id.to_string(), values);
+                snapshot.insert(node.id.clone(), values);
             }
             snapshot
         }
@@ -2331,8 +2526,9 @@ mod tests {
             expected_rematerialized: &[&str],
             expected_snapshot: Snapshot,
         ) {
-            let (context, tempdir, seeded) = build_smoke_context(action);
-            context.clone().run("b".to_string()).await.expect("run");
+            let (context, tempdir) = build_smoke_context(action);
+            let seeded = final_snapshot(&context);
+            context.clone().run().await.expect("run");
 
             let recomputed = trace_recomputed_nodes(&tempdir);
             let final_values = final_snapshot(&context);
@@ -2385,14 +2581,6 @@ mod tests {
                             ("stderr".to_string(), "old-b-err".to_string()),
                         ]),
                     ),
-                    (
-                        "c".to_string(),
-                        BTreeMap::from([
-                            ("stdin".to_string(), "old-c-in".to_string()),
-                            ("stdout".to_string(), "old-c-out".to_string()),
-                            ("stderr".to_string(), "old-c-err".to_string()),
-                        ]),
-                    ),
                 ]),
             )
             .await;
@@ -2420,14 +2608,6 @@ mod tests {
                             ("stderr".to_string(), "".to_string()),
                         ]),
                     ),
-                    (
-                        "c".to_string(),
-                        BTreeMap::from([
-                            ("stdin".to_string(), "old-c-in".to_string()),
-                            ("stdout".to_string(), "old-c-out".to_string()),
-                            ("stderr".to_string(), "old-c-err".to_string()),
-                        ]),
-                    ),
                 ]),
             )
             .await;
@@ -2439,31 +2619,14 @@ mod tests {
                 ExecutionAction::Rerun,
                 &["b"],
                 &["b.stdout", "b.stderr"],
-                BTreeMap::from([
-                    (
-                        "a".to_string(),
-                        BTreeMap::from([
-                            ("stdout".to_string(), "old-a".to_string()),
-                            ("stderr".to_string(), "old-a-err".to_string()),
-                        ]),
-                    ),
-                    (
-                        "b".to_string(),
-                        BTreeMap::from([
-                            ("stdin".to_string(), "old-b-in".to_string()),
-                            ("stdout".to_string(), "old-b-in b".to_string()),
-                            ("stderr".to_string(), "".to_string()),
-                        ]),
-                    ),
-                    (
-                        "c".to_string(),
-                        BTreeMap::from([
-                            ("stdin".to_string(), "old-c-in".to_string()),
-                            ("stdout".to_string(), "old-c-out".to_string()),
-                            ("stderr".to_string(), "old-c-err".to_string()),
-                        ]),
-                    ),
-                ]),
+                BTreeMap::from([(
+                    "b".to_string(),
+                    BTreeMap::from([
+                        ("stdin".to_string(), "old-b-in".to_string()),
+                        ("stdout".to_string(), "old-b-in b".to_string()),
+                        ("stderr".to_string(), "".to_string()),
+                    ]),
+                )]),
             )
             .await;
         }
@@ -2475,13 +2638,6 @@ mod tests {
                 &["b", "c"],
                 &["b.stdout", "b.stderr", "c.stdin", "c.stdout", "c.stderr"],
                 BTreeMap::from([
-                    (
-                        "a".to_string(),
-                        BTreeMap::from([
-                            ("stdout".to_string(), "old-a".to_string()),
-                            ("stderr".to_string(), "old-a-err".to_string()),
-                        ]),
-                    ),
                     (
                         "b".to_string(),
                         BTreeMap::from([
@@ -2511,18 +2667,11 @@ mod tests {
                 &["c.stdin", "c.stdout", "c.stderr"],
                 BTreeMap::from([
                     (
-                        "a".to_string(),
-                        BTreeMap::from([
-                            ("stdout".to_string(), "old-a".to_string()),
-                            ("stderr".to_string(), "old-a-err".to_string()),
-                        ]),
-                    ),
-                    (
                         "b".to_string(),
                         BTreeMap::from([
                             ("stdin".to_string(), "old-b-in".to_string()),
                             ("stdout".to_string(), "old-b-out".to_string()),
-                            ("stderr".to_string(), "old-b-err".to_string()),
+                            ("stderr".to_string(), "".to_string()),
                         ]),
                     ),
                     (
@@ -2589,10 +2738,8 @@ mod tests {
         );
 
         let exec_id = manager.run(
-            workspace,
+            request_for_action(&workspace, "target", ExecutionAction::PullInputs),
             HashMap::new(),
-            "target".to_string(),
-            ExecutionAction::PullInputs,
         );
         let mut source_starts = 0;
         timeout(Duration::from_secs(3), async {
@@ -2677,10 +2824,8 @@ mod tests {
         );
 
         let exec_id = manager.run(
-            workspace,
+            request_for_action(&workspace, "target", ExecutionAction::PullRun),
             HashMap::new(),
-            "target".to_string(),
-            ExecutionAction::PullRun,
         );
         let mut source_starts = 0;
         timeout(Duration::from_secs(3), async {
@@ -2749,10 +2894,8 @@ mod tests {
         );
 
         let exec_id = manager.run(
-            workspace,
+            request_for_action(&workspace, "text-1", ExecutionAction::RerunPush),
             store,
-            "text-1".to_string(),
-            ExecutionAction::RerunPush,
         );
         assert_eq!(
             wait_for_finish(&mut rx, &exec_id, "script-1").await,
@@ -2782,10 +2925,8 @@ mod tests {
         );
 
         let exec_id = manager.run(
-            workspace,
+            request_for_action(&workspace, "script-1", ExecutionAction::RerunPush),
             HashMap::new(),
-            "script-1".to_string(),
-            ExecutionAction::RerunPush,
         );
         let mut source_finished_at = None;
         let mut sink_started_at = None;
@@ -2842,33 +2983,26 @@ mod tests {
         let mut sink = node(NodeKind::Script, "script-2");
         sink.script = Some("cat >/dev/null".to_string());
         seed_materialized_text(&mut sink, &mut store, "stdin", "old-input\n");
-        let context = Arc::new(
-            ExecutionContext::new(
-                "exec-test".to_string(),
-                workspace(
-                    vec![source, sink],
-                    vec![edge(
-                        "edge-1",
-                        "script-1",
-                        PortKind::Stdout,
-                        "script-2",
-                        PortKind::Stdin,
-                        None,
-                    )],
-                ),
-                store,
-                ExecutionAction::RerunPush,
-                tx,
-                CancellationToken::new(),
-            )
-            .expect("context"),
+        let context = context_for_action(
+            "exec-test",
+            workspace(
+                vec![source, sink],
+                vec![edge(
+                    "edge-1",
+                    "script-1",
+                    PortKind::Stdout,
+                    "script-2",
+                    PortKind::Stdin,
+                    None,
+                )],
+            ),
+            store,
+            "script-1",
+            ExecutionAction::RerunPush,
+            tx,
         );
 
-        context
-            .clone()
-            .run("script-1".to_string())
-            .await
-            .expect("run");
+        context.clone().run().await.expect("run");
 
         assert_eq!(
             context
@@ -2903,10 +3037,8 @@ mod tests {
         let workspace = workspace(vec![file], vec![]);
 
         let exec_id = manager.run(
-            workspace,
+            request_for_action(&workspace, "file-1", ExecutionAction::Repush),
             store,
-            "file-1".to_string(),
-            ExecutionAction::Repush,
         );
         assert_eq!(wait_for_finish(&mut rx, &exec_id, "file-1").await, Some(0));
     }
@@ -2914,38 +3046,31 @@ mod tests {
     #[tokio::test]
     async fn display_pull_run_materializes_stdout_from_stdin() {
         let (tx, _) = broadcast::channel(64);
-        let context = Arc::new(
-            ExecutionContext::new(
-                "display-pull-run".to_string(),
-                workspace(
-                    {
-                        let mut source = node(NodeKind::Text, "text-1");
-                        source.text = Some("watch me".to_string());
-                        let display = node(NodeKind::Display, "display-1");
-                        vec![source, display]
-                    },
-                    vec![edge(
-                        "edge-1",
-                        "text-1",
-                        PortKind::Stdout,
-                        "display-1",
-                        PortKind::Stdin,
-                        None,
-                    )],
-                ),
-                HashMap::new(),
-                ExecutionAction::PullRun,
-                tx,
-                CancellationToken::new(),
-            )
-            .expect("context"),
+        let context = context_for_action(
+            "display-pull-run",
+            workspace(
+                {
+                    let mut source = node(NodeKind::Text, "text-1");
+                    source.text = Some("watch me".to_string());
+                    let display = node(NodeKind::Display, "display-1");
+                    vec![source, display]
+                },
+                vec![edge(
+                    "edge-1",
+                    "text-1",
+                    PortKind::Stdout,
+                    "display-1",
+                    PortKind::Stdin,
+                    None,
+                )],
+            ),
+            HashMap::new(),
+            "display-1",
+            ExecutionAction::PullRun,
+            tx,
         );
 
-        context
-            .clone()
-            .run("display-1".to_string())
-            .await
-            .expect("run");
+        context.clone().run().await.expect("run");
         assert_eq!(
             context
                 .materialized_values
@@ -2974,55 +3099,52 @@ mod tests {
         let mut e = node(NodeKind::Script, "e");
         e.script = Some("printf '%s E' \"$1\"".to_string());
         seed_materialized_text(&mut e, &mut store, "stdout", "old-e");
-        let context = Arc::new(
-            ExecutionContext::new(
-                "pull-run-fail".to_string(),
-                workspace(
-                    vec![a, b, c, d, e],
-                    vec![
-                        edge(
-                            "edge-a-c",
-                            "a",
-                            PortKind::Stdout,
-                            "c",
-                            PortKind::Argv,
-                            Some(1),
-                        ),
-                        edge(
-                            "edge-b-c",
-                            "b",
-                            PortKind::Stdout,
-                            "c",
-                            PortKind::Argv,
-                            Some(2),
-                        ),
-                        edge(
-                            "edge-c-d",
-                            "c",
-                            PortKind::Stdout,
-                            "d",
-                            PortKind::Argv,
-                            Some(1),
-                        ),
-                        edge(
-                            "edge-b-e",
-                            "b",
-                            PortKind::Stdout,
-                            "e",
-                            PortKind::Argv,
-                            Some(1),
-                        ),
-                    ],
-                ),
-                store,
-                ExecutionAction::PullRun,
-                tx,
-                CancellationToken::new(),
-            )
-            .expect("context"),
+        let context = context_for_action(
+            "pull-run-fail",
+            workspace(
+                vec![a, b, c, d, e],
+                vec![
+                    edge(
+                        "edge-a-c",
+                        "a",
+                        PortKind::Stdout,
+                        "c",
+                        PortKind::Argv,
+                        Some(1),
+                    ),
+                    edge(
+                        "edge-b-c",
+                        "b",
+                        PortKind::Stdout,
+                        "c",
+                        PortKind::Argv,
+                        Some(2),
+                    ),
+                    edge(
+                        "edge-c-d",
+                        "c",
+                        PortKind::Stdout,
+                        "d",
+                        PortKind::Argv,
+                        Some(1),
+                    ),
+                    edge(
+                        "edge-b-e",
+                        "b",
+                        PortKind::Stdout,
+                        "e",
+                        PortKind::Argv,
+                        Some(1),
+                    ),
+                ],
+            ),
+            store,
+            "d",
+            ExecutionAction::PullRun,
+            tx,
         );
 
-        context.clone().run("d".to_string()).await.expect("run");
+        context.clone().run().await.expect("run");
 
         assert_eq!(materialized_text(&context, "a", "stdout"), "A");
         assert_eq!(context.node_last_exit_code("a"), Some(1));
@@ -3030,7 +3152,6 @@ mod tests {
         assert_eq!(context.node_last_exit_code("b"), Some(0));
         assert_eq!(materialized_text(&context, "c", "stdout"), "old-c");
         assert_eq!(materialized_text(&context, "d", "stdout"), "old-d");
-        assert_eq!(materialized_text(&context, "e", "stdout"), "old-e");
     }
 
     #[tokio::test]
@@ -3042,38 +3163,52 @@ mod tests {
         let mut target = node(NodeKind::Script, "target");
         target.script = Some("cat".to_string());
         seed_materialized_text(&mut target, &mut store, "stdin", "old-input\n");
-        let context = Arc::new(
-            ExecutionContext::new(
-                "rerun-materialized-inputs".to_string(),
-                workspace(
-                    vec![source, target],
-                    vec![edge(
-                        "edge-1",
-                        "source",
-                        PortKind::Stdout,
-                        "target",
-                        PortKind::Stdin,
-                        None,
-                    )],
-                ),
-                store,
-                ExecutionAction::Rerun,
-                tx,
-                CancellationToken::new(),
-            )
-            .expect("context"),
+        let context = context_for_action(
+            "rerun-materialized-inputs",
+            workspace(
+                vec![source, target],
+                vec![edge(
+                    "edge-1",
+                    "source",
+                    PortKind::Stdout,
+                    "target",
+                    PortKind::Stdin,
+                    None,
+                )],
+            ),
+            store,
+            "target",
+            ExecutionAction::Rerun,
+            tx,
         );
 
-        context
-            .clone()
-            .run("target".to_string())
-            .await
-            .expect("run");
+        context.clone().run().await.expect("run");
         assert_eq!(
             materialized_text(&context, "target", "stdout"),
             "old-input\n"
         );
         assert_eq!(context.node_last_exit_code("target"), Some(0));
+    }
+
+    #[test]
+    fn request_rejects_missing_provided_matout_ids() {
+        let target = node(NodeKind::Script, "target");
+        let request = ExecutionRequest {
+            workspace: workspace(vec![target], vec![]),
+            seed_node_ids: vec!["target".to_string()],
+            provided_matout_ids: vec!["missing".to_string()],
+            blocked_node_ids: Vec::new(),
+        };
+        let error = ExecutionContext::new(
+            "missing-provided".to_string(),
+            request,
+            HashMap::new(),
+            broadcast::channel(8).0,
+            CancellationToken::new(),
+        )
+        .err()
+        .expect("request should fail");
+        assert!(error.contains("missing materialized output missing"));
     }
 
     #[tokio::test]
@@ -3088,33 +3223,26 @@ mod tests {
         sink.script = Some("cat".to_string());
         seed_materialized_text(&mut sink, &mut store, "stdin", "old-input\n");
         seed_materialized_text(&mut sink, &mut store, "stdout", "old-output\n");
-        let context = Arc::new(
-            ExecutionContext::new(
-                "repush-failed-status".to_string(),
-                workspace(
-                    vec![source, sink],
-                    vec![edge(
-                        "edge-1",
-                        "source",
-                        PortKind::Stdout,
-                        "sink",
-                        PortKind::Stdin,
-                        None,
-                    )],
-                ),
-                store,
-                ExecutionAction::Repush,
-                tx,
-                CancellationToken::new(),
-            )
-            .expect("context"),
+        let context = context_for_action(
+            "repush-failed-status",
+            workspace(
+                vec![source, sink],
+                vec![edge(
+                    "edge-1",
+                    "source",
+                    PortKind::Stdout,
+                    "sink",
+                    PortKind::Stdin,
+                    None,
+                )],
+            ),
+            store,
+            "source",
+            ExecutionAction::Repush,
+            tx,
         );
 
-        context
-            .clone()
-            .run("source".to_string())
-            .await
-            .expect("run");
+        context.clone().run().await.expect("run");
         assert_eq!(
             materialized_text(&context, "source", "stdout"),
             "watch me\n"
@@ -3130,21 +3258,18 @@ mod tests {
     #[tokio::test]
     async fn display_repush_is_rejected_without_outputs() {
         let (tx, _) = broadcast::channel(64);
-        let context = Arc::new(
-            ExecutionContext::new(
-                "display-repush".to_string(),
-                workspace(vec![node(NodeKind::Display, "display-1")], vec![]),
-                HashMap::new(),
-                ExecutionAction::Repush,
-                tx,
-                CancellationToken::new(),
-            )
-            .expect("context"),
+        let context = context_for_action(
+            "display-repush",
+            workspace(vec![node(NodeKind::Display, "display-1")], vec![]),
+            HashMap::new(),
+            "display-1",
+            ExecutionAction::Repush,
+            tx,
         );
 
         let error = context
             .clone()
-            .run("display-1".to_string())
+            .run()
             .await
             .expect_err("repush should fail");
         assert!(
@@ -3175,10 +3300,8 @@ mod tests {
         );
 
         let exec_id = manager.run(
-            workspace,
+            request_for_action(&workspace, "formula-1", ExecutionAction::PullRun),
             HashMap::new(),
-            "formula-1".to_string(),
-            ExecutionAction::PullRun,
         );
         assert_eq!(
             wait_for_finish(&mut rx, &exec_id, "formula-1").await,
@@ -3194,33 +3317,26 @@ mod tests {
         let mut formula_node = node(NodeKind::Formula, "formula-1");
         formula_node.formula = Some("let x = $1 + 2 in x * 3".to_string());
         seed_materialized_text(&mut formula_node, &mut store, "argv-1", "5");
-        let context = Arc::new(
-            ExecutionContext::new(
-                "formula-rerun".to_string(),
-                workspace(
-                    vec![source, formula_node],
-                    vec![edge(
-                        "edge-1",
-                        "text-1",
-                        PortKind::Stdout,
-                        "formula-1",
-                        PortKind::Argv,
-                        Some(1),
-                    )],
-                ),
-                store,
-                ExecutionAction::Rerun,
-                tx,
-                CancellationToken::new(),
-            )
-            .expect("context"),
+        let context = context_for_action(
+            "formula-rerun",
+            workspace(
+                vec![source, formula_node],
+                vec![edge(
+                    "edge-1",
+                    "text-1",
+                    PortKind::Stdout,
+                    "formula-1",
+                    PortKind::Argv,
+                    Some(1),
+                )],
+            ),
+            store,
+            "formula-1",
+            ExecutionAction::Rerun,
+            tx,
         );
 
-        context
-            .clone()
-            .run("formula-1".to_string())
-            .await
-            .expect("run");
+        context.clone().run().await.expect("run");
         assert_eq!(
             context
                 .materialized_values

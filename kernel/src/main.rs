@@ -367,15 +367,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
 async fn handle_client_event(event: ClientEvent, state: AppState) -> Result<(), AppError> {
     match event {
-        ClientEvent::RunNode {
-            workspace,
-            materialized_output_store,
-            node_id,
-            action,
-        } => {
-            state
-                .execution
-                .run(workspace, materialized_output_store, node_id, action);
+        ClientEvent::RunNode { request } => {
+            let materialized_output_store = state.materialized_output_store.load().await?;
+            state.execution.run(request, materialized_output_store);
         }
         ClientEvent::StopExecution { exec_id, node_id } => {
             if let Some(exec_id) = exec_id {
@@ -406,9 +400,12 @@ impl IntoResponse for AppError {
 
 fn summarize_client_event(event: &ClientEvent) -> String {
     match event {
-        ClientEvent::RunNode {
-            node_id, action, ..
-        } => format!("run {:?} {}", action, node_id),
+        ClientEvent::RunNode { request } => format!(
+            "run nodes={} seeds={} blocked={}",
+            request.workspace.nodes.len(),
+            request.seed_node_ids.len(),
+            request.blocked_node_ids.len()
+        ),
         ClientEvent::StopExecution { exec_id, node_id } => {
             format!(
                 "stop exec={} node={}",

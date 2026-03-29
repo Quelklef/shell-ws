@@ -153,10 +153,7 @@ export interface WorkspaceSummary {
 export type ClientEvent =
   | {
       type: "run_node";
-      workspace: Workspace;
-      materialized_output_store: MaterializedOutputStore;
-      node_id: string;
-      action: ExecutionAction;
+      request: ExecutionRequest;
     }
   | {
       type: "stop_execution";
@@ -235,6 +232,13 @@ export type ServerEvent =
 export interface DisplayState {
   bytes: Uint8Array;
   completed: boolean;
+}
+
+export interface ExecutionRequest {
+  workspace: Workspace;
+  seedNodeIds: string[];
+  providedMatoutIds: MatOutId[];
+  blockedNodeIds: string[];
 }
 
 export interface NodeRuntimeState {
