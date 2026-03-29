@@ -57,14 +57,22 @@ function rootNodeIds(scopeNodeIds: Set<string>, edges: WorkspaceEdge[]) {
     .sort();
 }
 
+function inputKeyForEdge(edge: WorkspaceEdge) {
+  if (edge.to.port === "stdin") {
+    return "stdin";
+  }
+  if (edge.to.port === "argv") {
+    return `argv-${edge.to.slot ?? 1}`;
+  }
+  return null;
+}
+
 function connectedInputKeys(edges: WorkspaceEdge[], nodeId: string) {
   const keys = new Set<string>();
   for (const edge of incomingEdges(edges, nodeId)) {
-    if (edge.to.port === "stdin") {
-      keys.add("stdin");
-    }
-    if (edge.to.port === "argv") {
-      keys.add(`argv-${edge.to.slot ?? 1}`);
+    const key = inputKeyForEdge(edge);
+    if (key) {
+      keys.add(key);
     }
   }
   return keys;
@@ -82,15 +90,9 @@ function connectedOutputPorts(edges: WorkspaceEdge[], nodeId: string) {
 
 function prepareNodeMaterialized(
   node: WorkspaceNode,
-  allowedInputKeys: Set<string> | null,
   allowedOutputPorts: Set<MaterializedOutputPort> | null,
 ): WorkspaceNode {
-  const inputs =
-    allowedInputKeys === null
-      ? { ...(node.materialized?.inputs ?? {}) }
-      : Object.fromEntries(
-          Object.entries(node.materialized?.inputs ?? {}).filter(([key]) => allowedInputKeys.has(key)),
-        );
+  const inputs = { ...(node.materialized?.inputs ?? {}) };
   const outputs =
     allowedOutputPorts === null
       ? { ...(node.materialized?.outputs ?? {}) }
@@ -112,8 +114,7 @@ function prepareNodeMaterialized(
 function filterWorkspaceToScope(
   workspace: Workspace,
   scopeNodeIds: Set<string>,
-  targetNodeId: string,
-  allowedInputKeys: Set<string> | null,
+  targetNodeId: string | null,
   allowedOutputPorts: Set<MaterializedOutputPort> | null,
 ): Workspace {
   return {
@@ -123,7 +124,6 @@ function filterWorkspaceToScope(
       .map((node) =>
         prepareNodeMaterialized(
           node,
-          node.id === targetNodeId ? allowedInputKeys : null,
           node.id === targetNodeId ? allowedOutputPorts : null,
         ),
       ),
@@ -156,6 +156,62 @@ function idsForOutputPorts(node: WorkspaceNode, ports: Set<MaterializedOutputPor
   return ids;
 }
 
+function pushRunnableScope(workspace: Workspace, startNodeId: string) {
+  const fullDownstream = Array.from(downstreamClosure(workspace.edges, startNodeId)).sort();
+  const included = new Set<string>([startNodeId]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const candidateId of fullDownstream) {
+      if (included.has(candidateId)) {
+        continue;
+      }
+      const candidate = workspace.nodes.find((node) => node.id === candidateId);
+      if (!candidate) {
+        continue;
+      }
+      const deps = incomingEdges(workspace.edges, candidateId);
+      if (!deps.some((edge) => included.has(edge.from.nodeId))) {
+        continue;
+      }
+      // Push-style requests only keep downstream nodes whose omitted sibling inputs
+      // can be satisfied from cached materialized refs carried in the request.
+      const missingExternalInput = deps.some((edge) => {
+        if (included.has(edge.from.nodeId)) {
+          return false;
+        }
+        const key = inputKeyForEdge(edge);
+        return key ? !candidate.materialized?.inputs?.[key] : false;
+      });
+      if (!missingExternalInput) {
+        included.add(candidateId);
+        changed = true;
+      }
+    }
+  }
+  return included;
+}
+
+function idsForExternalDependencies(workspace: Workspace, scopeNodeIds: Set<string>) {
+  const ids = new Set<MatOutId>();
+  for (const node of workspace.nodes) {
+    if (!scopeNodeIds.has(node.id)) {
+      continue;
+    }
+    for (const edge of incomingEdges(workspace.edges, node.id)) {
+      if (scopeNodeIds.has(edge.from.nodeId)) {
+        continue;
+      }
+      const key = inputKeyForEdge(edge);
+      const id = key ? node.materialized?.inputs?.[key] : null;
+      if (id) {
+        ids.add(id);
+      }
+    }
+  }
+  return ids;
+}
+
 export function compileExecutionRequest(
   workspace: Workspace,
   nodeId: string,
@@ -170,7 +226,6 @@ export function compileExecutionRequest(
   let seedNodeIds: string[];
   let blockedNodeIds: string[] = [];
   const providedMatoutIds = new Set<MatOutId>();
-  let allowedInputKeys: Set<string> | null = null;
   let allowedOutputPorts: Set<MaterializedOutputPort> | null = null;
 
   if (action === "pull_inputs" || action === "pull_run") {
@@ -182,19 +237,17 @@ export function compileExecutionRequest(
   } else if (action === "rerun") {
     scopeNodeIds = new Set([nodeId]);
     seedNodeIds = [nodeId];
-    allowedInputKeys = connectedInputKeys(workspace.edges, nodeId);
-    for (const id of idsForInputKeys(target, allowedInputKeys)) {
+    for (const id of idsForInputKeys(target, connectedInputKeys(workspace.edges, nodeId))) {
       providedMatoutIds.add(id);
     }
   } else if (action === "rerun_push") {
-    scopeNodeIds = downstreamClosure(workspace.edges, nodeId);
+    scopeNodeIds = pushRunnableScope(workspace, nodeId);
     seedNodeIds = [nodeId];
-    allowedInputKeys = connectedInputKeys(workspace.edges, nodeId);
-    for (const id of idsForInputKeys(target, allowedInputKeys)) {
+    for (const id of idsForExternalDependencies(workspace, scopeNodeIds)) {
       providedMatoutIds.add(id);
     }
   } else {
-    scopeNodeIds = downstreamClosure(workspace.edges, nodeId);
+    scopeNodeIds = pushRunnableScope(workspace, nodeId);
     seedNodeIds = [nodeId];
     blockedNodeIds = [nodeId];
     allowedOutputPorts = connectedOutputPorts(
@@ -213,13 +266,15 @@ export function compileExecutionRequest(
     for (const id of idsForOutputPorts(target, allowedOutputPorts)) {
       providedMatoutIds.add(id);
     }
+    for (const id of idsForExternalDependencies(workspace, scopeNodeIds)) {
+      providedMatoutIds.add(id);
+    }
   }
   return {
     workspace: filterWorkspaceToScope(
       workspace,
       scopeNodeIds,
       nodeId,
-      allowedInputKeys,
       allowedOutputPorts,
     ),
     seedNodeIds,

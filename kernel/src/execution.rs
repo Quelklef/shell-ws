@@ -940,11 +940,10 @@ impl RunController {
 
     fn required_materialized_input_keys(&self, node_id: &str) -> HashSet<String> {
         self.context
-            .materialized_nodes
-            .lock()
-            .get(node_id)
-            .map(|materialized| materialized.inputs.keys().cloned().collect())
-            .unwrap_or_default()
+            .node_available_materialized_inputs(node_id)
+            .keys()
+            .cloned()
+            .collect()
     }
 
     fn has_required_stdin(&self, node_id: &str) -> bool {
@@ -1957,16 +1956,20 @@ mod tests {
         roots
     }
 
+    fn edge_input_key(edge: &Edge) -> Option<String> {
+        match edge.to.port {
+            PortKind::Stdin => Some("stdin".to_string()),
+            PortKind::Argv => Some(format!("argv-{}", edge.to.slot.unwrap_or(1))),
+            PortKind::Stdout | PortKind::Stderr => None,
+        }
+    }
+
     fn connected_input_keys(workspace: &Workspace, node_id: &str) -> HashSet<String> {
         workspace
             .edges
             .iter()
             .filter(|edge| edge.to.node_id == node_id)
-            .filter_map(|edge| match edge.to.port {
-                PortKind::Stdin => Some("stdin".to_string()),
-                PortKind::Argv => Some(format!("argv-{}", edge.to.slot.unwrap_or(1))),
-                PortKind::Stdout | PortKind::Stderr => None,
-            })
+            .filter_map(edge_input_key)
             .collect()
     }
 
@@ -2008,16 +2011,12 @@ mod tests {
         workspace: &Workspace,
         scope: &HashSet<String>,
         target_node_id: &str,
-        allowed_input_keys: Option<&HashSet<String>>,
         allowed_output_ports: Option<&HashSet<String>>,
     ) -> Workspace {
         let mut next = workspace.clone();
         next.nodes.retain(|node| scope.contains(&node.id));
         for node in &mut next.nodes {
             if node.id == target_node_id {
-                if let Some(keys) = allowed_input_keys {
-                    node.materialized.inputs.retain(|key, _| keys.contains(key));
-                }
                 if let Some(ports) = allowed_output_ports {
                     node.materialized.outputs.retain(|key, _| ports.contains(key));
                 }
@@ -2026,6 +2025,71 @@ mod tests {
         next.edges
             .retain(|edge| scope.contains(&edge.from.node_id) && scope.contains(&edge.to.node_id));
         next
+    }
+
+    fn push_runnable_scope(workspace: &Workspace, start_node_id: &str) -> HashSet<String> {
+        let mut full_downstream = downstream_closure(workspace, start_node_id)
+            .into_iter()
+            .collect::<Vec<_>>();
+        full_downstream.sort();
+        let mut included = HashSet::from([start_node_id.to_string()]);
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for candidate_id in &full_downstream {
+                if included.contains(candidate_id) {
+                    continue;
+                }
+                let Some(candidate) = workspace.nodes.iter().find(|node| &node.id == candidate_id) else {
+                    continue;
+                };
+                let deps = workspace
+                    .edges
+                    .iter()
+                    .filter(|edge| edge.to.node_id == *candidate_id)
+                    .collect::<Vec<_>>();
+                if !deps.iter().any(|edge| included.contains(&edge.from.node_id)) {
+                    continue;
+                }
+                // Push-style requests keep only downstream nodes whose omitted sibling
+                // inputs can be satisfied by cached materialized refs in the request.
+                let missing_external_input = deps.iter().any(|edge| {
+                    if included.contains(&edge.from.node_id) {
+                        return false;
+                    }
+                    let Some(key) = edge_input_key(edge) else {
+                        return false;
+                    };
+                    !candidate.materialized.inputs.contains_key(&key)
+                });
+                if !missing_external_input {
+                    included.insert(candidate_id.clone());
+                    changed = true;
+                }
+            }
+        }
+        included
+    }
+
+    fn ids_for_external_dependencies(
+        workspace: &Workspace,
+        scope: &HashSet<String>,
+    ) -> HashSet<String> {
+        let mut ids = HashSet::new();
+        for node in workspace.nodes.iter().filter(|node| scope.contains(&node.id)) {
+            for edge in workspace.edges.iter().filter(|edge| edge.to.node_id == node.id) {
+                if scope.contains(&edge.from.node_id) {
+                    continue;
+                }
+                let Some(key) = edge_input_key(edge) else {
+                    continue;
+                };
+                if let Some(id) = node.materialized.inputs.get(&key) {
+                    ids.insert(id.clone());
+                }
+            }
+        }
+        ids
     }
 
     fn request_for_action(
@@ -2039,7 +2103,6 @@ mod tests {
             .find(|node| node.id == node_id)
             .expect("target node");
         let mut provided_ids = HashSet::new();
-        let mut allowed_input_keys = None;
         let mut allowed_output_ports = None;
         let (scope, seeds, blocked_node_ids) = match action {
             ExecutionAction::PullInputs => {
@@ -2059,7 +2122,6 @@ mod tests {
                         provided_ids.insert(id.clone());
                     }
                 }
-                allowed_input_keys = Some(keys);
                 (
                     HashSet::from([node_id.to_string()]),
                     vec![node_id.to_string()],
@@ -2067,27 +2129,23 @@ mod tests {
                 )
             }
             ExecutionAction::RerunPush => {
-                let keys = connected_input_keys(workspace, node_id);
-                for key in &keys {
-                    if let Some(id) = target.materialized.inputs.get(key) {
-                        provided_ids.insert(id.clone());
-                    }
-                }
-                allowed_input_keys = Some(keys);
+                let scope = push_runnable_scope(workspace, node_id);
+                provided_ids.extend(ids_for_external_dependencies(workspace, &scope));
                 (
-                    downstream_closure(workspace, node_id),
+                    scope,
                     vec![node_id.to_string()],
                     Vec::new(),
                 )
             }
             ExecutionAction::Repush => {
-                let scope = downstream_closure(workspace, node_id);
+                let scope = push_runnable_scope(workspace, node_id);
                 let ports = connected_output_ports(workspace, &scope, node_id);
                 for port in &ports {
                     if let Some(id) = target.materialized.outputs.get(port) {
                         provided_ids.insert(id.clone());
                     }
                 }
+                provided_ids.extend(ids_for_external_dependencies(workspace, &scope));
                 allowed_output_ports = Some(ports);
                 (
                     scope,
@@ -2101,7 +2159,6 @@ mod tests {
                 workspace,
                 &scope,
                 node_id,
-                allowed_input_keys.as_ref(),
                 allowed_output_ports.as_ref(),
             ),
             seed_node_ids: seeds,
@@ -3209,6 +3266,90 @@ mod tests {
         .err()
         .expect("request should fail");
         assert!(error.contains("missing materialized output missing"));
+    }
+
+    #[test]
+    fn rerun_push_request_prunes_downstream_nodes_missing_sibling_inputs() {
+        let mut a = node(NodeKind::Text, "a");
+        a.text = Some("a".to_string());
+        let mut b = node(NodeKind::Text, "b");
+        b.text = Some("b".to_string());
+        let mut c = node(NodeKind::Script, "c");
+        c.script = Some("printf '%s %s\\n' \"$1\" \"$2\"".to_string());
+        let workspace = workspace(
+            vec![a, b, c],
+            vec![
+                edge("e1", "a", PortKind::Stdout, "c", PortKind::Argv, Some(1)),
+                edge("e2", "b", PortKind::Stdout, "c", PortKind::Argv, Some(2)),
+            ],
+        );
+
+        let request = request_for_action(&workspace, "b", ExecutionAction::RerunPush);
+        assert_eq!(
+            request
+                .workspace
+                .nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b"]
+        );
+        assert!(request.workspace.edges.is_empty());
+        assert!(request.provided_matout_ids.is_empty());
+    }
+
+    #[test]
+    fn rerun_push_request_keeps_downstream_nodes_with_cached_sibling_inputs() {
+        let mut store = HashMap::new();
+        let mut a = node(NodeKind::Text, "a");
+        a.text = Some("a".to_string());
+        let mut b = node(NodeKind::Text, "b");
+        b.text = Some("b".to_string());
+        let mut c = node(NodeKind::Script, "c");
+        c.script = Some("printf '%s %s\\n' \"$1\" \"$2\"".to_string());
+        seed_materialized_text(&mut c, &mut store, "argv-1", "cached-a");
+        let workspace = workspace(
+            vec![a, b, c],
+            vec![
+                edge("e1", "a", PortKind::Stdout, "c", PortKind::Argv, Some(1)),
+                edge("e2", "b", PortKind::Stdout, "c", PortKind::Argv, Some(2)),
+            ],
+        );
+
+        let request = request_for_action(&workspace, "b", ExecutionAction::RerunPush);
+        assert_eq!(
+            request
+                .workspace
+                .nodes
+                .iter()
+                .map(|node| node.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b", "c"]
+        );
+        assert_eq!(
+            request
+                .workspace
+                .edges
+                .iter()
+                .map(|edge| edge.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["e2"]
+        );
+        assert_eq!(request.provided_matout_ids.len(), 1);
+        assert_eq!(
+            request
+                .workspace
+                .nodes
+                .iter()
+                .find(|node| node.id == "c")
+                .expect("c")
+                .materialized
+                .inputs
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>(),
+            vec!["argv-1".to_string()]
+        );
     }
 
     #[tokio::test]

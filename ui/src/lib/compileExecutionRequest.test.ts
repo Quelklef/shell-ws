@@ -106,4 +106,74 @@ describe("compileExecutionRequest", () => {
     expect(request.workspace.edges.map((item) => item.id)).toEqual(["e1"]);
     expect(request.workspace.nodes[0].materialized?.outputs).toEqual({ stdout: "mat-stdout" });
   });
+
+  it("prunes rerun_push downstream nodes that are missing sibling inputs", () => {
+    const a = node("a", "text");
+    const b = node("b", "text");
+    const c = node("c", "script");
+    const request = compileExecutionRequest(
+      workspace(
+        [a, b, c],
+        [
+          {
+            id: "e1",
+            from: { nodeId: "a", port: "stdout" },
+            to: { nodeId: "c", port: "argv", slot: 1 },
+            buffering: "line_or_1024",
+          },
+          {
+            id: "e2",
+            from: { nodeId: "b", port: "stdout" },
+            to: { nodeId: "c", port: "argv", slot: 2 },
+            buffering: "line_or_1024",
+          },
+        ],
+      ),
+      "b",
+      "rerun_push",
+    );
+
+    expect(request.workspace.nodes.map((item) => item.id)).toEqual(["b"]);
+    expect(request.workspace.edges).toEqual([]);
+    expect(request.providedMatoutIds).toEqual([]);
+  });
+
+  it("keeps rerun_push downstream nodes when cached sibling inputs are available", () => {
+    const a = node("a", "text");
+    const b = node("b", "text");
+    const c = node("c", "script");
+    c.materialized = {
+      inputs: { "argv-1": "mat-a" },
+      outputs: {},
+      lastExitCode: null,
+    };
+    const request = compileExecutionRequest(
+      workspace(
+        [a, b, c],
+        [
+          {
+            id: "e1",
+            from: { nodeId: "a", port: "stdout" },
+            to: { nodeId: "c", port: "argv", slot: 1 },
+            buffering: "line_or_1024",
+          },
+          {
+            id: "e2",
+            from: { nodeId: "b", port: "stdout" },
+            to: { nodeId: "c", port: "argv", slot: 2 },
+            buffering: "line_or_1024",
+          },
+        ],
+      ),
+      "b",
+      "rerun_push",
+    );
+
+    expect(request.workspace.nodes.map((item) => item.id)).toEqual(["b", "c"]);
+    expect(request.workspace.edges.map((item) => item.id)).toEqual(["e2"]);
+    expect(request.providedMatoutIds).toEqual(["mat-a"]);
+    expect(request.workspace.nodes.find((item) => item.id === "c")?.materialized?.inputs).toEqual({
+      "argv-1": "mat-a",
+    });
+  });
 });
