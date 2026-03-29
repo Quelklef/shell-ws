@@ -546,7 +546,9 @@ function toFlowEdge(
   edge: WorkspaceEdge,
   onDelete?: (edgeId: string) => void,
   onCycle?: (edgeId: string) => void,
+  executionPlan: ExecutionPlanState = emptyExecutionPlan(),
 ): FlowEdge {
+  const targetNodeIds = new Set(executionPlan.targetNodeIds);
   return {
     id: edge.id,
     source: edge.from.nodeId,
@@ -556,7 +558,12 @@ function toFlowEdge(
     type: "workspace",
     selectable: true,
     animated: edge.buffering === "unbuffered",
-    data: { buffering: edge.buffering, onDelete, onCycle },
+    data: {
+      buffering: edge.buffering,
+      executionPlan: targetNodeIds.has(edge.from.nodeId) && targetNodeIds.has(edge.to.nodeId),
+      onDelete,
+      onCycle,
+    },
     label: edge.buffering.replaceAll("_", " "),
   };
 }
@@ -1109,6 +1116,30 @@ function WorkspaceCanvas() {
     });
   }, [patchNodesById]);
 
+  const updateEdgeExecutionPlanData = useCallback((nextPlan: ExecutionPlanState) => {
+    const targetNodeIds = new Set(nextPlan.targetNodeIds);
+    setEdges((current) => {
+      let changed = false;
+      const next = current.map((edge) => {
+        const executionPlan = targetNodeIds.has(edge.source) && targetNodeIds.has(edge.target);
+        if (edge.data?.executionPlan === executionPlan) {
+          return edge;
+        }
+        changed = true;
+        return {
+          ...edge,
+          data: {
+            buffering: edge.data?.buffering ?? "unbuffered",
+            executionPlan,
+            onDelete: edge.data?.onDelete,
+            onCycle: edge.data?.onCycle,
+          },
+        };
+      });
+      return changed ? next : current;
+    });
+  }, [setEdges]);
+
   useEffect(() => {
     workspaceMetaRef.current = workspaceMeta;
   }, [workspaceMeta]);
@@ -1148,6 +1179,10 @@ function WorkspaceCanvas() {
   useEffect(() => {
     updateNodeExecutionPlanData(executionPlan);
   }, [executionPlan, updateNodeExecutionPlanData]);
+
+  useEffect(() => {
+    updateEdgeExecutionPlanData(executionPlan);
+  }, [executionPlan, updateEdgeExecutionPlanData]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -2465,6 +2500,7 @@ function WorkspaceCanvas() {
           return {
             ...edge,
             data: {
+              ...edge.data,
               buffering,
               onDelete: deleteEdge,
               onCycle: cycleEdgeBuffering,
@@ -2536,7 +2572,7 @@ function WorkspaceCanvas() {
       ]),
     );
     const loadedEdges = loaded.edges.map((edge) =>
-      toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
+      toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, emptyExecutionPlan()),
     );
     const incomingSummaries = buildIncomingEdgeSummaries(loadedEdges);
     const loadedNodes = loaded.nodes.map((node) =>
@@ -2843,6 +2879,9 @@ function WorkspaceCanvas() {
             type: "workspace",
             data: {
               buffering: "unbuffered",
+              executionPlan:
+                executionPlanRef.current.targetNodeIds.includes(connection.source ?? "")
+                && executionPlanRef.current.targetNodeIds.includes(connection.target ?? ""),
               onDelete: deleteEdge,
               onCycle: cycleEdgeBuffering,
             },
@@ -2980,7 +3019,7 @@ function WorkspaceCanvas() {
       ...runtimeRef.current,
       ...restoredRuntime,
     };
-    const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering));
+    const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current));
     const nextEdges = [...edgesRef.current, ...restoredEdges];
     const nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
     const preservedNodes = nodesRef.current.map((node) => ({ ...node, selected: false }));
@@ -3268,12 +3307,12 @@ function WorkspaceCanvas() {
     };
     const nextIncomingSummaries = buildIncomingEdgeSummaries([
       ...edgesRef.current,
-      ...duplicatedEdges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering)),
+      ...duplicatedEdges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current)),
     ]);
     const nextEdges = [
       ...edgesRef.current.map((edge) => ({ ...edge, selected: false })),
       ...duplicatedEdges.map((edge) => ({
-        ...toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
+        ...toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current),
         selected: true,
       })),
     ];
@@ -3323,6 +3362,7 @@ function WorkspaceCanvas() {
         return {
           ...edge,
           data: {
+            ...edge.data,
             buffering,
             onDelete: deleteEdge,
             onCycle: cycleEdgeBuffering,

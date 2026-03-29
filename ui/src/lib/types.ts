@@ -315,6 +315,7 @@ export interface ShellNodeData extends Record<string, unknown> {
 
 export interface FlowEdgeData extends Record<string, unknown> {
   buffering: BufferingMode;
+  executionPlan?: boolean;
   onDelete?: (edgeId: string) => void;
   onCycle?: (edgeId: string) => void;
 }

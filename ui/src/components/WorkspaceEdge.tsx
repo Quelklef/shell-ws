@@ -34,19 +34,26 @@ export default function WorkspaceEdge({
   });
   const typedData = (data ?? {}) as FlowEdgeData;
   const buffering = String(typedData.buffering ?? "line_or_1024");
-  const edgeStroke = selected ? "color-mix(in srgb, var(--selection) 82%, white 18%)" : "rgba(242, 192, 120, 0.9)";
+  const inExecutionPlan = typedData.executionPlan ?? false;
+  const edgeStroke = selected
+    ? "color-mix(in srgb, var(--selection) 82%, white 18%)"
+    : inExecutionPlan
+      ? "color-mix(in srgb, var(--exec-plan-color) 82%, white 18%)"
+      : "rgba(242, 192, 120, 0.9)";
   const edgeGlow = selected
     ? "drop-shadow(0 0 5px color-mix(in srgb, var(--selection) 36%, transparent))"
-    : "drop-shadow(0 0 4px rgba(242, 192, 120, 0.14))";
+    : inExecutionPlan
+      ? "drop-shadow(0 0 5px color-mix(in srgb, var(--exec-plan-color) 30%, transparent))"
+      : "drop-shadow(0 0 4px rgba(242, 192, 120, 0.14))";
   const edgeStyle = {
     stroke: edgeStroke,
-    strokeWidth: selected ? 4.2 : 3.1,
+    strokeWidth: selected ? 4.2 : inExecutionPlan ? 4 : 3.1,
     filter: edgeGlow,
     ...(style ?? {}),
   };
   const completeEdgeStyle = {
     stroke: edgeStroke,
-    strokeWidth: selected ? 6.6 : 5.2,
+    strokeWidth: selected ? 6.6 : inExecutionPlan ? 6 : 5.2,
     filter: edgeGlow,
     ...(style ?? {}),
   };
