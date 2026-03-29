@@ -243,6 +243,119 @@ function rectsIntersect(
   return a.left <= b.right && a.right >= b.left && a.top <= b.bottom && a.bottom >= b.top;
 }
 
+function SelectionActionsAnchor({
+  canvasRef,
+  nodes,
+  edges,
+  selectedNodes,
+  selectedEdges,
+  children,
+}: {
+  canvasRef: React.RefObject<HTMLElement | null>;
+  nodes: FlowNode[];
+  edges: FlowEdge[];
+  selectedNodes: FlowNode[];
+  selectedEdges: FlowEdge[];
+  children: ReactNode;
+}) {
+  const viewportTransform = useStore((store) => store.transform);
+  const selectionActionsRef = useRef<HTMLDivElement | null>(null);
+  const [selectionActionsSize, setSelectionActionsSize] = useState({ width: 180, height: 240 });
+
+  const selectedEdgeBounds = useMemo(() => {
+    if (selectedEdges.length === 0) {
+      return null;
+    }
+    const [viewportX, viewportY, zoom] = viewportTransform;
+    const anchors = selectedEdges.flatMap((edge) => {
+      const sourceNode = nodes.find((node) => node.id === edge.source);
+      const targetNode = nodes.find((node) => node.id === edge.target);
+      if (!sourceNode || !targetNode) {
+        return [];
+      }
+      const sourceHandle = parseHandleId(edge.sourceHandle as string | null | undefined);
+      const targetHandle = parseHandleId(edge.targetHandle as string | null | undefined);
+      const sourceWidth = sourceNode.measured?.width ?? sourceNode.width ?? sourceNode.data.model.size.width;
+      return [
+        {
+          top: (sourceNode.position.y + portTopForEdgeHandle(sourceNode, sourceHandle, edges) - HANDLE_SIZE / 2) * zoom + viewportY,
+          right: (sourceNode.position.x + sourceWidth) * zoom + viewportX,
+        },
+        {
+          top: (targetNode.position.y + portTopForEdgeHandle(targetNode, targetHandle, edges) - HANDLE_SIZE / 2) * zoom + viewportY,
+          right: targetNode.position.x * zoom + viewportX,
+        },
+      ];
+    });
+    if (anchors.length === 0) {
+      return null;
+    }
+    const rightmost = anchors.reduce((best, anchor) =>
+      anchor.right > best.right || (anchor.right === best.right && anchor.top < best.top) ? anchor : best,
+    );
+    return {
+      top: rightmost.top,
+      right: rightmost.right,
+    };
+  }, [edges, nodes, selectedEdges, viewportTransform]);
+
+  useLayoutEffect(() => {
+    const element = selectionActionsRef.current;
+    if (!element) {
+      return;
+    }
+    const updateSize = () => {
+      const next = { width: element.offsetWidth, height: element.offsetHeight };
+      setSelectionActionsSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next,
+      );
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [selectedNodes.length, selectedEdges.length]);
+
+  const selectionActionsStyle = useMemo(() => {
+    if (selectedNodes.length === 0 && selectedEdges.length === 0) {
+      return null;
+    }
+    const canvas = canvasRef.current;
+    const margin = 16;
+    if (!canvas) {
+      return { top: margin, right: margin } as const;
+    }
+    let anchorLeft = margin;
+    let anchorTop = margin;
+    if (selectedNodes.length > 0) {
+      const [viewportX, viewportY, zoom] = viewportTransform;
+      const minY = Math.min(...selectedNodes.map((node) => node.position.y));
+      const maxX = Math.max(...selectedNodes.map((node) => node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width)));
+      anchorLeft = maxX * zoom + viewportX + 12;
+      anchorTop = minY * zoom + viewportY;
+    } else if (selectedEdgeBounds) {
+      anchorLeft = selectedEdgeBounds.right + 12;
+      anchorTop = selectedEdgeBounds.top;
+    }
+    const maxLeft = Math.max(margin, canvas.clientWidth - selectionActionsSize.width - margin);
+    const maxTop = Math.max(margin, canvas.clientHeight - selectionActionsSize.height - margin);
+    return {
+      left: Math.min(Math.max(margin, anchorLeft), maxLeft),
+      top: Math.min(Math.max(margin, anchorTop), maxTop),
+    } as const;
+  }, [canvasRef, selectedEdgeBounds, selectedEdges.length, selectedNodes, selectionActionsSize.height, selectionActionsSize.width, viewportTransform]);
+
+  if (!selectionActionsStyle) {
+    return null;
+  }
+
+  return (
+    <div ref={selectionActionsRef} className="selection-actions" style={selectionActionsStyle}>
+      {children}
+    </div>
+  );
+}
+
 function syncNodeData(
   current: FlowNode[],
   runtime: Record<string, NodeRuntimeState>,
@@ -698,7 +811,7 @@ function WorkspaceCanvas() {
   const flow = useReactFlow<FlowNode, FlowEdge>();
   const userSelectionRect = useStore((store) => store.userSelectionRect);
   const userSelectionActive = useStore((store) => store.userSelectionActive);
-  const viewportTransform = useStore((store) => store.transform);
+  const zoom = useStore((store) => store.transform[2]);
 
   const [nodes, setNodes] = useNodesState<FlowNode>([]);
   const [edges, setEdges] = useEdgesState<FlowEdge>([]);
@@ -788,11 +901,12 @@ function WorkspaceCanvas() {
   }, [tuckspace]);
 
   useEffect(() => {
+    const viewport = flow.getViewport();
     const previewIds = userSelectionActive && userSelectionRect
       ? new Set(
           flow
             .getIntersectingNodes(
-              selectionRectToFlowRect(userSelectionRect, viewportTransform),
+              selectionRectToFlowRect(userSelectionRect, [viewport.x, viewport.y, viewport.zoom]),
               true,
               nodesRef.current,
             )
@@ -817,7 +931,7 @@ function WorkspaceCanvas() {
       });
       return changed ? next : current;
     });
-  }, [flow, setNodes, userSelectionActive, userSelectionRect, viewportTransform]);
+  }, [flow, setNodes, userSelectionActive, userSelectionRect]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -2471,42 +2585,6 @@ function WorkspaceCanvas() {
     })),
     [selectedNodes],
   );
-  const selectedEdgeBounds = useMemo(() => {
-    if (selectedEdges.length === 0) {
-      return null;
-    }
-    const [viewportX, viewportY, zoom] = viewportTransform;
-    const anchors = selectedEdges.flatMap((edge) => {
-      const sourceNode = nodes.find((node) => node.id === edge.source);
-      const targetNode = nodes.find((node) => node.id === edge.target);
-      if (!sourceNode || !targetNode) {
-        return [];
-      }
-      const sourceHandle = parseHandleId(edge.sourceHandle as string | null | undefined);
-      const targetHandle = parseHandleId(edge.targetHandle as string | null | undefined);
-      const sourceWidth = sourceNode.measured?.width ?? sourceNode.width ?? sourceNode.data.model.size.width;
-      return [
-        {
-          top: (sourceNode.position.y + portTopForEdgeHandle(sourceNode, sourceHandle, edges) - HANDLE_SIZE / 2) * zoom + viewportY,
-          right: (sourceNode.position.x + sourceWidth) * zoom + viewportX,
-        },
-        {
-          top: (targetNode.position.y + portTopForEdgeHandle(targetNode, targetHandle, edges) - HANDLE_SIZE / 2) * zoom + viewportY,
-          right: targetNode.position.x * zoom + viewportX,
-        },
-      ];
-    });
-    if (anchors.length === 0) {
-      return null;
-    }
-    const rightmost = anchors.reduce((best, anchor) =>
-      anchor.right > best.right || (anchor.right === best.right && anchor.top < best.top) ? anchor : best,
-    );
-    return {
-      top: rightmost.top,
-      right: rightmost.right,
-    };
-  }, [edges, nodes, selectedEdges, viewportTransform]);
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
     [edges, selectedNodeIds],
@@ -2521,25 +2599,6 @@ function WorkspaceCanvas() {
     () => tuckspace.filter((item) => isTuckspaceShell(item) && item.userNamed),
     [tuckspace],
   );
-  const selectionActionsRef = useRef<HTMLDivElement | null>(null);
-  const [selectionActionsSize, setSelectionActionsSize] = useState({ width: 180, height: 240 });
-
-  useLayoutEffect(() => {
-    const element = selectionActionsRef.current;
-    if (!element) {
-      return;
-    }
-    const updateSize = () => {
-      const next = { width: element.offsetWidth, height: element.offsetHeight };
-      setSelectionActionsSize((current) =>
-        current.width === next.width && current.height === next.height ? current : next,
-      );
-    };
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [selectedNodes.length, selectedEdges.length]);
 
   const canToggleSelectedPreviewTabs = useMemo(
     () => ({
@@ -2551,35 +2610,6 @@ function WorkspaceCanvas() {
     }),
     [selectedPreviewNodes],
   );
-
-  const selectionActionsStyle = useMemo(() => {
-    if (selectedNodes.length === 0 && selectedEdges.length === 0) {
-      return null;
-    }
-    const canvas = canvasRef.current;
-    const margin = 16;
-    if (!canvas) {
-      return { top: margin, right: margin } as const;
-    }
-    let anchorLeft = margin;
-    let anchorTop = margin;
-    if (selectedNodes.length > 0) {
-      const [viewportX, viewportY, zoom] = viewportTransform;
-      const minY = Math.min(...selectedNodes.map((node) => node.position.y));
-      const maxX = Math.max(...selectedNodes.map((node) => node.position.x + (node.measured?.width ?? node.width ?? node.data.model.size.width)));
-      anchorLeft = maxX * zoom + viewportX + 12;
-      anchorTop = minY * zoom + viewportY;
-    } else if (selectedEdgeBounds) {
-      anchorLeft = selectedEdgeBounds.right + 12;
-      anchorTop = selectedEdgeBounds.top;
-    }
-    const maxLeft = Math.max(margin, canvas.clientWidth - selectionActionsSize.width - margin);
-    const maxTop = Math.max(margin, canvas.clientHeight - selectionActionsSize.height - margin);
-    return {
-      left: Math.min(Math.max(margin, anchorLeft), maxLeft),
-      top: Math.min(Math.max(margin, anchorTop), maxTop),
-    } as const;
-  }, [selectedEdgeBounds, selectedEdges.length, selectedNodes, selectionActionsSize.height, selectionActionsSize.width, viewportTransform]);
 
   const deleteTuckShell = useCallback((tuckId: string) => {
     const nextTuckspace = tuckspaceRef.current.filter((item) => item.id !== tuckId);
@@ -3127,8 +3157,7 @@ function WorkspaceCanvas() {
       >
         <ReactFlow<FlowNode, FlowEdge>
           style={{
-            ["--selection-border-width" as string]: `${1 / Math.max(viewportTransform[2], 0.01)}px`,
-            ["--canvas-zoom" as string]: `${viewportTransform[2]}`,
+            ["--canvas-zoom" as string]: `${zoom}`,
           }}
           defaultViewport={{
             x: workspaceMeta.ui.viewportX,
@@ -3184,8 +3213,13 @@ function WorkspaceCanvas() {
           </Panel>
           <Background gap={28} size={1} color="rgba(250, 244, 233, 0.08)" />
         </ReactFlow>
-        {selectionActionsStyle && (
-          <div ref={selectionActionsRef} className="selection-actions" style={selectionActionsStyle}>
+        <SelectionActionsAnchor
+          canvasRef={canvasRef}
+          nodes={nodes}
+          edges={edges}
+          selectedNodes={selectedNodes}
+          selectedEdges={selectedEdges}
+        >
             <button type="button" onClick={duplicateSelected} disabled={selectedNodes.length === 0}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
@@ -3304,8 +3338,7 @@ function WorkspaceCanvas() {
               </span>
               <span>delete</span>
             </button>
-          </div>
-        )}
+        </SelectionActionsAnchor>
         {toast && <div className="toast">{toast}</div>}
       </main>
 
