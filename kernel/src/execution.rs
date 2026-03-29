@@ -697,6 +697,8 @@ impl RunController {
 
     async fn run(mut self) -> Result<(), String> {
         self.init();
+        // Starting every in-scope root naturally covers disconnected request fragments
+        // without needing any explicit connected-component planning step.
         for root in self.context.roots_in_scope(&self.plan.scope) {
             self.start_root(root).await?;
         }
@@ -3321,6 +3323,82 @@ mod tests {
         )
         .expect("context");
         assert_eq!(replay.node_last_exit_code("source"), Some(7));
+    }
+
+    #[test]
+    fn request_accepts_disconnected_scope() {
+        let request = ExecutionRequest {
+            workspace: workspace(
+                vec![node(NodeKind::Text, "a"), node(NodeKind::Text, "b")],
+                vec![],
+            ),
+            provided_matout_ids: Vec::new(),
+            blocked_node_ids: Vec::new(),
+        };
+        let context = ExecutionContext::new(
+            "disconnected-scope".to_string(),
+            request,
+            HashMap::new(),
+            broadcast::channel(8).0,
+            CancellationToken::new(),
+        )
+        .expect("context");
+
+        let plan = context.validate_request().expect("plan");
+        assert_eq!(plan.scope, HashSet::from(["a".to_string(), "b".to_string()]));
+    }
+
+    #[tokio::test]
+    async fn request_runs_disconnected_components_from_all_roots() {
+        let (tx, _) = broadcast::channel(64);
+        let mut left_root = node(NodeKind::Text, "left-root");
+        left_root.text = Some("left\n".to_string());
+        let mut left_sink = node(NodeKind::Script, "left-sink");
+        left_sink.script = Some("cat".to_string());
+        let mut right_root = node(NodeKind::Text, "right-root");
+        right_root.text = Some("right\n".to_string());
+        let mut right_sink = node(NodeKind::Script, "right-sink");
+        right_sink.script = Some("cat".to_string());
+        let request = ExecutionRequest {
+            workspace: workspace(
+                vec![left_root, left_sink, right_root, right_sink],
+                vec![
+                    edge(
+                        "edge-left",
+                        "left-root",
+                        PortKind::Stdout,
+                        "left-sink",
+                        PortKind::Stdin,
+                        None,
+                    ),
+                    edge(
+                        "edge-right",
+                        "right-root",
+                        PortKind::Stdout,
+                        "right-sink",
+                        PortKind::Stdin,
+                        None,
+                    ),
+                ],
+            ),
+            provided_matout_ids: Vec::new(),
+            blocked_node_ids: Vec::new(),
+        };
+        let context = Arc::new(
+            ExecutionContext::new(
+                "disconnected-roots".to_string(),
+                request,
+                HashMap::new(),
+                tx,
+                CancellationToken::new(),
+            )
+            .expect("context"),
+        );
+
+        context.clone().run().await.expect("run");
+
+        assert_eq!(materialized_text(&context, "left-sink", "stdout"), "left\n");
+        assert_eq!(materialized_text(&context, "right-sink", "stdout"), "right\n");
     }
 
     #[test]
