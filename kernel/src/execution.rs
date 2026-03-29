@@ -313,13 +313,19 @@ impl ExecutionContext {
             }
         }
 
+        let replayable_exit_nodes = workspace
+            .nodes
+            .iter()
+            .filter(|node| has_available_output(node, &provided_ids))
+            .map(|node| (node.id.clone(), node.materialized.last_exit_code))
+            .collect();
         let materialized_values = workspace
             .nodes
             .iter()
             .map(|node| {
                 (
                     node.id.clone(),
-                    materialized_value_map(node, &materialized_output_store),
+                    materialized_value_map(node, &materialized_output_store, &provided_ids),
                 )
             })
             .collect();
@@ -327,11 +333,6 @@ impl ExecutionContext {
             .nodes
             .iter()
             .map(|node| (node.id.clone(), node.materialized.clone()))
-            .collect();
-        let last_exit_codes = workspace
-            .nodes
-            .iter()
-            .map(|node| (node.id.clone(), node.materialized.last_exit_code))
             .collect();
 
         Ok(Self {
@@ -347,7 +348,7 @@ impl ExecutionContext {
             materialized_nodes: Arc::new(Mutex::new(materialized_nodes)),
             materialized_output_store: Arc::new(Mutex::new(materialized_output_store)),
             available_matout_ids: provided_ids,
-            last_exit_codes: Arc::new(Mutex::new(last_exit_codes)),
+            last_exit_codes: Arc::new(Mutex::new(replayable_exit_nodes)),
             execution_scope: Arc::new(Mutex::new(HashSet::new())),
             blocked_nodes: Arc::new(Mutex::new(HashSet::new())),
         })
@@ -1810,19 +1811,31 @@ enum StdinMessage {
 fn materialized_value_map(
     node: &Node,
     store: &MaterializedOutputStore,
+    available_ids: &HashSet<String>,
 ) -> HashMap<String, Vec<u8>> {
     let mut values: HashMap<String, Vec<u8>> = HashMap::new();
     for (key, id) in &node.materialized.inputs {
-        if let Some(entry) = store.get(id) {
-            values.insert(key.clone(), decode_entry_bytes(entry));
+        if available_ids.contains(id) {
+            if let Some(entry) = store.get(id) {
+                values.insert(key.clone(), decode_entry_bytes(entry));
+            }
         }
     }
     for (key, id) in &node.materialized.outputs {
-        if let Some(entry) = store.get(id) {
-            values.insert(key.clone(), decode_entry_bytes(entry));
+        if available_ids.contains(id) {
+            if let Some(entry) = store.get(id) {
+                values.insert(key.clone(), decode_entry_bytes(entry));
+            }
         }
     }
     values
+}
+
+fn has_available_output(node: &Node, available_ids: &HashSet<String>) -> bool {
+    node.materialized
+        .outputs
+        .values()
+        .any(|id| available_ids.contains(id))
 }
 
 fn now_ms() -> u64 {
@@ -2226,13 +2239,26 @@ mod tests {
     }
 
     fn materialized_text(context: &ExecutionContext, node_id: &str, key: &str) -> String {
-        let bytes = context
-            .materialized_values
+        let node = context
+            .materialized_nodes
             .lock()
             .get(node_id)
-            .and_then(|values| values.get(key))
             .cloned()
             .unwrap_or_default();
+        let store = context.materialized_output_store.lock();
+        let bytes = if key == "stdout" || key == "stderr" {
+            node.outputs
+                .get(key)
+                .and_then(|id| store.get(id))
+                .map(decode_entry_bytes)
+                .unwrap_or_default()
+        } else {
+            node.inputs
+                .get(key)
+                .and_then(|id| store.get(id))
+                .map(decode_entry_bytes)
+                .unwrap_or_default()
+        };
         String::from_utf8(bytes).expect("materialized utf8")
     }
 
@@ -2535,7 +2561,8 @@ mod tests {
         }
 
         fn final_snapshot(context: &ExecutionContext) -> Snapshot {
-            let materialized = context.materialized_values.lock();
+            let materialized_nodes = context.materialized_nodes.lock();
+            let store = context.materialized_output_store.lock();
             let mut snapshot = BTreeMap::new();
             for node in &context.workspace.nodes {
                 let mut ports = BTreeSet::new();
@@ -2548,10 +2575,24 @@ mod tests {
                 let values = ports
                     .into_iter()
                     .map(|port| {
-                        let bytes = materialized
+                        let bytes = materialized_nodes
                             .get(&node.id)
-                            .and_then(|node_ports| node_ports.get(&port))
                             .cloned()
+                            .unwrap_or_default()
+                            .inputs
+                            .get(&port)
+                            .and_then(|id| store.get(id))
+                            .map(decode_entry_bytes)
+                            .or_else(|| {
+                                materialized_nodes
+                                    .get(&node.id)
+                                    .cloned()
+                                    .unwrap_or_default()
+                                    .outputs
+                                    .get(&port)
+                                    .and_then(|id| store.get(id))
+                                    .map(decode_entry_bytes)
+                            })
                             .unwrap_or_default();
                         (
                             port,
@@ -3061,25 +3102,9 @@ mod tests {
 
         context.clone().run().await.expect("run");
 
-        assert_eq!(
-            context
-                .materialized_values
-                .lock()
-                .get("script-1")
-                .and_then(|ports| ports.get("stdout"))
-                .cloned(),
-            Some(b"fresh\n".to_vec())
-        );
+        assert_eq!(materialized_text(&context, "script-1", "stdout"), "fresh\n");
         assert_eq!(context.node_last_exit_code("script-1"), Some(1));
-        assert_eq!(
-            context
-                .materialized_values
-                .lock()
-                .get("script-2")
-                .and_then(|ports| ports.get("stdin"))
-                .cloned(),
-            Some(b"old-input\n".to_vec())
-        );
+        assert_eq!(materialized_text(&context, "script-2", "stdin"), "old-input\n");
     }
 
     #[tokio::test]
@@ -3266,6 +3291,101 @@ mod tests {
         .err()
         .expect("request should fail");
         assert!(error.contains("missing materialized output missing"));
+    }
+
+    #[test]
+    fn context_only_preloads_provided_materialized_bytes() {
+        let mut store = HashMap::new();
+        let mut source = node(NodeKind::Text, "source");
+        source.text = Some("source".to_string());
+        let mut sink = node(NodeKind::Script, "sink");
+        sink.script = Some("cat".to_string());
+        seed_materialized_text(&mut source, &mut store, "stdout", "old-source\n");
+        seed_materialized_text(&mut sink, &mut store, "stdin", "old-sink\n");
+        let request = ExecutionRequest {
+            workspace: workspace(
+                vec![source, sink],
+                vec![edge(
+                    "edge-1",
+                    "source",
+                    PortKind::Stdout,
+                    "sink",
+                    PortKind::Stdin,
+                    None,
+                )],
+            ),
+            seed_node_ids: vec!["source".to_string()],
+            provided_matout_ids: Vec::new(),
+            blocked_node_ids: Vec::new(),
+        };
+        let context = ExecutionContext::new(
+            "no-preload".to_string(),
+            request,
+            store,
+            broadcast::channel(8).0,
+            CancellationToken::new(),
+        )
+        .expect("context");
+
+        assert!(
+            context
+                .materialized_values
+                .lock()
+                .get("source")
+                .is_none_or(HashMap::is_empty)
+        );
+        assert!(
+            context
+                .materialized_values
+                .lock()
+                .get("sink")
+                .is_none_or(HashMap::is_empty)
+        );
+    }
+
+    #[test]
+    fn context_only_preloads_exit_codes_for_available_outputs() {
+        let mut store = HashMap::new();
+        let mut source = node(NodeKind::Script, "source");
+        source.script = Some("echo hi".to_string());
+        seed_materialized_text(&mut source, &mut store, "stdout", "hi\n");
+        source.materialized.last_exit_code = Some(7);
+        let provided = source
+            .materialized
+            .outputs
+            .get("stdout")
+            .cloned()
+            .expect("stdout id");
+
+        let no_replay = ExecutionContext::new(
+            "no-replay-exit".to_string(),
+            ExecutionRequest {
+                workspace: workspace(vec![source.clone()], vec![]),
+                seed_node_ids: vec!["source".to_string()],
+                provided_matout_ids: Vec::new(),
+                blocked_node_ids: Vec::new(),
+            },
+            store.clone(),
+            broadcast::channel(8).0,
+            CancellationToken::new(),
+        )
+        .expect("context");
+        assert_eq!(no_replay.node_last_exit_code("source"), None);
+
+        let replay = ExecutionContext::new(
+            "replay-exit".to_string(),
+            ExecutionRequest {
+                workspace: workspace(vec![source], vec![]),
+                seed_node_ids: vec!["source".to_string()],
+                provided_matout_ids: vec![provided],
+                blocked_node_ids: Vec::new(),
+            },
+            store,
+            broadcast::channel(8).0,
+            CancellationToken::new(),
+        )
+        .expect("context");
+        assert_eq!(replay.node_last_exit_code("source"), Some(7));
     }
 
     #[test]
