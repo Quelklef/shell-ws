@@ -54,7 +54,14 @@ textarea {
 
 .react-flow {
   --xy-selection-background-color: color-mix(in srgb, var(--selection) 14%, transparent);
-  --xy-selection-border: var(--selection-border-width, 1px) solid color-mix(in srgb, var(--selection) 82%, white 18%);
+}
+
+.react-flow__selection {
+  border: 2px solid color-mix(in srgb, var(--selection) 82%, white 18%);
+}
+
+.react-flow__nodesselection-rect {
+  border: calc(2px / max(var(--canvas-zoom, 1), 0.01)) solid color-mix(in srgb, var(--selection) 82%, white 18%);
 }
 
 .app-shell {
@@ -1646,7 +1653,6 @@ textarea {
   
 .react-flow {
   --xy-selection-background-color: color-mix(in srgb, var(--selection) 14%, transparent);
-  --xy-selection-border: var(--selection-border-width, 1px) solid color-mix(in srgb, var(--selection) 82%, white 18%);
 }
 
   .app-shell {
