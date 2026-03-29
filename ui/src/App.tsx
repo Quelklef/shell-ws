@@ -54,6 +54,7 @@ import type {
   FlowNode,
   MaterializedOutputStore,
   NodeKind,
+  NodeMaterialized,
   NodeRuntimeState,
   NodeUiState,
   PortKind,
@@ -215,6 +216,120 @@ function computePreviewTabs(nodeId: string, kind: NodeKind, edges: FlowEdge[]) {
   return nodePreviewTabsForNode(nodeId, kind, edges, parseHandleId);
 }
 
+type IncomingEdgeSummary = {
+  stdinCount: number;
+  argvSlotCounts: Map<number, number>;
+};
+
+type NodeEdgeDerivedData = {
+  argvSlots?: number[];
+  previewTabs: string[];
+};
+
+function createIncomingEdgeSummary(): IncomingEdgeSummary {
+  return {
+    stdinCount: 0,
+    argvSlotCounts: new Map(),
+  };
+}
+
+function getOrCreateIncomingEdgeSummary(
+  summaries: Map<string, IncomingEdgeSummary>,
+  nodeId: string,
+) {
+  const existing = summaries.get(nodeId);
+  if (existing) {
+    return existing;
+  }
+  const created = createIncomingEdgeSummary();
+  summaries.set(nodeId, created);
+  return created;
+}
+
+function summarizeIncomingEdge(
+  summaries: Map<string, IncomingEdgeSummary>,
+  edge: Pick<FlowEdge, "target" | "targetHandle">,
+  delta: 1 | -1,
+) {
+  const handle = parseHandleId(edge.targetHandle as string | null | undefined);
+  if (handle.port !== "stdin" && handle.port !== "argv") {
+    return;
+  }
+  const summary = getOrCreateIncomingEdgeSummary(summaries, edge.target);
+  if (handle.port === "stdin") {
+    summary.stdinCount = Math.max(0, summary.stdinCount + delta);
+  } else {
+    const slot = handle.slot ?? 1;
+    const nextCount = Math.max(0, (summary.argvSlotCounts.get(slot) ?? 0) + delta);
+    if (nextCount === 0) {
+      summary.argvSlotCounts.delete(slot);
+    } else {
+      summary.argvSlotCounts.set(slot, nextCount);
+    }
+  }
+  if (summary.stdinCount === 0 && summary.argvSlotCounts.size === 0) {
+    summaries.delete(edge.target);
+  }
+}
+
+function buildIncomingEdgeSummaries(edges: FlowEdge[]) {
+  const summaries = new Map<string, IncomingEdgeSummary>();
+  for (const edge of edges) {
+    summarizeIncomingEdge(summaries, edge, 1);
+  }
+  return summaries;
+}
+
+function deriveNodeEdgeData(
+  kind: NodeKind,
+  summary: IncomingEdgeSummary | undefined,
+): NodeEdgeDerivedData {
+  const previewTabs: string[] = [];
+  if (nodeHasInputPort(kind) && (summary?.stdinCount ?? 0) > 0) {
+    previewTabs.push("stdin");
+  }
+  let argvSlots: number[] | undefined;
+  if (nodeHasArgvPort(kind)) {
+    const connectedArgvSlots = Array.from(summary?.argvSlotCounts.keys() ?? []).sort((a, b) => a - b);
+    previewTabs.push(...connectedArgvSlots.map((slot) => `argv-${slot}`));
+    if (connectedArgvSlots.length === 0) {
+      argvSlots = [1];
+    } else {
+      const maxSlot = connectedArgvSlots[connectedArgvSlots.length - 1] ?? 1;
+      argvSlots = Array.from({ length: maxSlot + 1 }, (_, index) => index + 1);
+    }
+  }
+  previewTabs.push(...previewOutputPortsForKind(kind));
+  return { argvSlots, previewTabs };
+}
+
+function reconcileIncomingEdgeSummaryForEdgeChange(
+  summaries: Map<string, IncomingEdgeSummary>,
+  previousEdge: FlowEdge | undefined,
+  nextEdge: FlowEdge | undefined,
+) {
+  const affectedTargetNodeIds = new Set<string>();
+  if (previousEdge) {
+    summarizeIncomingEdge(summaries, previousEdge, -1);
+    affectedTargetNodeIds.add(previousEdge.target);
+  }
+  if (nextEdge) {
+    summarizeIncomingEdge(summaries, nextEdge, 1);
+    affectedTargetNodeIds.add(nextEdge.target);
+  }
+  return affectedTargetNodeIds;
+}
+
+function sameArray<T>(left: T[] | undefined, right: T[] | undefined) {
+  if (left === right) {
+    return true;
+  }
+  if (!left || !right || left.length !== right.length) {
+    return false;
+  }
+  return left.every((value, index) => value === right[index]);
+}
+
 const PORT_STACK_TOP = 48;
 const PORT_SPACING = 30;
 const HANDLE_SIZE = 13;
@@ -356,41 +471,6 @@ function SelectionActionsAnchor({
   );
 }
 
-function syncNodeData(
-  current: FlowNode[],
-  runtime: Record<string, NodeRuntimeState>,
-  generation: Record<string, AiGenerationState>,
-  handlers: ShellNodeActions,
-  edges: FlowEdge[],
-  previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
-) {
-  return current.map((node) => ({
-    ...node,
-    data: {
-      ...node.data,
-      model: node.data.model,
-      runtime: runtime[node.id] ?? { running: false, portActivity: {} },
-      generation: generation[node.id],
-      selectionPreview: false,
-      argvSlots: computeArgvSlots(node.id, node.data.model.kind, edges),
-      previewTabs: computePreviewTabs(node.id, node.data.model.kind, edges),
-      previewControlsLocation,
-      onUpdate: handlers.onUpdate,
-      onRun: handlers.onRun,
-      getActionReason: handlers.getActionReason,
-      onDelete: handlers.onDelete,
-      onPickFile: handlers.onPickFile,
-      onToggleAutorun: handlers.onToggleAutorun,
-      onGenerate: handlers.onGenerate,
-      onClearMaterialized: handlers.onClearMaterialized,
-      onConvertKind: handlers.onConvertKind,
-      onResizeWidth: handlers.onResizeWidth,
-      onResizePaneHeight: handlers.onResizePaneHeight,
-      onResizePaneWidth: handlers.onResizePaneWidth,
-    },
-  }));
-}
-
 function toFlowNode(
   node: WorkspaceNode,
   runtime: Record<string, NodeRuntimeState>,
@@ -399,7 +479,7 @@ function toFlowNode(
     ShellNodeActions,
     "onUpdate" | "onRun" | "getActionReason" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
   >,
-  edges: FlowEdge[],
+  edgeDerived: NodeEdgeDerivedData,
   previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
 ): FlowNode {
   return {
@@ -411,8 +491,8 @@ function toFlowNode(
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
       generation: generation[node.id],
       selectionPreview: false,
-      argvSlots: computeArgvSlots(node.id, node.kind, edges),
-      previewTabs: computePreviewTabs(node.id, node.kind, edges),
+      argvSlots: edgeDerived.argvSlots,
+      previewTabs: edgeDerived.previewTabs,
       previewControlsLocation,
       onUpdate: handlers.onUpdate,
       onRun: handlers.onRun,
@@ -800,6 +880,7 @@ function WorkspaceCanvas() {
   const persistTimerRef = useRef<number | null>(null);
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
+  const incomingEdgeSummaryRef = useRef<Map<string, IncomingEdgeSummary>>(new Map());
   const tuckspaceRef = useRef<TuckedSubgraph[]>([]);
   const workspaceItemRefs = useRef(new Map<string, HTMLElement>());
   const tuckItemRefs = useRef(new Map<string, HTMLElement>());
@@ -815,6 +896,133 @@ function WorkspaceCanvas() {
 
   const [nodes, setNodes] = useNodesState<FlowNode>([]);
   const [edges, setEdges] = useEdgesState<FlowEdge>([]);
+
+  const stableNodeActions = useMemo<ShellNodeActions>(() => ({
+    onUpdate: (...args) => (handlersRef.current ?? handlersFallback).onUpdate(...args),
+    onRun: (...args) => (handlersRef.current ?? handlersFallback).onRun(...args),
+    getActionReason: (...args) => (handlersRef.current ?? handlersFallback).getActionReason(...args),
+    onDelete: (...args) => (handlersRef.current ?? handlersFallback).onDelete(...args),
+    onPickFile: (...args) => (handlersRef.current ?? handlersFallback).onPickFile(...args),
+    onToggleAutorun: (...args) => (handlersRef.current ?? handlersFallback).onToggleAutorun(...args),
+    onGenerate: (...args) => (handlersRef.current ?? handlersFallback).onGenerate(...args),
+    onClearMaterialized: (...args) => (handlersRef.current ?? handlersFallback).onClearMaterialized(...args),
+    onConvertKind: (...args) => (handlersRef.current ?? handlersFallback).onConvertKind(...args),
+    onResizeWidth: (...args) => (handlersRef.current ?? handlersFallback).onResizeWidth(...args),
+    onResizePaneHeight: (...args) => (handlersRef.current ?? handlersFallback).onResizePaneHeight(...args),
+    onResizePaneWidth: (...args) => (handlersRef.current ?? handlersFallback).onResizePaneWidth(...args),
+  }), [handlersFallback]);
+
+  const patchNodesById = useCallback((nodeIds: Iterable<string>, updater: (node: FlowNode) => FlowNode) => {
+    const ids = new Set(nodeIds);
+    if (ids.size === 0) {
+      return;
+    }
+    setNodes((current) => {
+      let changed = false;
+      const next = current.map((node) => {
+        if (!ids.has(node.id)) {
+          return node;
+        }
+        const updated = updater(node);
+        if (updated !== node) {
+          changed = true;
+        }
+        return updated;
+      });
+      return changed ? next : current;
+    });
+  }, [setNodes]);
+
+  const updateNodePreviewControlsLocation = useCallback((nextLocation: Workspace["ui"]["previewControlsLocation"]) => {
+    patchNodesById(nodesRef.current.map((node) => node.id), (node) =>
+      node.data.previewControlsLocation === nextLocation
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              previewControlsLocation: nextLocation,
+            },
+          });
+  }, [patchNodesById]);
+
+  const updateNodeGenerationData = useCallback((nodeId: string, nextGeneration: AiGenerationState | undefined) => {
+    patchNodesById([nodeId], (node) =>
+      node.data.generation === nextGeneration
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              generation: nextGeneration,
+            },
+          });
+  }, [patchNodesById]);
+
+  const updateNodeMaterializedData = useCallback((nodeId: string, nextMaterialized: NodeMaterialized | undefined) => {
+    patchNodesById([nodeId], (node) =>
+      node.data.model.materialized === nextMaterialized
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              model: {
+                ...node.data.model,
+                materialized: nextMaterialized,
+              },
+            },
+          });
+  }, [patchNodesById]);
+
+  const updateNodeRuntimeData = useCallback((nodeId: string, nextRuntime: NodeRuntimeState | undefined) => {
+    patchNodesById([nodeId], (node) => {
+      const runtimeData = nextRuntime ?? { running: false, portActivity: {} };
+      return node.data.runtime === runtimeData
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              runtime: runtimeData,
+            },
+          };
+    });
+  }, [patchNodesById]);
+
+  const updateNodesRuntimeData = useCallback((nodeIds: Iterable<string>, runtimeMap: Record<string, NodeRuntimeState>) => {
+    patchNodesById(nodeIds, (node) => {
+      const runtimeData = runtimeMap[node.id] ?? { running: false, portActivity: {} };
+      return node.data.runtime === runtimeData
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              runtime: runtimeData,
+            },
+          };
+    });
+  }, [patchNodesById]);
+
+  const updateNodeEdgeDerivedData = useCallback((nodeIds: Iterable<string>) => {
+    patchNodesById(nodeIds, (node) => {
+      const derived = deriveNodeEdgeData(
+        node.data.model.kind,
+        incomingEdgeSummaryRef.current.get(node.id),
+      );
+      return sameArray(node.data.argvSlots, derived.argvSlots) && sameArray(node.data.previewTabs, derived.previewTabs)
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              argvSlots: derived.argvSlots,
+              previewTabs: derived.previewTabs,
+            },
+          };
+    });
+  }, [patchNodesById]);
 
   useEffect(() => {
     workspaceMetaRef.current = workspaceMeta;
@@ -1167,16 +1375,9 @@ function WorkspaceCanvas() {
         }
         const next = { ...current, ui: updater(current.ui) };
         workspaceMetaRef.current = next;
-        setNodes((nodesCurrent) =>
-          syncNodeData(
-            nodesCurrent,
-            runtimeRef.current,
-            generationRef.current,
-            handlersRef.current ?? handlersFallback,
-            edgesRef.current,
-            next.ui.previewControlsLocation,
-          ),
-        );
+        if (next.ui.previewControlsLocation !== current.ui.previewControlsLocation) {
+          updateNodePreviewControlsLocation(next.ui.previewControlsLocation);
+        }
         if (persist) {
           const nextWorkspace = buildWorkspace(nodesRef.current, edgesRef.current, next);
           if (nextWorkspace) {
@@ -1186,7 +1387,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [buildWorkspace, handlersFallback, setNodes],
+    [buildWorkspace, updateNodePreviewControlsLocation],
   );
 
   const persistMaterializedOutputStore = useCallback((nextStore: MaterializedOutputStore) => {
@@ -1272,19 +1473,21 @@ function WorkspaceCanvas() {
         if (!state || state.lastExecId !== execId) {
           return current;
         }
-        return {
+        const next = {
           ...current,
           [nodeId]: {
             ...state,
             running: false,
           },
         };
+        updateNodeRuntimeData(nodeId, next[nodeId]);
+        return next;
       });
       runningClearTimersRef.current.delete(nodeId);
     }, remaining);
     runningClearTimersRef.current.set(nodeId, timerId);
     return true;
-  }, [clearRunningTimer]);
+  }, [clearRunningTimer, updateNodeRuntimeData]);
 
   const sendRunRequest = useCallback(
     (nodeId: string, action: ExecutionAction, silenceIfDisconnected = false) => {
@@ -1378,10 +1581,37 @@ function WorkspaceCanvas() {
       getActionReason,
       onDelete: (nodeId) => {
         setNodes((current) => {
-          const next = current.filter((node) => node.id !== nodeId);
           const nextEdges = edgesRef.current.filter(
             (edge) => edge.source !== nodeId && edge.target !== nodeId,
           );
+          const nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
+          const affectedTargetIds = new Set(
+            edgesRef.current
+              .filter((edge) => edge.source === nodeId && edge.target !== nodeId)
+              .map((edge) => edge.target),
+          );
+          incomingEdgeSummaryRef.current = nextIncomingSummaries;
+          const next = current
+            .filter((node) => node.id !== nodeId)
+            .map((node) => {
+              if (!affectedTargetIds.has(node.id)) {
+                return node;
+              }
+              const derived = deriveNodeEdgeData(
+                node.data.model.kind,
+                nextIncomingSummaries.get(node.id),
+              );
+              return sameArray(node.data.argvSlots, derived.argvSlots) && sameArray(node.data.previewTabs, derived.previewTabs)
+                ? node
+                : {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      argvSlots: derived.argvSlots,
+                      previewTabs: derived.previewTabs,
+                    },
+                  };
+            });
           setEdges(nextEdges);
           persistSoon(next, nextEdges);
           return next;
@@ -1452,7 +1682,14 @@ function WorkspaceCanvas() {
         const nextNodes = nodesRef.current.map((candidate) =>
           candidate.id === nodeId
             ? {
-                ...toFlowNode(cleared.node, nextRuntime, generationRef.current, handlersRef.current ?? handlersFallback, edgesRef.current, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+                ...toFlowNode(
+                  cleared.node,
+                  nextRuntime,
+                  generationRef.current,
+                  stableNodeActions,
+                  deriveNodeEdgeData(cleared.node.kind, incomingEdgeSummaryRef.current.get(cleared.node.id)),
+                  workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+                ),
                 selected: candidate.selected,
               }
             : candidate,
@@ -1465,22 +1702,42 @@ function WorkspaceCanvas() {
       onConvertKind: (nodeId, kind) => {
         setNodes((current) => {
           let nextEdges = edgesRef.current;
+          let nextIncomingSummaries = incomingEdgeSummaryRef.current;
+          const affectedTargetIds = new Set<string>();
           if (kind === "display") {
             nextEdges = edgesRef.current.filter((edge) => edge.source !== nodeId);
+            for (const edge of edgesRef.current) {
+              if (edge.source === nodeId && edge.target !== nodeId) {
+                affectedTargetIds.add(edge.target);
+              }
+            }
+            nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
+            incomingEdgeSummaryRef.current = nextIncomingSummaries;
             setEdges(nextEdges);
           }
           const next = current.map((node) =>
-            node.id === nodeId
-              ? {
-                  ...node,
-                  data: {
-                    ...node.data,
-                    model: {
-                      ...node.data.model,
-                      kind,
+            node.id === nodeId || affectedTargetIds.has(node.id)
+              ? (() => {
+                  const nextModel = node.id === nodeId
+                    ? {
+                        ...node.data.model,
+                        kind,
+                      }
+                    : node.data.model;
+                  const derived = deriveNodeEdgeData(
+                    nextModel.kind,
+                    nextIncomingSummaries.get(node.id),
+                  );
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      model: nextModel,
+                      argvSlots: derived.argvSlots,
+                      previewTabs: derived.previewTabs,
                     },
-                  },
-                }
+                  };
+                })()
               : node,
           );
           persistSoon(next, nextEdges);
@@ -1561,10 +1818,12 @@ function WorkspaceCanvas() {
         if (!workspace || !node || node.kind !== "ai_script") {
           return;
         }
+        const loadingGeneration = { loading: true, error: null };
         setGeneration((current) => ({
           ...current,
-          [nodeId]: { loading: true, error: null },
+          [nodeId]: loadingGeneration,
         }));
+        updateNodeGenerationData(nodeId, loadingGeneration);
         try {
           const samples = collectAiScriptSamples(
             nodeId,
@@ -1595,30 +1854,28 @@ function WorkspaceCanvas() {
             persistSoon(next, edgesRef.current);
             return next;
           });
+          const completeGeneration = { loading: false, error: null };
           setGeneration((current) => ({
             ...current,
-            [nodeId]: { loading: false, error: null },
+            [nodeId]: completeGeneration,
           }));
+          updateNodeGenerationData(nodeId, completeGeneration);
         } catch (error) {
+          const failedGeneration = { loading: false, error: String(error) };
           setGeneration((current) => ({
             ...current,
-            [nodeId]: { loading: false, error: String(error) },
+            [nodeId]: failedGeneration,
           }));
+          updateNodeGenerationData(nodeId, failedGeneration);
         }
       },
     }),
-    [getActionReason, persistLayoutSoon, persistSoon, sendRunRequest, setNodes],
+    [getActionReason, persistLayoutSoon, persistSoon, sendRunRequest, setNodes, stableNodeActions, updateNodeGenerationData],
   );
 
   useEffect(() => {
     handlersRef.current = handlers;
   }, [handlers]);
-
-  useEffect(() => {
-    setNodes((current) =>
-      syncNodeData(current, runtime, generationRef.current, handlers, edgesRef.current, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
-    );
-  }, [edges, generation, handlers, runtime, setNodes]);
 
   useEffect(() => {
     const connection = connectKernel(
@@ -1652,7 +1909,7 @@ function WorkspaceCanvas() {
                   nextLive[port] = { bytes: new Uint8Array(), completed: false };
                 }
               }
-              return {
+              const next = {
                 ...current,
                 [event.node_id]: {
                   ...(current[event.node_id] ?? {
@@ -1664,6 +1921,8 @@ function WorkspaceCanvas() {
                   livePreviews: nextLive,
                 },
               };
+              updateNodeRuntimeData(event.node_id, next[event.node_id]);
+              return next;
             }
             case "materialized_state": {
               const nextStore = { ...materializedOutputStoreRef.current, ...event.upserted_entries };
@@ -1672,62 +1931,41 @@ function WorkspaceCanvas() {
               }
               materializedOutputStoreRef.current = nextStore;
               setMaterializedOutputStore(nextStore);
-              let updatedModel: WorkspaceNode | undefined;
-              setNodes((nodesCurrent) =>
-                nodesCurrent.map((candidate) => {
-                  if (candidate.id !== event.node_id) {
-                    return candidate;
-                  }
-                  updatedModel = {
-                    ...candidate.data.model,
-                    materialized: {
-                      ...event.materialized,
-                    },
-                  };
-                  return {
-                    ...candidate,
-                    data: {
-                      ...candidate.data,
-                      model: updatedModel,
-                    },
-                  };
-                }),
-              );
+              const nextMaterialized = { ...event.materialized };
+              updateNodeMaterializedData(event.node_id, nextMaterialized);
+              const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
               const previous = current[event.node_id] ?? {
                 running: false,
                 portActivity: {},
               };
-              return {
+              const next = {
                 ...current,
                 [event.node_id]: {
                   ...previous,
-                  previews: updatedModel ? runtimePreviewsFromNode(updatedModel, nextStore) : previous.previews,
+                  previews: node
+                    ? runtimePreviewsFromNode(
+                        {
+                          ...node,
+                          materialized: nextMaterialized,
+                        },
+                        nextStore,
+                      )
+                    : previous.previews,
                 },
               };
+              updateNodeRuntimeData(event.node_id, next[event.node_id]);
+              return next;
             }
             case "exec_finished": {
               const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
-              setNodes((nodesCurrent) =>
-                nodesCurrent.map((candidate) =>
-                  candidate.id === event.node_id
-                    ? {
-                        ...candidate,
-                        data: {
-                          ...candidate.data,
-                          model: {
-                            ...candidate.data.model,
-                            materialized: {
-                              ...(candidate.data.model.materialized ?? { values: {} }),
-                              lastExitCode: event.materialized
-                                ? event.exit_code
-                                : candidate.data.model.materialized?.lastExitCode ?? null,
-                            },
-                          },
-                        },
-                      }
-                    : candidate,
-                ),
-              );
+              if (node) {
+                updateNodeMaterializedData(event.node_id, {
+                  ...(node.materialized ?? { inputs: {}, outputs: {} }),
+                  lastExitCode: event.materialized
+                    ? event.exit_code
+                    : node.materialized?.lastExitCode ?? null,
+                });
+              }
               const previous = current[event.node_id] ?? {
                 running: false,
                 portActivity: {},
@@ -1744,7 +1982,7 @@ function WorkspaceCanvas() {
                 }
               }
               const keepRunning = scheduleRunningClear(event.node_id, event.exec_id);
-              return {
+              const next = {
                 ...current,
                 [event.node_id]: {
                   ...previous,
@@ -1753,9 +1991,11 @@ function WorkspaceCanvas() {
                   livePreviews: Object.keys(live).length > 0 ? live : undefined,
                 },
               };
+              updateNodeRuntimeData(event.node_id, next[event.node_id]);
+              return next;
             }
-            case "port_activity":
-              return {
+            case "port_activity": {
+              const next = {
                 ...current,
                 [event.node_id]: {
                   ...(current[event.node_id] ?? {
@@ -1768,8 +2008,11 @@ function WorkspaceCanvas() {
                   },
                 },
               };
+              updateNodeRuntimeData(event.node_id, next[event.node_id]);
+              return next;
+            }
             case "node_output": {
-              return {
+              const next = {
                 ...current,
                 [event.node_id]: {
                   ...(current[event.node_id] ?? {
@@ -1779,6 +2022,8 @@ function WorkspaceCanvas() {
                   livePreviews: applyNodeOutputEvent(current[event.node_id]?.livePreviews, event),
                 },
               };
+              updateNodeRuntimeData(event.node_id, next[event.node_id]);
+              return next;
             }
             case "stream_chunk": {
               const targetExists = nodesRef.current.some((node) => node.id === event.to_node_id);
@@ -1812,7 +2057,7 @@ function WorkspaceCanvas() {
                 }
                 delete livePreviews[previewKey];
               }
-              return {
+              const next = {
                 ...current,
                 [event.to_node_id]: {
                   ...previousState,
@@ -1820,12 +2065,15 @@ function WorkspaceCanvas() {
                   livePreviews: Object.keys(livePreviews).length > 0 ? livePreviews : undefined,
                 },
               };
+              updateNodeRuntimeData(event.to_node_id, next[event.to_node_id]);
+              return next;
             }
 
             case "display_update":
               return current;
             case "execution_stopped": {
               const nextState = { ...current };
+              const updatedNodeIds: string[] = [];
               for (const [nodeId, state] of Object.entries(current)) {
                 if (state.lastExecId === event.exec_id) {
                   const keepRunning = scheduleRunningClear(nodeId, event.exec_id);
@@ -1834,8 +2082,10 @@ function WorkspaceCanvas() {
                     running: keepRunning ? true : false,
                     livePreviews: undefined,
                   };
+                  updatedNodeIds.push(nodeId);
                 }
               }
+              updateNodesRuntimeData(updatedNodeIds, nextState);
               return nextState;
             }
             case "error":
@@ -1854,7 +2104,7 @@ function WorkspaceCanvas() {
     socketRef.current = connection;
     connection.onOpen(() => setKernelConnected(true));
     return () => connection.close();
-  }, []);
+  }, [clearRunningTimer, scheduleRunningClear, updateNodeMaterializedData, updateNodeRuntimeData, updateNodesRuntimeData]);
 
   useEffect(() => {
     const desired = new Map(
@@ -1956,9 +2206,22 @@ function WorkspaceCanvas() {
       }
       setEdges((current) => {
         const next = applyEdgeChanges(filteredChanges, current);
-        setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
-        );
+        const currentById = new Map(current.map((edge) => [edge.id, edge]));
+        const nextById = new Map(next.map((edge) => [edge.id, edge]));
+        const affectedTargetNodeIds = new Set<string>();
+        for (const change of filteredChanges) {
+          if (!("id" in change)) {
+            continue;
+          }
+          for (const nodeId of reconcileIncomingEdgeSummaryForEdgeChange(
+            incomingEdgeSummaryRef.current,
+            currentById.get(change.id),
+            nextById.get(change.id),
+          )) {
+            affectedTargetNodeIds.add(nodeId);
+          }
+        }
+        updateNodeEdgeDerivedData(affectedTargetNodeIds);
         const shouldPersist = filteredChanges.length > 0;
         if (shouldPersist) {
           persistSoon(nodesRef.current, next);
@@ -1966,21 +2229,23 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [handlers, persistSoon, setEdges, setNodes],
+    [persistSoon, setEdges, updateNodeEdgeDerivedData],
   );
 
   const deleteEdge = useCallback(
     (edgeId: string) => {
       setEdges((current) => {
+        const deletedEdge = current.find((edge) => edge.id === edgeId);
         const next = current.filter((edge) => edge.id !== edgeId);
-        setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
-        );
+        if (deletedEdge) {
+          summarizeIncomingEdge(incomingEdgeSummaryRef.current, deletedEdge, -1);
+          updateNodeEdgeDerivedData([deletedEdge.target]);
+        }
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [handlers, persistSoon, setEdges, setNodes],
+    [persistSoon, setEdges, updateNodeEdgeDerivedData],
   );
 
   const cycleEdgeBuffering = useCallback(
@@ -2011,14 +2276,11 @@ function WorkspaceCanvas() {
             label: buffering.replaceAll("_", " "),
           };
         });
-        setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
-        );
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [handlers, persistSoon, setEdges, setNodes],
+    [persistSoon, setEdges],
   );
 
   const cancelPendingWorkspaceSaves = useCallback(() => {
@@ -2079,8 +2341,16 @@ function WorkspaceCanvas() {
     const loadedEdges = loaded.edges.map((edge) =>
       toFlowEdge(edge, deleteEdge, cycleEdgeBuffering),
     );
+    const incomingSummaries = buildIncomingEdgeSummaries(loadedEdges);
     const loadedNodes = loaded.nodes.map((node) =>
-      toFlowNode(node, loadedRuntime, {}, handlers, loadedEdges, loaded.ui.previewControlsLocation),
+      toFlowNode(
+        node,
+        loadedRuntime,
+        {},
+        stableNodeActions,
+        deriveNodeEdgeData(node.kind, incomingSummaries.get(node.id)),
+        loaded.ui.previewControlsLocation,
+      ),
     );
 
     for (const handle of autorunRef.current.values()) {
@@ -2097,6 +2367,7 @@ function WorkspaceCanvas() {
     nodesRef.current = loadedNodes;
     edgesRef.current = loadedEdges;
     runtimeRef.current = loadedRuntime;
+    incomingEdgeSummaryRef.current = incomingSummaries;
 
     setWorkspaceSummaries((current) =>
       upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name, createdAt: loaded.createdAt, sortOrder: loaded.sortOrder }),
@@ -2117,7 +2388,7 @@ function WorkspaceCanvas() {
     window.requestAnimationFrame(() => {
       void flow.setViewport({ x: ui.viewportX, y: ui.viewportY, zoom: ui.zoom }, { duration: 0 });
     });
-  }, [cycleEdgeBuffering, deleteEdge, flow, handlers, setEdges, setNodes]);
+  }, [cycleEdgeBuffering, deleteEdge, flow, setEdges, setNodes, stableNodeActions]);
 
   const loadWorkspaceIntoCanvas = useCallback(async (workspaceId: string) => {
     if (workspaceMetaRef.current?.id === workspaceId) {
@@ -2379,14 +2650,16 @@ function WorkspaceCanvas() {
           },
           current,
         ) as FlowEdge[];
-        setNodes((nodesCurrent) =>
-          syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
-        );
+        const nextEdge = next[next.length - 1];
+        if (nextEdge) {
+          summarizeIncomingEdge(incomingEdgeSummaryRef.current, nextEdge, 1);
+          updateNodeEdgeDerivedData([nextEdge.target]);
+        }
         persistSoon(nodesRef.current, next);
         return next;
       });
     },
-    [handlers, persistSoon, setEdges, setNodes],
+    [persistSoon, setEdges, updateNodeEdgeDerivedData],
   );
 
   const addNode = useCallback(
@@ -2416,8 +2689,8 @@ function WorkspaceCanvas() {
           nextNodeModel,
           runtime,
           generationRef.current,
-          handlers,
-          edgesRef.current,
+          stableNodeActions,
+          deriveNodeEdgeData(nextNodeModel.kind, incomingEdgeSummaryRef.current.get(nextNodeModel.id)),
           workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
         );
         const next = [...current, nextNode];
@@ -2425,7 +2698,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [flow, handlers, persistSoon, runtime, setNodes],
+    [flow, persistSoon, runtime, setNodes, stableNodeActions],
   );
 
   const renameTuckedSubgraph = useCallback((tuckId: string, name: string) => {
@@ -2453,6 +2726,7 @@ function WorkspaceCanvas() {
     const nextRuntime = Object.fromEntries(
       Object.entries(runtimeRef.current).filter(([nodeId]) => !selectedIds.has(nodeId)),
     );
+    const nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
     for (const nodeId of selectedIds) {
       clearRunningTimer(nodeId);
     }
@@ -2460,6 +2734,7 @@ function WorkspaceCanvas() {
       Object.entries(current).filter(([nodeId]) => !selectedIds.has(nodeId)),
     ));
     setActiveExecutions((current) => current.filter((entry) => !selectedIds.has(entry.nodeId)));
+    incomingEdgeSummaryRef.current = nextIncomingSummaries;
     setTuckspace(nextTuckspace);
     setRuntime(nextRuntime);
     setEdges(nextEdges);
@@ -2506,18 +2781,27 @@ function WorkspaceCanvas() {
     };
     const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering));
     const nextEdges = [...edgesRef.current, ...restoredEdges];
+    const nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
     const preservedNodes = nodesRef.current.map((node) => ({ ...node, selected: false }));
     const restoredNodes = restoredModels.map((node) => ({
-      ...toFlowNode(node, nextRuntime, generationRef.current, handlers, nextEdges, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+      ...toFlowNode(
+        node,
+        nextRuntime,
+        generationRef.current,
+        stableNodeActions,
+        deriveNodeEdgeData(node.kind, nextIncomingSummaries.get(node.id)),
+        workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+      ),
       selected: true,
     }));
     const nextNodes = [...preservedNodes, ...restoredNodes];
+    incomingEdgeSummaryRef.current = nextIncomingSummaries;
     setTuckspace(nextTuckspace);
     setRuntime(nextRuntime);
     setEdges(nextEdges);
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
-  }, [cycleEdgeBuffering, deleteEdge, flow, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
+  }, [cycleEdgeBuffering, deleteEdge, flow, persistWorkspaceSnapshot, setEdges, setNodes, stableNodeActions]);
 
   const reorderTuckedSubgraphs = useCallback((draggedId: string, targetId: string, position: "before" | "after") => {
     const nextTuckspace = reorderTuckspaceWithPlacement(tuckspaceRef.current, draggedId, targetId, position);
@@ -2692,7 +2976,14 @@ function WorkspaceCanvas() {
       const updated = updatedModels.get(node.id);
       return updated
         ? {
-            ...toFlowNode(updated, nextRuntime, generationRef.current, handlers, edgesRef.current, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+            ...toFlowNode(
+              updated,
+              nextRuntime,
+              generationRef.current,
+              stableNodeActions,
+              deriveNodeEdgeData(updated.kind, incomingEdgeSummaryRef.current.get(updated.id)),
+              workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+            ),
             selected: node.selected,
           }
         : node;
@@ -2701,7 +2992,7 @@ function WorkspaceCanvas() {
     setRuntime(nextRuntime);
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, edgesRef.current, tuckspaceRef.current, nextRuntime, nextStore);
-  }, [handlers, persistWorkspaceSnapshot, setNodes]);
+  }, [persistWorkspaceSnapshot, setNodes, stableNodeActions]);
 
   const duplicateSelected = useCallback(() => {
     const selectedNodes = nodesRef.current.filter((node) => node.selected);
@@ -2754,6 +3045,10 @@ function WorkspaceCanvas() {
       ...runtimeRef.current,
       ...duplicatedRuntime,
     };
+    const nextIncomingSummaries = buildIncomingEdgeSummaries([
+      ...edgesRef.current,
+      ...duplicatedEdges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering)),
+    ]);
     const nextEdges = [
       ...edgesRef.current.map((edge) => ({ ...edge, selected: false })),
       ...duplicatedEdges.map((edge) => ({
@@ -2764,16 +3059,24 @@ function WorkspaceCanvas() {
     const nextNodes = [
       ...nodesRef.current.map((node) => ({ ...node, selected: false })),
       ...duplicatedModels.map((node) => ({
-        ...toFlowNode(node, nextRuntime, generationRef.current, handlers, nextEdges, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
+        ...toFlowNode(
+          node,
+          nextRuntime,
+          generationRef.current,
+          stableNodeActions,
+          deriveNodeEdgeData(node.kind, nextIncomingSummaries.get(node.id)),
+          workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
+        ),
         selected: true,
       })),
     ];
+    incomingEdgeSummaryRef.current = nextIncomingSummaries;
     setMaterializedOutputStore(nextStore);
     setRuntime(nextRuntime);
     setEdges(nextEdges);
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime, nextStore);
-  }, [cycleEdgeBuffering, deleteEdge, handlers, persistWorkspaceSnapshot, setEdges, setNodes]);
+  }, [cycleEdgeBuffering, deleteEdge, persistWorkspaceSnapshot, setEdges, setNodes, stableNodeActions]);
 
   const setSelectedEdgeBuffering = useCallback((buffering: BufferingMode) => {
     const selectedEdgeIds = new Set(
@@ -2798,13 +3101,10 @@ function WorkspaceCanvas() {
           label: buffering.replaceAll("_", " "),
         };
       });
-      setNodes((nodesCurrent) =>
-        syncNodeData(nodesCurrent, runtime, generationRef.current, handlers, next, workspaceMetaRef.current?.ui.previewControlsLocation ?? "node"),
-      );
       persistSoon(nodesRef.current, next);
       return next;
     });
-  }, [cycleEdgeBuffering, deleteEdge, handlers, persistSoon, runtime, setEdges, setNodes]);
+  }, [cycleEdgeBuffering, deleteEdge, persistSoon, setEdges]);
 
   const toggleSelectedPreviewTabs = useCallback((category: PreviewToggleCategory) => {
     const nextTabsByNodeId = togglePreviewCategoryForSelection(selectedPreviewNodes, category);
@@ -2854,8 +3154,38 @@ function WorkspaceCanvas() {
     const nextEdges = edgesRef.current.filter(
       (edge) => !selectedEdgeIds.has(edge.id) && !selectedNodeIds.has(edge.source) && !selectedNodeIds.has(edge.target),
     );
-    const nextNodes = nodesRef.current.filter((node) => !selectedNodeIds.has(node.id));
+    const nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
+    const affectedTargetIds = new Set(
+      edgesRef.current
+        .filter((edge) =>
+          selectedEdgeIds.has(edge.id)
+          || (selectedNodeIds.has(edge.source) && !selectedNodeIds.has(edge.target)),
+        )
+        .map((edge) => edge.target),
+    );
+    const nextNodes = nodesRef.current
+      .filter((node) => !selectedNodeIds.has(node.id))
+      .map((node) => {
+        if (!affectedTargetIds.has(node.id)) {
+          return node;
+        }
+        const derived = deriveNodeEdgeData(
+          node.data.model.kind,
+          nextIncomingSummaries.get(node.id),
+        );
+        return sameArray(node.data.argvSlots, derived.argvSlots) && sameArray(node.data.previewTabs, derived.previewTabs)
+          ? node
+          : {
+              ...node,
+              data: {
+                ...node.data,
+                argvSlots: derived.argvSlots,
+                previewTabs: derived.previewTabs,
+              },
+            };
+      });
     const nextRuntime = Object.fromEntries(Object.entries(runtimeRef.current).filter(([nodeId]) => !selectedNodeIds.has(nodeId)));
+    incomingEdgeSummaryRef.current = nextIncomingSummaries;
     setMaterializedOutputStore(nextStore);
     setRuntime(nextRuntime);
     setEdges(nextEdges);
