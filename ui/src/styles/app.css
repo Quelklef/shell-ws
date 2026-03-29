@@ -1047,7 +1047,7 @@ textarea {
 
 .shell-node.is-selection-preview .node-card {
   border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
-  box-shadow: 0 0 0 var(--selection-preview-width, 2px) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
+  box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
 }
 
 .node-toolbar {

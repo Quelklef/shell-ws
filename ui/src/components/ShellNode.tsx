@@ -3,7 +3,7 @@ import { StreamLanguage } from "@codemirror/language";
 import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import katex from "katex";
-import { Handle, Position, type NodeProps, useStore, useUpdateNodeInternals } from "@xyflow/react";
+import { Handle, Position, type NodeProps, useUpdateNodeInternals } from "@xyflow/react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import ResizablePane from "./ResizablePane";
@@ -142,7 +142,6 @@ export default function ShellNode({ data }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
   const refreshNodeInternals = useUpdateNodeInternals();
-  const zoom = useStore((store) => store.transform[2]);
   const shellExtensions = useMemo(() => [StreamLanguage.define(shell)], []);
   const autoRun = model.autoRun ?? {
     enabled: false,
@@ -163,7 +162,6 @@ export default function ShellNode({ data }: NodeProps) {
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
   const commentBody = commentBodyLines.join("\n").trim();
   const formulaAnalysis = useMemo(() => analyzeFormula(model.formula ?? ""), [model.formula]);
-  const selectionPreviewDisplayWidth = useMemo(() => 2 / Math.max(zoom, 0.01), [zoom]);
   const formulaHtml = useMemo(() => formulaAnalysis.ok ? katex.renderToString(formulaAnalysis.tex, { throwOnError: false, displayMode: true, strict: "ignore" }) : null, [formulaAnalysis]);
   const execArgs = model.args ?? [];
   const paneSizeSignature = useMemo(() => JSON.stringify(model.uiState?.paneSizes ?? {}), [model.uiState?.paneSizes]);
@@ -466,7 +464,6 @@ export default function ShellNode({ data }: NodeProps) {
   return (
     <div
       className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""}`}
-      style={{ ["--selection-preview-width" as string]: `${selectionPreviewDisplayWidth}px` }}
     >
       {leftPorts.map(({ key, port, activeAt }, index) => {
         const active = activeAt ? Date.now() - activeAt < 800 : false;
