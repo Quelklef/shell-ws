@@ -1,8 +1,169 @@
 import TOML from "@iarna/toml";
-import { Fragment } from "react";
+import { Fragment, type CSSProperties } from "react";
 import ReactMarkdown from "react-markdown";
 import xmlFormat from "xml-formatter";
 import YAML from "yaml";
+
+const ANSI_SGR_PATTERN = /\x1b\[([0-9;]*)m/g;
+
+const ANSI_COLOR_PALETTE: Record<number, string> = {
+  30: "#111318",
+  31: "#ff6b6b",
+  32: "#7fd17a",
+  33: "#f4c76b",
+  34: "#7ab7ff",
+  35: "#d699ff",
+  36: "#72d6c9",
+  37: "#e9e1d4",
+  90: "#6f7786",
+  91: "#ff8f8f",
+  92: "#95e38f",
+  93: "#ffd889",
+  94: "#9cc9ff",
+  95: "#e0b3ff",
+  96: "#8ee8de",
+  97: "#fffaf0",
+  40: "#111318",
+  41: "#6b2626",
+  42: "#23472a",
+  43: "#5c4718",
+  44: "#213b63",
+  45: "#4c2f63",
+  46: "#1f4b48",
+  47: "#d7d0c4",
+  100: "#3e4552",
+  101: "#8f4545",
+  102: "#35663c",
+  103: "#7a6427",
+  104: "#34588f",
+  105: "#6e4a8f",
+  106: "#2d6661",
+  107: "#fffaf0",
+};
+
+type AnsiTextStyle = {
+  color?: string;
+  backgroundColor?: string;
+  fontWeight?: CSSProperties["fontWeight"];
+  opacity?: number;
+  textDecoration?: string;
+};
+
+function hasAnsiSgr(text: string) {
+  ANSI_SGR_PATTERN.lastIndex = 0;
+  return ANSI_SGR_PATTERN.test(text);
+}
+
+function styleToCss(style: AnsiTextStyle): CSSProperties {
+  return {
+    color: style.color,
+    backgroundColor: style.backgroundColor,
+    fontWeight: style.fontWeight,
+    opacity: style.opacity,
+    textDecoration: style.textDecoration,
+  };
+}
+
+function cloneAnsiStyle(style: AnsiTextStyle): AnsiTextStyle {
+  return {
+    color: style.color,
+    backgroundColor: style.backgroundColor,
+    fontWeight: style.fontWeight,
+    opacity: style.opacity,
+    textDecoration: style.textDecoration,
+  };
+}
+
+function applyAnsiSgrCodes(style: AnsiTextStyle, rawCodes: string) {
+  const codes = rawCodes === "" ? [0] : rawCodes.split(";").map((part) => Number.parseInt(part, 10) || 0);
+  const nextStyle = cloneAnsiStyle(style);
+  for (const code of codes) {
+    if (code === 0) {
+      delete nextStyle.color;
+      delete nextStyle.backgroundColor;
+      delete nextStyle.fontWeight;
+      delete nextStyle.opacity;
+      delete nextStyle.textDecoration;
+      continue;
+    }
+    if (code === 1) {
+      nextStyle.fontWeight = 700;
+      continue;
+    }
+    if (code === 2) {
+      nextStyle.opacity = 0.72;
+      continue;
+    }
+    if (code === 4) {
+      nextStyle.textDecoration = "underline";
+      continue;
+    }
+    if (code === 22) {
+      delete nextStyle.fontWeight;
+      delete nextStyle.opacity;
+      continue;
+    }
+    if (code === 24) {
+      delete nextStyle.textDecoration;
+      continue;
+    }
+    if (code === 39) {
+      delete nextStyle.color;
+      continue;
+    }
+    if (code === 49) {
+      delete nextStyle.backgroundColor;
+      continue;
+    }
+    if (code in ANSI_COLOR_PALETTE) {
+      if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+        nextStyle.color = ANSI_COLOR_PALETTE[code];
+      } else {
+        nextStyle.backgroundColor = ANSI_COLOR_PALETTE[code];
+      }
+    }
+  }
+  return nextStyle;
+}
+
+function renderAnsiText(text: string) {
+  const parts: Array<string | JSX.Element> = [];
+  let cursor = 0;
+  let segmentIndex = 0;
+  let currentStyle: AnsiTextStyle = {};
+  ANSI_SGR_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(ANSI_SGR_PATTERN)) {
+    const start = match.index ?? 0;
+    if (start > cursor) {
+      const segment = text.slice(cursor, start);
+      if (Object.keys(currentStyle).length === 0) {
+        parts.push(segment);
+      } else {
+        parts.push(
+          <span key={`ansi-${segmentIndex}`} className="display-ansi-segment" style={styleToCss(currentStyle)}>
+            {segment}
+          </span>,
+        );
+        segmentIndex += 1;
+      }
+    }
+    currentStyle = applyAnsiSgrCodes(currentStyle, match[1] ?? "");
+    cursor = start + match[0].length;
+  }
+  if (cursor < text.length) {
+    const segment = text.slice(cursor);
+    if (Object.keys(currentStyle).length === 0) {
+      parts.push(segment);
+    } else {
+      parts.push(
+        <span key={`ansi-${segmentIndex}`} className="display-ansi-segment" style={styleToCss(currentStyle)}>
+          {segment}
+        </span>,
+      );
+    }
+  }
+  return <pre className="display-code display-code-ansi">{parts.map((part, index) => <Fragment key={index}>{part}</Fragment>)}</pre>;
+}
 
 function looksLikeJson(text: string) {
   return text.trim().startsWith("{") || text.trim().startsWith("[");
@@ -211,6 +372,13 @@ export function renderDisplay(bytes: Uint8Array) {
   }
 
   const text = new TextDecoder().decode(bytes);
+
+  if (hasAnsiSgr(text)) {
+    return {
+      label: "colored text",
+      content: renderAnsiText(text),
+    };
+  }
 
   try {
     if (looksLikeJson(text)) {

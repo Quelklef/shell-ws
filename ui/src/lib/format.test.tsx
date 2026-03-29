@@ -28,4 +28,14 @@ describe("renderDisplay", () => {
     expect(screen.getByText("alice")).toBeTruthy();
     expect(screen.getByText("41")).toBeTruthy();
   });
+
+  it("renders ansi-colored text as styled segments", () => {
+    const result = renderDisplay(new TextEncoder().encode("plain \u001b[31mred\u001b[0m tail"));
+    const view = render(result.content);
+    expect(result.label).toBe("colored text");
+    const redSegment = screen.getByText("red");
+    expect(redSegment.className).toContain("display-ansi-segment");
+    expect((redSegment as HTMLElement).style.color).toBeTruthy();
+    expect(view.container.textContent).toBe("plain red tail");
+  });
 });
