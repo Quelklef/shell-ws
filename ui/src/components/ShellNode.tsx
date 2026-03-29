@@ -157,6 +157,16 @@ export default function ShellNode({ data }: NodeProps) {
   const getVisiblePreview = (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port];
   const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
+  const handleOpenHtmlInNewTab = useCallback(() => {
+    const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const opened = window.open(url, "_blank", "noopener,noreferrer");
+    if (!opened) {
+      URL.revokeObjectURL(url);
+      return;
+    }
+    window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+  }, [htmlContent]);
   const orderedOpenPreviewTabs = previewTabs.filter((port) => openPreviewTabs.includes(port));
   const openPreviewSignature = orderedOpenPreviewTabs.join("|");
   const [commentHeadline, ...commentBodyLines] = model.comment.split("\n");
@@ -793,7 +803,22 @@ export default function ShellNode({ data }: NodeProps) {
             "html",
             "resizable-pane html-pane nodrag nopan",
             <>
-              <div className="display-label">html</div>
+              <div className="html-pane-header">
+                <div className="display-label">html</div>
+                <button
+                  type="button"
+                  className="html-open-tab nodrag nopan"
+                  onClick={handleOpenHtmlInNewTab}
+                  title="open in new tab"
+                  aria-label="open in new tab"
+                >
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M14 5h5v5" />
+                    <path d="M10 14 19 5" />
+                    <path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
+                  </svg>
+                </button>
+              </div>
               <iframe
                 className="html-frame"
                 sandbox="allow-scripts allow-forms"
