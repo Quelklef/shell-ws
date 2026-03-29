@@ -58,11 +58,11 @@ textarea {
 }
 
 .react-flow__selection {
-  border: 2px solid color-mix(in srgb, var(--selection) 82%, white 18%);
+  border: 2px solid color-mix(in srgb, var(--selection-gesture-color, var(--selection)) 82%, white 18%);
 }
 
 .react-flow__nodesselection-rect {
-  border: calc(2px / max(var(--canvas-zoom, 1), 0.01)) solid color-mix(in srgb, var(--selection) 82%, white 18%);
+  border: calc(2px / max(var(--canvas-zoom, 1), 0.01)) solid color-mix(in srgb, var(--selection-gesture-color, var(--selection)) 82%, white 18%);
 }
 
 .app-shell {
@@ -1070,20 +1070,57 @@ textarea {
   transform: none;
 }
 
-.selection-actions button.selection-actions-plan-target {
-  border-bottom-color: color-mix(in srgb, var(--exec-plan-color) 48%, transparent);
-  background: color-mix(in srgb, var(--exec-plan-color) 10%, transparent);
-  color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
-}
-
-.selection-actions button.selection-actions-plan-target:hover {
-  background: color-mix(in srgb, var(--exec-plan-color) 16%, transparent);
-}
-
 .selection-actions button:disabled {
   cursor: not-allowed;
   color: color-mix(in srgb, var(--selection) 36%, var(--text-soft));
   background: transparent;
+}
+
+.selection-gesture-hint {
+  position: absolute;
+  z-index: 32;
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.selection-gesture-hint-box {
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid color-mix(in srgb, var(--selection) 72%, white 28%);
+  background: color-mix(in srgb, var(--selection) 14%, rgba(12, 14, 16, 0.96));
+  color: color-mix(in srgb, var(--selection) 80%, white 20%);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  box-shadow: var(--shadow);
+}
+
+.selection-gesture-hint-box.is-active {
+  color: white;
+  border-color: color-mix(in srgb, var(--selection) 84%, white 16%);
+  background: color-mix(in srgb, var(--selection) 46%, rgba(12, 14, 16, 0.98));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--selection) 46%, transparent),
+    0 0 16px color-mix(in srgb, var(--selection) 38%, transparent),
+    var(--shadow);
+}
+
+.selection-gesture-hint-box.selection-gesture-hint-box-exec {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 62%, white 18%);
+  background: color-mix(in srgb, var(--exec-plan-color) 12%, rgba(18, 12, 29, 0.96));
+  color: color-mix(in srgb, var(--exec-plan-color) 82%, white 18%);
+}
+
+.selection-gesture-hint-box.selection-gesture-hint-box-exec.is-active {
+  color: white;
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  background: color-mix(in srgb, var(--exec-plan-color) 42%, rgba(18, 12, 29, 0.98));
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--exec-plan-color) 46%, transparent),
+    0 0 18px color-mix(in srgb, var(--exec-plan-color) 42%, transparent),
+    var(--shadow);
 }
 
 .shell-node {
@@ -1111,6 +1148,11 @@ textarea {
 .shell-node.is-execution-target.is-selection-preview .node-card {
   border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
   box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
+}
+
+.canvas-shell.is-exec-plan-modifier-active .shell-node.is-execution-target.is-selection-preview .node-card {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
 }
 
 .execution-plan-floating {
@@ -1268,13 +1310,13 @@ textarea {
   stroke-linejoin: round;
 }
 
-.node-action-select-button {
+.canvas-shell.is-exec-plan-modifier-active .node-action-button[data-exec-action="true"] {
   border-color: color-mix(in srgb, var(--exec-plan-color) 54%, rgba(255, 255, 255, 0.14));
   color: color-mix(in srgb, var(--exec-plan-color) 74%, white 26%);
   background: linear-gradient(180deg, color-mix(in srgb, var(--exec-plan-color) 16%, rgba(255, 255, 255, 0.02)), rgba(15, 16, 19, 0.82));
 }
 
-.node-action-select-button:hover {
+.canvas-shell.is-exec-plan-modifier-active .node-action-button[data-exec-action="true"]:hover {
   color: white;
   border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
   background: linear-gradient(180deg, color-mix(in srgb, var(--exec-plan-color) 26%, rgba(255, 255, 255, 0.03)), rgba(15, 16, 19, 0.9));

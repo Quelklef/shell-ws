@@ -35,31 +35,32 @@ export default function WorkspaceEdge({
   const typedData = (data ?? {}) as FlowEdgeData;
   const buffering = String(typedData.buffering ?? "line_or_1024");
   const inExecutionPlan = typedData.executionPlan ?? false;
-  const edgeStroke = selected
+  const preferExecutionPlan = inExecutionPlan && typedData.execSelectionGestureActive;
+  const edgeStroke = selected && !preferExecutionPlan
     ? "color-mix(in srgb, var(--selection) 82%, white 18%)"
     : inExecutionPlan
       ? "color-mix(in srgb, var(--exec-plan-color) 82%, white 18%)"
       : "rgba(242, 192, 120, 0.9)";
-  const edgeGlow = selected
+  const edgeGlow = selected && !preferExecutionPlan
     ? "drop-shadow(0 0 5px color-mix(in srgb, var(--selection) 36%, transparent))"
     : inExecutionPlan
       ? "drop-shadow(0 0 5px color-mix(in srgb, var(--exec-plan-color) 30%, transparent))"
       : "drop-shadow(0 0 4px rgba(242, 192, 120, 0.14))";
   const edgeStyle = {
     stroke: edgeStroke,
-    strokeWidth: selected ? 4.2 : inExecutionPlan ? 4 : 3.1,
+    strokeWidth: selected && !preferExecutionPlan ? 4.2 : inExecutionPlan ? 4 : 3.1,
     filter: edgeGlow,
     ...(style ?? {}),
   };
   const completeEdgeStyle = {
     stroke: edgeStroke,
-    strokeWidth: selected ? 6.6 : inExecutionPlan ? 6 : 5.2,
+    strokeWidth: selected && !preferExecutionPlan ? 6.6 : inExecutionPlan ? 6 : 5.2,
     filter: edgeGlow,
     ...(style ?? {}),
   };
   const completeEdgeCutoutStyle = {
     stroke: "rgba(12, 14, 16, 0.96)",
-    strokeWidth: selected ? 2.6 : 2.2,
+    strokeWidth: selected && !preferExecutionPlan ? 2.6 : 2.2,
     ...(style ?? {}),
   };
 

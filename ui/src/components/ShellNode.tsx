@@ -27,21 +27,6 @@ const PORT_STACK_TOP = 48;
 const PREVIEW_WIDTH_SAMPLE = "MMMMMMMMMM";
 const PREVIEW_SCROLLBAR_BUFFER = 16;
 
-function selectionActionTitle(action: ExecutionAction) {
-  switch (action) {
-    case "pull_inputs":
-      return "Select upstream closure as execution target.\n\nShift+click to add/remove from execution target instead.";
-    case "pull_run":
-      return "Select upstream closure and target node as execution target.\n\nShift+click to add/remove from execution target instead.";
-    case "rerun":
-      return "Select this node as execution target.\n\nShift+click to add/remove from execution target instead.";
-    case "rerun_push":
-      return "Select this node and downstream push scope as execution target.\n\nShift+click to add/remove from execution target instead.";
-    case "repush":
-      return "Select this node and replay push scope as execution target.\n\nShift+click to add/remove from execution target instead.";
-  }
-}
-
 function tabExpandedLength(line: string, tabSize: number) {
   let width = 0;
   for (const char of line) {
@@ -880,27 +865,24 @@ export default function ShellNode({ data }: NodeProps) {
             const reason = typedData.getActionReason(model.id, action);
             const disabled = reason !== null;
             return (
-              <div key={action} className="node-action-stack">
-                <button
-                  className="nodrag nopan node-action-button node-action-select-button"
-                  type="button"
-                  title={selectionActionTitle(action)}
-                  aria-label={`${label} target selector`}
-                  onClick={(event) => typedData.onSelectExecutionTarget(model.id, action, event.shiftKey)}
-                >
-                  {icon}
-                </button>
-                <button
-                  className="nodrag nopan node-action-button"
-                  type="button"
-                  disabled={disabled}
-                  title={disabled ? `${label}: ${reason}` : label}
-                  aria-label={label}
-                  onClick={() => typedData.onRun(model.id, action)}
-                >
-                  {icon}
-                </button>
-              </div>
+              <button
+                key={action}
+                className="nodrag nopan node-action-button"
+                data-exec-action="true"
+                type="button"
+                disabled={disabled}
+                title={disabled ? `${label}: ${reason}` : label}
+                aria-label={label}
+                onClick={(event) => {
+                  if (event.altKey) {
+                    typedData.onSelectExecutionTarget(model.id, action, event.shiftKey);
+                    return;
+                  }
+                  typedData.onRun(model.id, action);
+                }}
+              >
+                {icon}
+              </button>
             );
           })}
           <button

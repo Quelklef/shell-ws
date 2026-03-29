@@ -485,6 +485,31 @@ function SelectionActionsAnchor({
   );
 }
 
+function SelectionGestureHint({
+  rect,
+  altActive,
+  shiftActive,
+}: {
+  rect: { x: number; y: number; width: number; height: number };
+  altActive: boolean;
+  shiftActive: boolean;
+}) {
+  const top = Math.max(12, rect.y - (altActive ? 58 : 30));
+  const left = Math.max(12, rect.x + 6);
+  return (
+    <div className="selection-gesture-hint" style={{ left, top }}>
+      <div className={`selection-gesture-hint-box ${altActive ? "is-active" : ""}`}>
+        ALT: select nodes for exec
+      </div>
+      {altActive && (
+        <div className={`selection-gesture-hint-box selection-gesture-hint-box-exec ${shiftActive ? "is-active" : ""}`}>
+          SHIFT: add/remove nodes from exec
+        </div>
+      )}
+    </div>
+  );
+}
+
 function toFlowNode(
   node: WorkspaceNode,
   runtime: Record<string, NodeRuntimeState>,
@@ -548,6 +573,7 @@ function toFlowEdge(
   onDelete?: (edgeId: string) => void,
   onCycle?: (edgeId: string) => void,
   executionPlan: ExecutionPlanState = emptyExecutionPlan(),
+  execSelectionGestureActive = false,
 ): FlowEdge {
   return {
     id: edge.id,
@@ -561,6 +587,7 @@ function toFlowEdge(
     data: {
       buffering: edge.buffering,
       executionPlan: executionPlan.edgeIds.includes(edge.id),
+      execSelectionGestureActive,
       onDelete,
       onCycle,
     },
@@ -913,6 +940,7 @@ function WorkspaceCanvas() {
   const runtimeRef = useRef<Record<string, NodeRuntimeState>>({});
   const materializedOutputStoreRef = useRef<MaterializedOutputStore>({});
   const executionPlanRef = useRef<ExecutionPlanState>(executionPlan);
+  const displayedExecutionPlanRef = useRef<ExecutionPlanState>(executionPlan);
   const persistTimerRef = useRef<number | null>(null);
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
@@ -924,6 +952,11 @@ function WorkspaceCanvas() {
   const runningClearTimersRef = useRef<Map<string, number>>(new Map());
   const selectionGestureActiveRef = useRef(false);
   const selectionGestureClearTimerRef = useRef<number | null>(null);
+  const selectionExecModifierRef = useRef({ alt: false, shift: false });
+  const gesturePreviewNodeIdsRef = useRef<string[]>([]);
+  const gesturePreviewEdgeIdsRef = useRef<string[]>([]);
+  const selectionPreviewNodeIdsRef = useRef<Set<string>>(new Set());
+  const selectionPreviewEdgeIdsRef = useRef<Set<string>>(new Set());
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
   const userSelectionRect = useStore((store) => store.userSelectionRect);
@@ -932,6 +965,21 @@ function WorkspaceCanvas() {
 
   const [nodes, setNodes] = useNodesState<FlowNode>([]);
   const [edges, setEdges] = useEdgesState<FlowEdge>([]);
+  const [selectionExecModifier, setSelectionExecModifier] = useState({ alt: false, shift: false });
+  const [gesturePreviewNodeIds, setGesturePreviewNodeIds] = useState<string[]>([]);
+  const [gesturePreviewEdgeIds, setGesturePreviewEdgeIds] = useState<string[]>([]);
+  // Selection churn is a hot path. Effects that only care about node-model slices
+  // should key off a reduced signature instead of the whole node array.
+  const autorunConfigSignature = useMemo(
+    () =>
+      nodes.map((node) => {
+        const config = node.data.model.autoRun;
+        return config?.enabled
+          ? `${node.id}:${config.mode}:${config.intervalMs}`
+          : `${node.id}:off`;
+      }).join("|"),
+    [nodes],
+  );
 
   const stableNodeActions = useMemo<ShellNodeActions>(() => ({
     onUpdate: (...args) => (handlersRef.current ?? handlersFallback).onUpdate(...args),
@@ -1003,7 +1051,7 @@ function WorkspaceCanvas() {
   }, []);
 
   const updateNodeMaterializedData = useCallback((nodeId: string, nextMaterialized: NodeMaterialized | undefined) => {
-    const participatingNodeIds = participatingNodeIdsForCurrentPlan(executionPlanRef.current);
+    const participatingNodeIds = participatingNodeIdsForCurrentPlan(displayedExecutionPlanRef.current);
     const workspaceEdges = edgesRef.current.map(flowEdgeToWorkspaceEdge);
     patchNodesById([nodeId], (node) =>
       node.data.model.materialized === nextMaterialized
@@ -1017,7 +1065,7 @@ function WorkspaceCanvas() {
                 materialized: nextMaterialized,
               },
               executionPlan: {
-                isExecutable: executionPlanRef.current.executableNodeIds.includes(node.id),
+                isExecutable: displayedExecutionPlanRef.current.executableNodeIds.includes(node.id),
                 isParticipating: participatingNodeIds.has(node.id),
                 portKeys: executionPlanPortKeysForNode(
                   {
@@ -1025,7 +1073,7 @@ function WorkspaceCanvas() {
                     materialized: nextMaterialized,
                   },
                   node.data.argvSlots,
-                  executionPlanRef.current,
+                  displayedExecutionPlanRef.current,
                   workspaceEdges,
                 ),
                 matvals: executionPlanMatvalsForNode(
@@ -1033,7 +1081,7 @@ function WorkspaceCanvas() {
                     ...node.data.model,
                     materialized: nextMaterialized,
                   },
-                  executionPlanRef.current,
+                  displayedExecutionPlanRef.current,
                 ),
               },
             },
@@ -1055,10 +1103,37 @@ function WorkspaceCanvas() {
     });
   }, [patchNodesById]);
 
-  const updateNodeExecutionPlanData = useCallback((nextPlan: ExecutionPlanState) => {
+  const updateNodeExecutionPlanData = useCallback((previousPlan: ExecutionPlanState, nextPlan: ExecutionPlanState) => {
+    const previousParticipatingNodeIds = participatingNodeIdsForCurrentPlan(previousPlan);
     const participatingNodeIds = participatingNodeIdsForCurrentPlan(nextPlan);
     const workspaceEdges = edgesRef.current.map(flowEdgeToWorkspaceEdge);
-    patchNodesById(nodesRef.current.map((node) => node.id), (node) => {
+    const changedMatoutIds = new Set<string>();
+    for (const id of previousPlan.providedMatoutIds) {
+      if (!nextPlan.providedMatoutIds.includes(id)) {
+        changedMatoutIds.add(id);
+      }
+    }
+    for (const id of nextPlan.providedMatoutIds) {
+      if (!previousPlan.providedMatoutIds.includes(id)) {
+        changedMatoutIds.add(id);
+      }
+    }
+    const affectedNodeIds = new Set<string>([
+      ...previousPlan.executableNodeIds,
+      ...nextPlan.executableNodeIds,
+      ...previousParticipatingNodeIds,
+      ...participatingNodeIds,
+    ]);
+    if (changedMatoutIds.size > 0) {
+      for (const node of nodesRef.current) {
+        const inputIds = Object.values(node.data.model.materialized?.inputs ?? {});
+        const outputIds = Object.values(node.data.model.materialized?.outputs ?? {});
+        if ([...inputIds, ...outputIds].some((id) => id && changedMatoutIds.has(id))) {
+          affectedNodeIds.add(node.id);
+        }
+      }
+    }
+    patchNodesById(affectedNodeIds, (node) => {
       const nextNodeExecutionPlan = {
         isExecutable: nextPlan.executableNodeIds.includes(node.id),
         isParticipating: participatingNodeIds.has(node.id),
@@ -1120,7 +1195,7 @@ function WorkspaceCanvas() {
       const nextPortKeys = executionPlanPortKeysForNode(
         node.data.model,
         derived.argvSlots,
-        executionPlanRef.current,
+        displayedExecutionPlanRef.current,
         workspaceEdges,
       );
       return sameArray(node.data.argvSlots, derived.argvSlots)
@@ -1144,13 +1219,24 @@ function WorkspaceCanvas() {
     });
   }, [patchNodesById]);
 
-  const updateEdgeExecutionPlanData = useCallback((nextPlan: ExecutionPlanState) => {
+  const updateEdgeExecutionPlanData = useCallback((previousPlan: ExecutionPlanState, nextPlan: ExecutionPlanState) => {
     const edgeIds = new Set(nextPlan.edgeIds);
+    const execSelectionGestureActive = selectionExecModifierRef.current.alt && userSelectionActive;
+    const affectedEdgeIds = new Set<string>([...previousPlan.edgeIds, ...nextPlan.edgeIds]);
+    if (affectedEdgeIds.size === 0) {
+      return;
+    }
     setEdges((current) => {
       let changed = false;
       const next = current.map((edge) => {
+        if (!affectedEdgeIds.has(edge.id)) {
+          return edge;
+        }
         const executionPlan = edgeIds.has(edge.id);
-        if (edge.data?.executionPlan === executionPlan) {
+        if (
+          edge.data?.executionPlan === executionPlan
+          && edge.data?.execSelectionGestureActive === execSelectionGestureActive
+        ) {
           return edge;
         }
         changed = true;
@@ -1159,6 +1245,7 @@ function WorkspaceCanvas() {
           data: {
             buffering: edge.data?.buffering ?? "unbuffered",
             executionPlan,
+            execSelectionGestureActive,
             onDelete: edge.data?.onDelete,
             onCycle: edge.data?.onCycle,
           },
@@ -1166,7 +1253,7 @@ function WorkspaceCanvas() {
       });
       return changed ? next : current;
     });
-  }, [setEdges]);
+  }, [setEdges, userSelectionActive]);
 
   useEffect(() => {
     workspaceMetaRef.current = workspaceMeta;
@@ -1205,12 +1292,31 @@ function WorkspaceCanvas() {
   }, [executionPlan]);
 
   useEffect(() => {
-    updateNodeExecutionPlanData(executionPlan);
-  }, [executionPlan, updateNodeExecutionPlanData]);
-
-  useEffect(() => {
-    updateEdgeExecutionPlanData(executionPlan);
-  }, [executionPlan, updateEdgeExecutionPlanData]);
+    const updateModifierState = (event: KeyboardEvent) => {
+      if (event.key === "Alt") {
+        event.preventDefault();
+      }
+      const next = { alt: event.altKey, shift: event.shiftKey };
+      selectionExecModifierRef.current = next;
+      setSelectionExecModifier((current) =>
+        current.alt === next.alt && current.shift === next.shift ? current : next,
+      );
+    };
+    const clearModifierState = () => {
+      selectionExecModifierRef.current = { alt: false, shift: false };
+      setSelectionExecModifier((current) =>
+        current.alt || current.shift ? { alt: false, shift: false } : current,
+      );
+    };
+    window.addEventListener("keydown", updateModifierState);
+    window.addEventListener("keyup", updateModifierState);
+    window.addEventListener("blur", clearModifierState);
+    return () => {
+      window.removeEventListener("keydown", updateModifierState);
+      window.removeEventListener("keyup", updateModifierState);
+      window.removeEventListener("blur", clearModifierState);
+    };
+  }, []);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -1266,7 +1372,7 @@ function WorkspaceCanvas() {
 
   useEffect(() => {
     const viewport = flow.getViewport();
-    const previewIds = userSelectionActive && userSelectionRect
+    const nextPreviewIds = userSelectionActive && userSelectionRect
       ? new Set(
           flow
             .getIntersectingNodes(
@@ -1276,30 +1382,49 @@ function WorkspaceCanvas() {
             )
             .map((node) => node.id),
         )
-      : null;
-    setNodes((current) => {
-      let changed = false;
-      const next = current.map((node) => {
-        const selectionPreview = previewIds?.has(node.id) ?? false;
-        if (node.data.selectionPreview === selectionPreview) {
-          return node;
-        }
-        changed = true;
-        return {
-          ...node,
-          data: {
-            ...node.data,
-            selectionPreview,
-          },
-        };
-      });
-      return changed ? next : current;
+      : new Set<string>();
+    const previousPreviewIds = selectionPreviewNodeIdsRef.current;
+    const changedIds = new Set<string>();
+    for (const id of previousPreviewIds) {
+      if (!nextPreviewIds.has(id)) {
+        changedIds.add(id);
+      }
+    }
+    for (const id of nextPreviewIds) {
+      if (!previousPreviewIds.has(id)) {
+        changedIds.add(id);
+      }
+    }
+    // During drag selection we only want to touch nodes whose preview bit flipped.
+    selectionPreviewNodeIdsRef.current = nextPreviewIds;
+    patchNodesById(changedIds, (node) => {
+      const selectionPreview = nextPreviewIds.has(node.id);
+      if (node.data.selectionPreview === selectionPreview) {
+        return node;
+      }
+      return {
+        ...node,
+        data: {
+          ...node.data,
+          selectionPreview,
+        },
+      };
     });
-  }, [flow, setNodes, userSelectionActive, userSelectionRect]);
+    const previewNodeIds = Array.from(nextPreviewIds).sort();
+    gesturePreviewNodeIdsRef.current = previewNodeIds;
+    if (selectionExecModifierRef.current.alt && userSelectionActive) {
+      setGesturePreviewNodeIds((current) => sameArray(current, previewNodeIds) ? current : previewNodeIds);
+    } else {
+      setGesturePreviewNodeIds((current) => current.length === 0 ? current : []);
+    }
+  }, [flow, patchNodesById, userSelectionActive, userSelectionRect]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !userSelectionActive || !userSelectionRect) {
+      selectionPreviewEdgeIdsRef.current = new Set();
+      gesturePreviewEdgeIdsRef.current = [];
+      setGesturePreviewEdgeIds((current) => current.length === 0 ? current : []);
       return;
     }
     const canvasBounds = canvas.getBoundingClientRect();
@@ -1326,9 +1451,47 @@ function WorkspaceCanvas() {
         selectedEdgeIds.add(edgeId);
       }
     }
+    const sortedEdgeIds = Array.from(selectedEdgeIds).sort();
+    gesturePreviewEdgeIdsRef.current = sortedEdgeIds;
+    if (selectionExecModifierRef.current.alt) {
+      setGesturePreviewEdgeIds((current) => sameArray(current, sortedEdgeIds) ? current : sortedEdgeIds);
+      const previousSelectedIds = selectionPreviewEdgeIdsRef.current;
+      if (previousSelectedIds.size > 0) {
+        setEdges((current) => {
+          let changed = false;
+          const next = current.map((edge) => {
+            if (!previousSelectedIds.has(edge.id) || !edge.selected) {
+              return edge;
+            }
+            changed = true;
+            return { ...edge, selected: false };
+          });
+          return changed ? next : current;
+        });
+        selectionPreviewEdgeIdsRef.current = new Set();
+      }
+      return;
+    }
+    setGesturePreviewEdgeIds((current) => current.length === 0 ? current : []);
+    const previousSelectedIds = selectionPreviewEdgeIdsRef.current;
+    const changedIds = new Set<string>();
+    for (const id of previousSelectedIds) {
+      if (!selectedEdgeIds.has(id)) {
+        changedIds.add(id);
+      }
+    }
+    for (const id of selectedEdgeIds) {
+      if (!previousSelectedIds.has(id)) {
+        changedIds.add(id);
+      }
+    }
+    selectionPreviewEdgeIdsRef.current = selectedEdgeIds;
     setEdges((current) => {
       let changed = false;
       const next = current.map((edge) => {
+        if (!changedIds.has(edge.id)) {
+          return edge;
+        }
         const selected = selectedEdgeIds.has(edge.id);
         if (!!edge.selected === selected) {
           return edge;
@@ -1630,10 +1793,43 @@ function WorkspaceCanvas() {
     }
     // React Flow can deliver the final select changes just after selection-end fires.
     selectionGestureClearTimerRef.current = window.setTimeout(() => {
+      if (selectionExecModifierRef.current.alt) {
+        const computedPlan = executionPlanForSelection(
+          gesturePreviewNodeIdsRef.current,
+          gesturePreviewEdgeIdsRef.current,
+        );
+        setExecutionPlan((current) => mergeExecutionPlans(current, computedPlan, selectionExecModifierRef.current.shift));
+        gesturePreviewNodeIdsRef.current = [];
+        gesturePreviewEdgeIdsRef.current = [];
+        setGesturePreviewNodeIds((current) => current.length === 0 ? current : []);
+        setGesturePreviewEdgeIds((current) => current.length === 0 ? current : []);
+        setNodes((current) => {
+          let changed = false;
+          const next = current.map((node) => {
+            if (!node.selected) {
+              return node;
+            }
+            changed = true;
+            return { ...node, selected: false };
+          });
+          return changed ? next : current;
+        });
+        setEdges((current) => {
+          let changed = false;
+          const next = current.map((edge) => {
+            if (!edge.selected) {
+              return edge;
+            }
+            changed = true;
+            return { ...edge, selected: false };
+          });
+          return changed ? next : current;
+        });
+      }
       selectionGestureActiveRef.current = false;
       selectionGestureClearTimerRef.current = null;
     }, 0);
-  }, []);
+  }, [setEdges, setNodes]);
 
   // Keep nodes visually active for a short minimum duration so fast runs do not flicker.
   const scheduleRunningClear = useCallback((nodeId: string, execId: string) => {
@@ -2385,7 +2581,10 @@ function WorkspaceCanvas() {
       );
       active.set(nodeId, { signature, timerId });
     }
-  }, [nodes, sendRunRequest]);
+  // Selection churn is a hot path. Keep autorun bookkeeping keyed to the node model
+  // auto-run slice rather than the whole node object so selection changes do not
+  // tear down and rebuild interval state.
+  }, [autorunConfigSignature, sendRunRequest]);
 
   useEffect(() => {
     return () => {
@@ -2415,9 +2614,31 @@ function WorkspaceCanvas() {
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
       const filteredChanges = changes.filter((change) =>
-        change.type !== "select" || selectionGestureActiveRef.current || userSelectionActive,
+        change.type !== "select"
+        || (
+          !selectionExecModifierRef.current.alt
+          && (selectionGestureActiveRef.current || userSelectionActive)
+        ),
       );
       if (filteredChanges.length === 0) {
+        return;
+      }
+      if (filteredChanges.every((change) => change.type === "select")) {
+        // Pure select churn is frequent enough that the generic React Flow change
+        // reconciler is overkill here; patch just the affected node ids.
+        const selectedById = new Map(
+          filteredChanges.map((change) => [change.id, Boolean(change.selected)]),
+        );
+        patchNodesById(selectedById.keys(), (node) => {
+          const selected = selectedById.get(node.id);
+          if (selected === undefined || node.selected === selected) {
+            return node;
+          }
+          return {
+            ...node,
+            selected,
+          };
+        });
         return;
       }
       setNodes((current) => {
@@ -2440,7 +2661,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [persistLayoutSoon, persistSoon, setNodes, userSelectionActive],
+    [patchNodesById, persistLayoutSoon, persistSoon, setNodes, userSelectionActive],
   );
 
   const onEdgesChange = useCallback(
@@ -2585,7 +2806,7 @@ function WorkspaceCanvas() {
       ]),
     );
     const loadedEdges = loaded.edges.map((edge) =>
-      toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, emptyExecutionPlan()),
+      toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, emptyExecutionPlan(), false),
     );
     const incomingSummaries = buildIncomingEdgeSummaries(loadedEdges);
     const participatingNodeIds = new Set<string>();
@@ -3033,7 +3254,7 @@ function WorkspaceCanvas() {
       ...runtimeRef.current,
       ...restoredRuntime,
     };
-    const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current));
+    const restoredEdges = item.edges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current, selectionExecModifierRef.current.alt && userSelectionActive));
     const nextEdges = [...edgesRef.current, ...restoredEdges];
     const nextIncomingSummaries = buildIncomingEdgeSummaries(nextEdges);
     const nextExecutionPlanEdges = nextEdges.map(flowEdgeToWorkspaceEdge);
@@ -3137,6 +3358,21 @@ function WorkspaceCanvas() {
     () => selectedEdges.map((edge) => edge.id).sort(),
     [selectedEdges],
   );
+  const gestureExecutionPlan = useMemo(
+    () => executionPlanForSelection(
+      selectionExecModifier.alt ? gesturePreviewNodeIds : selectedExecutionPlanNodeIds,
+      selectionExecModifier.alt ? gesturePreviewEdgeIds : selectedExecutionPlanEdgeIds,
+    ),
+    [gesturePreviewEdgeIds, gesturePreviewNodeIds, selectedExecutionPlanEdgeIds, selectedExecutionPlanNodeIds, selectionExecModifier.alt],
+  );
+  const displayedExecutionPlan = useMemo(() => {
+    if (!userSelectionActive || !selectionExecModifier.alt) {
+      return executionPlan;
+    }
+    return selectionExecModifier.shift
+      ? mergeExecutionPlans(executionPlan, gestureExecutionPlan, true)
+      : gestureExecutionPlan;
+  }, [executionPlan, gestureExecutionPlan, selectionExecModifier.alt, selectionExecModifier.shift, userSelectionActive]);
   const executionPlanParticipatingNodeIds = useMemo(
     () => participatingNodeIdsForPlan(executionPlan, edges.map(flowEdgeToWorkspaceEdge)),
     [edges, executionPlan],
@@ -3149,6 +3385,13 @@ function WorkspaceCanvas() {
     }),
     [executionPlan, executionPlanParticipatingNodeIds.length],
   );
+
+  useEffect(() => {
+    const previousPlan = displayedExecutionPlanRef.current;
+    updateNodeExecutionPlanData(previousPlan, displayedExecutionPlan);
+    updateEdgeExecutionPlanData(previousPlan, displayedExecutionPlan);
+    displayedExecutionPlanRef.current = displayedExecutionPlan;
+  }, [displayedExecutionPlan, updateEdgeExecutionPlanData, updateNodeExecutionPlanData]);
   const canTuckSelection = useMemo(
     () => isClosedSelection(selectedNodeIds, edges),
     [edges, selectedNodeIds],
@@ -3329,12 +3572,12 @@ function WorkspaceCanvas() {
     };
     const nextIncomingSummaries = buildIncomingEdgeSummaries([
       ...edgesRef.current,
-      ...duplicatedEdges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current)),
+      ...duplicatedEdges.map((edge) => toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current, selectionExecModifierRef.current.alt && userSelectionActive)),
     ]);
     const nextEdges = [
       ...edgesRef.current.map((edge) => ({ ...edge, selected: false })),
       ...duplicatedEdges.map((edge) => ({
-        ...toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current),
+        ...toFlowEdge(edge, deleteEdge, cycleEdgeBuffering, executionPlanRef.current, selectionExecModifierRef.current.alt && userSelectionActive),
         selected: true,
       })),
     ];
@@ -3363,17 +3606,6 @@ function WorkspaceCanvas() {
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime, nextStore);
   }, [cycleEdgeBuffering, deleteEdge, persistWorkspaceSnapshot, setEdges, setNodes, stableNodeActions]);
-
-  const applySelectedToExecutionPlan = useCallback((additive: boolean) => {
-    if (selectedExecutionPlanNodeIds.length === 0 && selectedExecutionPlanEdgeIds.length === 0) {
-      return;
-    }
-    const computedPlan = executionPlanForSelection(
-      selectedExecutionPlanNodeIds,
-      selectedExecutionPlanEdgeIds,
-    );
-    setExecutionPlan((current) => mergeExecutionPlans(current, computedPlan, additive));
-  }, [selectedExecutionPlanEdgeIds, selectedExecutionPlanNodeIds]);
 
   const setSelectedEdgeBuffering = useCallback((buffering: BufferingMode) => {
     const selectedEdgeIds = new Set(
@@ -3776,7 +4008,7 @@ function WorkspaceCanvas() {
 
       <main
         ref={canvasRef}
-        className="canvas-shell"
+        className={`canvas-shell ${selectionExecModifier.alt ? "is-exec-plan-modifier-active" : ""}`}
         onContextMenu={(event) => {
           if (selectedNodes.length > 0) {
             event.preventDefault();
@@ -3786,6 +4018,9 @@ function WorkspaceCanvas() {
         <ReactFlow<FlowNode, FlowEdge>
           style={{
             ["--canvas-zoom" as string]: `${zoom}`,
+            ["--selection-gesture-color" as string]: userSelectionActive && selectionExecModifier.alt
+              ? "var(--exec-plan-color)"
+              : "var(--selection)",
           }}
           defaultViewport={{
             x: workspaceMeta.ui.viewportX,
@@ -3963,29 +4198,6 @@ function WorkspaceCanvas() {
                 </div>
               )}
             </div>
-            <button
-              type="button"
-              className="selection-actions-plan-target"
-              onClick={(event) => applySelectedToExecutionPlan(event.shiftKey)}
-              disabled={selectedExecutionPlanNodeIds.length === 0 && selectedExecutionPlanEdgeIds.length === 0}
-              title={
-                selectedExecutionPlanNodeIds.length === 0 && selectedExecutionPlanEdgeIds.length === 0
-                  ? "select nodes or wires first"
-                  : "Set selected nodes/wires as execution target.\n\nShift+click to add/remove from execution target instead."
-              }
-            >
-              <span className="selection-actions-icon" aria-hidden="true">
-                <svg viewBox="0 0 16 16" focusable="false">
-                  <path d="M3 3.5h4" />
-                  <path d="M9 3.5h4" />
-                  <path d="M13 3.5v4" />
-                  <path d="M3 12.5h4" />
-                  <path d="M9 12.5h4" />
-                  <path d="M13 12.5v-4" />
-                </svg>
-              </span>
-              <span>exec target</span>
-            </button>
             <button type="button" onClick={clearSelectedMaterialized} disabled={selectedNodes.length === 0}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
@@ -4009,6 +4221,13 @@ function WorkspaceCanvas() {
               <span>delete</span>
             </button>
         </SelectionActionsAnchor>
+        {userSelectionActive && userSelectionRect && (
+          <SelectionGestureHint
+            rect={userSelectionRect}
+            altActive={selectionExecModifier.alt}
+            shiftActive={selectionExecModifier.shift}
+          />
+        )}
         {toast && <div className="toast">{toast}</div>}
       </main>
 
