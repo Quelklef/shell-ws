@@ -158,7 +158,6 @@ export default function ShellNode({ data }: NodeProps) {
   const { model, runtime } = typedData;
   const executionPlan = typedData.executionPlan ?? {
     isTarget: false,
-    isSeed: false,
     isBlocked: false,
     matvals: [],
   };
@@ -507,14 +506,6 @@ export default function ShellNode({ data }: NodeProps) {
       {executionPlan.isTarget && (
         <div className="execution-plan-floating nodrag nopan">
           <div className="execution-plan-toggle-row">
-            <button
-              type="button"
-              className={`execution-plan-toggle nodrag nopan ${executionPlan.isSeed ? "is-active" : ""}`}
-              onClick={() => typedData.onToggleExecutionPlanSeed(model.id)}
-              title={executionPlan.isSeed ? "remove execution seed" : "mark as execution seed"}
-            >
-              seed
-            </button>
             <button
               type="button"
               className={`execution-plan-toggle nodrag nopan ${executionPlan.isBlocked ? "is-active" : ""}`}

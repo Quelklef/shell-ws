@@ -49,14 +49,6 @@ function downstreamClosure(edges: WorkspaceEdge[], startNodeId: string) {
   return visited;
 }
 
-function rootNodeIds(scopeNodeIds: Set<string>, edges: WorkspaceEdge[]) {
-  return Array.from(scopeNodeIds)
-    .filter((nodeId) =>
-      !edges.some((edge) => edge.to.nodeId === nodeId && scopeNodeIds.has(edge.from.nodeId)),
-    )
-    .sort();
-}
-
 function inputKeyForEdge(edge: WorkspaceEdge) {
   if (edge.to.port === "stdin") {
     return "stdin";
@@ -223,32 +215,27 @@ export function compileExecutionRequest(
   }
 
   let scopeNodeIds: Set<string>;
-  let seedNodeIds: string[];
   let blockedNodeIds: string[] = [];
   const providedMatoutIds = new Set<MatOutId>();
   let allowedOutputPorts: Set<MaterializedOutputPort> | null = null;
 
   if (action === "pull_inputs" || action === "pull_run") {
     scopeNodeIds = upstreamClosure(workspace.edges, nodeId);
-    seedNodeIds = rootNodeIds(scopeNodeIds, workspace.edges);
     if (action === "pull_inputs") {
       blockedNodeIds = [nodeId];
     }
   } else if (action === "rerun") {
     scopeNodeIds = new Set([nodeId]);
-    seedNodeIds = [nodeId];
     for (const id of idsForInputKeys(target, connectedInputKeys(workspace.edges, nodeId))) {
       providedMatoutIds.add(id);
     }
   } else if (action === "rerun_push") {
     scopeNodeIds = pushRunnableScope(workspace, nodeId);
-    seedNodeIds = [nodeId];
     for (const id of idsForExternalDependencies(workspace, scopeNodeIds)) {
       providedMatoutIds.add(id);
     }
   } else {
     scopeNodeIds = pushRunnableScope(workspace, nodeId);
-    seedNodeIds = [nodeId];
     blockedNodeIds = [nodeId];
     allowedOutputPorts = connectedOutputPorts(
       workspace.edges.filter(
@@ -277,7 +264,6 @@ export function compileExecutionRequest(
       nodeId,
       allowedOutputPorts,
     ),
-    seedNodeIds,
     providedMatoutIds: Array.from(providedMatoutIds).sort(),
     blockedNodeIds,
   };

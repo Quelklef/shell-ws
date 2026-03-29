@@ -53,7 +53,6 @@ describe("executionPlan", () => {
     expect(emptyExecutionPlan()).toEqual({
       targetNodeIds: [],
       providedMatoutIds: [],
-      seedNodeIds: [],
       blockedNodeIds: [],
     });
   });
@@ -61,14 +60,12 @@ describe("executionPlan", () => {
   it("derives a plan snapshot from an execution request", () => {
     const request: ExecutionRequest = {
       workspace: workspace([node("a", "text"), node("b", "script")], []),
-      seedNodeIds: ["a"],
       providedMatoutIds: ["out-1"],
       blockedNodeIds: ["b"],
     };
 
     expect(executionPlanFromRequest(request)).toEqual({
       targetNodeIds: ["a", "b"],
-      seedNodeIds: ["a"],
       providedMatoutIds: ["out-1"],
       blockedNodeIds: ["b"],
     });
@@ -78,7 +75,6 @@ describe("executionPlan", () => {
     expect(executionPlanForTargetNodeIds(["b", "a", "a"])).toEqual({
       targetNodeIds: ["a", "b"],
       providedMatoutIds: [],
-      seedNodeIds: [],
       blockedNodeIds: [],
     });
   });
@@ -89,13 +85,11 @@ describe("executionPlan", () => {
         {
           targetNodeIds: ["a"],
           providedMatoutIds: ["mat-a"],
-          seedNodeIds: ["a"],
           blockedNodeIds: [],
         },
         {
           targetNodeIds: ["b"],
           providedMatoutIds: ["mat-b"],
-          seedNodeIds: [],
           blockedNodeIds: ["b"],
         },
         true,
@@ -103,7 +97,6 @@ describe("executionPlan", () => {
     ).toEqual({
       targetNodeIds: ["a", "b"],
       providedMatoutIds: ["mat-a", "mat-b"],
-      seedNodeIds: ["a"],
       blockedNodeIds: ["b"],
     });
   });
@@ -114,13 +107,11 @@ describe("executionPlan", () => {
         {
           targetNodeIds: ["a", "b"],
           providedMatoutIds: ["mat-a", "mat-b"],
-          seedNodeIds: ["a", "b"],
           blockedNodeIds: ["b"],
         },
         {
           targetNodeIds: ["b"],
           providedMatoutIds: ["mat-b"],
-          seedNodeIds: ["b"],
           blockedNodeIds: ["b"],
         },
         true,
@@ -128,7 +119,6 @@ describe("executionPlan", () => {
     ).toEqual({
       targetNodeIds: ["a"],
       providedMatoutIds: ["mat-a"],
-      seedNodeIds: ["a"],
       blockedNodeIds: [],
     });
   });
@@ -169,7 +159,6 @@ describe("executionPlan", () => {
       {
         targetNodeIds: ["b", "c"],
         providedMatoutIds: ["a-out", "b-out", "dangling"],
-        seedNodeIds: ["b", "z"],
         blockedNodeIds: ["a", "c"],
       },
     );
@@ -177,7 +166,6 @@ describe("executionPlan", () => {
     expect(request.workspace.nodes.map((item) => item.id)).toEqual(["b", "c"]);
     expect(request.workspace.edges.map((item) => item.id)).toEqual(["e2"]);
     expect(request.providedMatoutIds).toEqual(["a-out", "b-out"]);
-    expect(request.seedNodeIds).toEqual(["b"]);
     expect(request.blockedNodeIds).toEqual(["c"]);
   });
 
@@ -193,7 +181,6 @@ describe("executionPlan", () => {
       executionPlanMatvalsForNode(current, {
         targetNodeIds: ["current"],
         providedMatoutIds: ["stdout-id"],
-        seedNodeIds: [],
         blockedNodeIds: [],
       }),
     ).toEqual([

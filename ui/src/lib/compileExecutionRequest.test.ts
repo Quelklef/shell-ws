@@ -50,7 +50,7 @@ function edgeIds(request: ReturnType<typeof compileExecutionRequest>) {
 }
 
 describe("compileExecutionRequest", () => {
-  it("compiles pull_inputs to the upstream closure with topology roots as seeds", () => {
+  it("compiles pull_inputs to the upstream closure", () => {
     const a = node("a", "text");
     const b = node("b", "script");
     b.materialized = {
@@ -76,7 +76,6 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["a", "b"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.seedNodeIds).toEqual(["a"]);
     expect(request.blockedNodeIds).toEqual(["b"]);
     expect(request.providedMatoutIds).toEqual([]);
     expect(request.workspace.nodes.find((item) => item.id === "b")?.materialized).toEqual({
@@ -107,7 +106,6 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["a", "b"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.seedNodeIds).toEqual(["a"]);
     expect(request.blockedNodeIds).toEqual([]);
     expect(request.providedMatoutIds).toEqual([]);
   });
@@ -141,7 +139,6 @@ describe("compileExecutionRequest", () => {
       "rerun",
     );
 
-    expect(request.seedNodeIds).toEqual(["target"]);
     expect(request.blockedNodeIds).toEqual([]);
     expect(request.providedMatoutIds).toEqual(["mat-in"]);
     expect(request.workspace.nodes.map((item) => item.id)).toEqual(["target"]);
@@ -174,7 +171,6 @@ describe("compileExecutionRequest", () => {
       "repush",
     );
 
-    expect(request.seedNodeIds).toEqual(["source"]);
     expect(request.blockedNodeIds).toEqual(["source"]);
     expect(request.providedMatoutIds).toEqual(["mat-stdout"]);
     expect(request.workspace.nodes.map((item) => item.id)).toEqual(["source", "sink"]);
@@ -215,7 +211,6 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["source"]);
     expect(edgeIds(request)).toEqual([]);
-    expect(request.seedNodeIds).toEqual(["source"]);
     expect(request.blockedNodeIds).toEqual(["source"]);
     expect(request.providedMatoutIds).toEqual(["source-out"]);
   });
@@ -258,7 +253,6 @@ describe("compileExecutionRequest", () => {
 
     expect(nodeIds(request)).toEqual(["source", "sink"]);
     expect(edgeIds(request)).toEqual(["e1"]);
-    expect(request.seedNodeIds).toEqual(["source"]);
     expect(request.blockedNodeIds).toEqual(["source"]);
     expect(request.providedMatoutIds).toEqual(["cached-sibling", "source-out"]);
     expect(request.workspace.nodes.find((item) => item.id === "sink")?.materialized?.inputs).toEqual({

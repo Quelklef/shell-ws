@@ -489,7 +489,7 @@ function toFlowNode(
   generation: Record<string, AiGenerationState>,
   handlers: Pick<
     ShellNodeActions,
-    "onUpdate" | "onRun" | "onSelectExecutionTarget" | "getActionReason" | "onToggleExecutionPlanSeed" | "onToggleExecutionPlanBlocked" | "onToggleExecutionPlanMatout" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
+    "onUpdate" | "onRun" | "onSelectExecutionTarget" | "getActionReason" | "onToggleExecutionPlanBlocked" | "onToggleExecutionPlanMatout" | "onDelete" | "onPickFile" | "onToggleAutorun" | "onGenerate" | "onClearMaterialized" | "onConvertKind" | "onResizeWidth" | "onResizePaneHeight" | "onResizePaneWidth"
   >,
   edgeDerived: NodeEdgeDerivedData,
   previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
@@ -506,7 +506,6 @@ function toFlowNode(
       selectionPreview: false,
       executionPlan: {
         isTarget: executionPlan.targetNodeIds.includes(node.id),
-        isSeed: executionPlan.seedNodeIds.includes(node.id),
         isBlocked: executionPlan.blockedNodeIds.includes(node.id),
         matvals: executionPlanMatvalsForNode(node, executionPlan),
       },
@@ -517,7 +516,6 @@ function toFlowNode(
       onRun: handlers.onRun,
       onSelectExecutionTarget: handlers.onSelectExecutionTarget,
       getActionReason: handlers.getActionReason,
-      onToggleExecutionPlanSeed: handlers.onToggleExecutionPlanSeed,
       onToggleExecutionPlanBlocked: handlers.onToggleExecutionPlanBlocked,
       onToggleExecutionPlanMatout: handlers.onToggleExecutionPlanMatout,
       onDelete: handlers.onDelete,
@@ -618,7 +616,6 @@ type ShellNodeActions = {
   onRun: (nodeId: string, action: ExecutionAction) => void;
   onSelectExecutionTarget: (nodeId: string, action: ExecutionAction, additive: boolean) => void;
   getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
-  onToggleExecutionPlanSeed: (nodeId: string) => void;
   onToggleExecutionPlanBlocked: (nodeId: string) => void;
   onToggleExecutionPlanMatout: (nodeId: string, id: string) => void;
   onDelete: (nodeId: string) => void;
@@ -897,7 +894,6 @@ function WorkspaceCanvas() {
     onRun: () => undefined,
     onSelectExecutionTarget: () => undefined,
     getActionReason: () => null,
-    onToggleExecutionPlanSeed: () => undefined,
     onToggleExecutionPlanBlocked: () => undefined,
     onToggleExecutionPlanMatout: () => undefined,
     onDelete: () => undefined,
@@ -942,7 +938,6 @@ function WorkspaceCanvas() {
     onRun: (...args) => (handlersRef.current ?? handlersFallback).onRun(...args),
     onSelectExecutionTarget: (...args) => (handlersRef.current ?? handlersFallback).onSelectExecutionTarget(...args),
     getActionReason: (...args) => (handlersRef.current ?? handlersFallback).getActionReason(...args),
-    onToggleExecutionPlanSeed: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanSeed(...args),
     onToggleExecutionPlanBlocked: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanBlocked(...args),
     onToggleExecutionPlanMatout: (...args) => (handlersRef.current ?? handlersFallback).onToggleExecutionPlanMatout(...args),
     onDelete: (...args) => (handlersRef.current ?? handlersFallback).onDelete(...args),
@@ -1017,7 +1012,6 @@ function WorkspaceCanvas() {
               },
               executionPlan: {
                 isTarget: executionPlanRef.current.targetNodeIds.includes(node.id),
-                isSeed: executionPlanRef.current.seedNodeIds.includes(node.id),
                 isBlocked: executionPlanRef.current.blockedNodeIds.includes(node.id),
                 matvals: executionPlanMatvalsForNode(
                   {
@@ -1050,7 +1044,6 @@ function WorkspaceCanvas() {
     patchNodesById(nodesRef.current.map((node) => node.id), (node) => {
       const nextNodeExecutionPlan = {
         isTarget: nextPlan.targetNodeIds.includes(node.id),
-        isSeed: nextPlan.seedNodeIds.includes(node.id),
         isBlocked: nextPlan.blockedNodeIds.includes(node.id),
         matvals: executionPlanMatvalsForNode(node.data.model, nextPlan),
       };
@@ -1066,7 +1059,6 @@ function WorkspaceCanvas() {
         });
       if (
         currentNodeExecutionPlan?.isTarget === nextNodeExecutionPlan.isTarget
-        && currentNodeExecutionPlan?.isSeed === nextNodeExecutionPlan.isSeed
         && currentNodeExecutionPlan?.isBlocked === nextNodeExecutionPlan.isBlocked
         && sameMatvals
       ) {
@@ -1370,7 +1362,6 @@ function WorkspaceCanvas() {
     if (
       sameArray(trimmed.targetNodeIds, executionPlanRef.current.targetNodeIds)
       && sameArray(trimmed.providedMatoutIds, executionPlanRef.current.providedMatoutIds)
-      && sameArray(trimmed.seedNodeIds, executionPlanRef.current.seedNodeIds)
       && sameArray(trimmed.blockedNodeIds, executionPlanRef.current.blockedNodeIds)
     ) {
       return;
@@ -1777,14 +1768,6 @@ function WorkspaceCanvas() {
         }
       },
       getActionReason,
-      onToggleExecutionPlanSeed: (nodeId) => {
-        setExecutionPlan((current) => ({
-          ...current,
-          seedNodeIds: current.seedNodeIds.includes(nodeId)
-            ? current.seedNodeIds.filter((id) => id !== nodeId)
-            : [...current.seedNodeIds, nodeId].sort(),
-        }));
-      },
       onToggleExecutionPlanBlocked: (nodeId) => {
         setExecutionPlan((current) => ({
           ...current,

@@ -448,8 +448,6 @@ pub enum ClientEvent {
 pub struct ExecutionRequest {
     pub workspace: Workspace,
     #[serde(default)]
-    pub seed_node_ids: Vec<String>,
-    #[serde(default)]
     pub provided_matout_ids: Vec<String>,
     #[serde(default)]
     pub blocked_node_ids: Vec<String>,
@@ -720,7 +718,6 @@ mod tests {
             "type": "run_node",
             "request": {
                 "workspace": workspace,
-                "seedNodeIds": ["text-1"],
                 "providedMatoutIds": [],
                 "blockedNodeIds": []
             }
@@ -728,7 +725,7 @@ mod tests {
 
         let event: ClientEvent = serde_json::from_value(payload).expect("deserialize run event");
         match event {
-            ClientEvent::RunNode { request } => assert_eq!(request.seed_node_ids, vec!["text-1"]),
+            ClientEvent::RunNode { request } => assert!(request.provided_matout_ids.is_empty()),
             _ => panic!("unexpected client event"),
         }
     }

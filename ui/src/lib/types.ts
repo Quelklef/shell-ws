@@ -236,7 +236,6 @@ export interface DisplayState {
 
 export interface ExecutionRequest {
   workspace: Workspace;
-  seedNodeIds: string[];
   providedMatoutIds: MatOutId[];
   blockedNodeIds: string[];
 }
@@ -244,7 +243,6 @@ export interface ExecutionRequest {
 export interface ExecutionPlanState {
   targetNodeIds: string[];
   providedMatoutIds: MatOutId[];
-  seedNodeIds: string[];
   blockedNodeIds: string[];
 }
 
@@ -257,7 +255,6 @@ export interface ExecutionPlanNodeMatval {
 
 export interface NodeExecutionPlanState {
   isTarget: boolean;
-  isSeed: boolean;
   isBlocked: boolean;
   matvals: ExecutionPlanNodeMatval[];
 }
@@ -299,7 +296,6 @@ export interface ShellNodeData extends Record<string, unknown> {
   onRun: (nodeId: string, action: ExecutionAction) => void;
   onSelectExecutionTarget: (nodeId: string, action: ExecutionAction, additive: boolean) => void;
   getActionReason: (nodeId: string, action: ExecutionAction) => string | null;
-  onToggleExecutionPlanSeed: (nodeId: string) => void;
   onToggleExecutionPlanBlocked: (nodeId: string) => void;
   onToggleExecutionPlanMatout: (nodeId: string, id: MatOutId) => void;
   onDelete: (nodeId: string) => void;

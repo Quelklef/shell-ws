@@ -401,9 +401,8 @@ impl IntoResponse for AppError {
 fn summarize_client_event(event: &ClientEvent) -> String {
     match event {
         ClientEvent::RunNode { request } => format!(
-            "run nodes={} seeds={} blocked={}",
+            "run nodes={} blocked={}",
             request.workspace.nodes.len(),
-            request.seed_node_ids.len(),
             request.blocked_node_ids.len()
         ),
         ClientEvent::StopExecution { exec_id, node_id } => {

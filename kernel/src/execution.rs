@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet, VecDeque},
+    collections::{BTreeMap, HashMap, HashSet},
     path::{Path, PathBuf},
     process::Stdio,
     sync::Arc,
@@ -103,10 +103,10 @@ impl ExecutionManager {
         let cancel = CancellationToken::new();
         let manager = self.clone();
         let node_for_handle = request
-            .seed_node_ids
+            .workspace
+            .nodes
             .first()
-            .cloned()
-            .or_else(|| request.workspace.nodes.first().map(|node| node.id.clone()))
+            .map(|node| node.id.clone())
             .unwrap_or_default();
         let exec_id_for_task = exec_id.clone();
         let exec_id_for_remove = exec_id.clone();
@@ -183,7 +183,6 @@ struct ExecutionHandle {
 
 struct StreamingExecutionPlan {
     scope: HashSet<String>,
-    seeds: Vec<String>,
     blocked_nodes: HashSet<String>,
 }
 
@@ -360,17 +359,12 @@ impl ExecutionContext {
     }
 
     fn validate_request(&self) -> Result<StreamingExecutionPlan, String> {
-        if self.request.seed_node_ids.is_empty() {
-            return Err("execution request has no seeds".to_string());
-        }
-
         let scope = self
             .workspace
             .nodes
             .iter()
             .map(|node| node.id.clone())
             .collect::<HashSet<_>>();
-        let seeds = self.request.seed_node_ids.iter().cloned().collect::<HashSet<_>>();
         let blocked_nodes = self
             .request
             .blocked_node_ids
@@ -378,30 +372,13 @@ impl ExecutionContext {
             .cloned()
             .collect::<HashSet<_>>();
 
-        for node_id in seeds.iter().chain(blocked_nodes.iter()) {
+        for node_id in blocked_nodes.iter() {
             if !scope.contains(node_id) {
                 return Err(format!("node {node_id} is not in the execution graph"));
             }
         }
 
-        let roots = self.roots_in_scope(&scope).into_iter().collect::<HashSet<_>>();
-        for seed in &seeds {
-            if !roots.contains(seed) {
-                return Err(format!("seed node {seed} is not a graph-theoretic root"));
-            }
-        }
-        for root in &roots {
-            if !seeds.contains(root) {
-                return Err(format!("graph root {root} is missing from the seed set"));
-            }
-        }
-
-        let reachable = self.forward_reachable_from(&seeds);
-        for node_id in &scope {
-            if !reachable.contains(node_id) {
-                return Err(format!("node {node_id} is unreachable from the provided seeds"));
-            }
-        }
+        let roots = self.roots_in_scope(&scope);
 
         for node_id in &blocked_nodes {
             let has_downstream = self
@@ -409,24 +386,21 @@ impl ExecutionContext {
                 .get(node_id)
                 .map(|edges| edges.iter().any(|edge| scope.contains(&edge.to.node_id)))
                 .unwrap_or(false);
-            if has_downstream
-                && (!seeds.contains(node_id) || !self.node_has_replayable_outputs(node_id))
-            {
+            if has_downstream && !self.node_has_replayable_outputs(node_id) {
                 return Err(format!(
                     "blocked node {node_id} cannot feed downstream execution without provided outputs"
                 ));
             }
         }
-        for node_id in seeds.intersection(&blocked_nodes) {
+        for node_id in roots.iter().filter(|node_id| blocked_nodes.contains(*node_id)) {
             if !self.node_has_replayable_outputs(node_id) {
-                let node = self.nodes.get(node_id).expect("seed node");
+                let node = self.nodes.get(node_id).expect("root node");
                 return Err(format!("{} has no outputs to push.", node_label(node)));
             }
         }
 
         Ok(StreamingExecutionPlan {
             scope,
-            seeds: self.request.seed_node_ids.clone(),
             blocked_nodes,
         })
     }
@@ -487,22 +461,6 @@ impl ExecutionContext {
 
     fn node_has_replayable_outputs(&self, node_id: &str) -> bool {
         !self.node_available_materialized_outputs(node_id).is_empty()
-    }
-
-    fn forward_reachable_from(&self, seeds: &HashSet<String>) -> HashSet<String> {
-        let mut visited = HashSet::new();
-        let mut queue = seeds.iter().cloned().collect::<VecDeque<_>>();
-        while let Some(node_id) = queue.pop_front() {
-            if !visited.insert(node_id.clone()) {
-                continue;
-            }
-            if let Some(edges) = self.outgoing.get(&node_id) {
-                for edge in edges {
-                    queue.push_back(edge.to.node_id.clone());
-                }
-            }
-        }
-        visited
     }
 
     fn roots_in_scope(&self, scope: &HashSet<String>) -> Vec<String> {
@@ -739,8 +697,8 @@ impl RunController {
 
     async fn run(mut self) -> Result<(), String> {
         self.init();
-        for seed in self.plan.seeds.clone() {
-            self.start_seed(seed).await?;
+        for root in self.context.roots_in_scope(&self.plan.scope) {
+            self.start_root(root).await?;
         }
 
         loop {
@@ -783,13 +741,14 @@ impl RunController {
         }
     }
 
-    async fn start_seed(&mut self, node_id: String) -> Result<(), String> {
+    async fn start_root(&mut self, node_id: String) -> Result<(), String> {
         if self.context.node_has_replayable_outputs(&node_id) {
-            self.start_materialized_seed(node_id).await
+            self.start_replay_root(node_id).await
         } else if self.context.should_execute_node_in_scope(&node_id) {
             self.start_node_execute(node_id).await
         } else {
-            Ok(())
+            let node = self.context.nodes.get(&node_id).expect("root node");
+            Err(format!("{} has no outputs to push.", node_label(node)))
         }
     }
 
@@ -1122,7 +1081,7 @@ impl RunController {
         }
     }
 
-    async fn start_materialized_seed(&mut self, node_id: String) -> Result<(), String> {
+    async fn start_replay_root(&mut self, node_id: String) -> Result<(), String> {
         let node = self
             .context
             .nodes
@@ -1157,7 +1116,7 @@ impl RunController {
             return Ok(());
         }
         if self.context.node_has_replayable_outputs(&node_id) {
-            self.start_materialized_seed(node_id).await
+            self.start_replay_root(node_id).await
         } else {
             self.start_node_execute(node_id).await
         }
@@ -1852,6 +1811,7 @@ mod tests {
         AutoRunConfig, ExecutionAction, ExecutionRequest, MatOutEntry, MaterializedReferrer,
         PortKind as ModelPortKind, Position, ProducedBy, Size, WorkspaceUi,
     };
+    use std::collections::VecDeque;
     use tokio::time::{timeout, Duration};
 
     fn node(kind: NodeKind, id: &str) -> Node {
@@ -1952,21 +1912,6 @@ mod tests {
             }
         }
         visited
-    }
-
-    fn root_ids(workspace: &Workspace, scope: &HashSet<String>) -> Vec<String> {
-        let mut roots = scope
-            .iter()
-            .filter(|node_id| {
-                !workspace
-                    .edges
-                    .iter()
-                    .any(|edge| edge.to.node_id == **node_id && scope.contains(&edge.from.node_id))
-            })
-            .cloned()
-            .collect::<Vec<_>>();
-        roots.sort();
-        roots
     }
 
     fn edge_input_key(edge: &Edge) -> Option<String> {
@@ -2117,16 +2062,14 @@ mod tests {
             .expect("target node");
         let mut provided_ids = HashSet::new();
         let mut allowed_output_ports = None;
-        let (scope, seeds, blocked_node_ids) = match action {
+        let (scope, blocked_node_ids) = match action {
             ExecutionAction::PullInputs => {
                 let scope = upstream_closure(workspace, node_id);
-                let seeds = root_ids(workspace, &scope);
-                (scope, seeds, vec![node_id.to_string()])
+                (scope, vec![node_id.to_string()])
             }
             ExecutionAction::PullRun => {
                 let scope = upstream_closure(workspace, node_id);
-                let seeds = root_ids(workspace, &scope);
-                (scope, seeds, Vec::new())
+                (scope, Vec::new())
             }
             ExecutionAction::Rerun => {
                 let keys = connected_input_keys(workspace, node_id);
@@ -2137,7 +2080,6 @@ mod tests {
                 }
                 (
                     HashSet::from([node_id.to_string()]),
-                    vec![node_id.to_string()],
                     Vec::new(),
                 )
             }
@@ -2146,7 +2088,6 @@ mod tests {
                 provided_ids.extend(ids_for_external_dependencies(workspace, &scope));
                 (
                     scope,
-                    vec![node_id.to_string()],
                     Vec::new(),
                 )
             }
@@ -2163,7 +2104,6 @@ mod tests {
                 (
                     scope,
                     vec![node_id.to_string()],
-                    vec![node_id.to_string()],
                 )
             }
         };
@@ -2174,7 +2114,6 @@ mod tests {
                 node_id,
                 allowed_output_ports.as_ref(),
             ),
-            seed_node_ids: seeds,
             provided_matout_ids: {
                 let mut ids = provided_ids.into_iter().collect::<Vec<_>>();
                 ids.sort();
@@ -3277,7 +3216,6 @@ mod tests {
         let target = node(NodeKind::Script, "target");
         let request = ExecutionRequest {
             workspace: workspace(vec![target], vec![]),
-            seed_node_ids: vec!["target".to_string()],
             provided_matout_ids: vec!["missing".to_string()],
             blocked_node_ids: Vec::new(),
         };
@@ -3314,7 +3252,6 @@ mod tests {
                     None,
                 )],
             ),
-            seed_node_ids: vec!["source".to_string()],
             provided_matout_ids: Vec::new(),
             blocked_node_ids: Vec::new(),
         };
@@ -3361,7 +3298,6 @@ mod tests {
             "no-replay-exit".to_string(),
             ExecutionRequest {
                 workspace: workspace(vec![source.clone()], vec![]),
-                seed_node_ids: vec!["source".to_string()],
                 provided_matout_ids: Vec::new(),
                 blocked_node_ids: Vec::new(),
             },
@@ -3376,7 +3312,6 @@ mod tests {
             "replay-exit".to_string(),
             ExecutionRequest {
                 workspace: workspace(vec![source], vec![]),
-                seed_node_ids: vec!["source".to_string()],
                 provided_matout_ids: vec![provided],
                 blocked_node_ids: Vec::new(),
             },

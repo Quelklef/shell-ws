@@ -28,7 +28,6 @@ export function emptyExecutionPlan(): ExecutionPlanState {
   return {
     targetNodeIds: [],
     providedMatoutIds: [],
-    seedNodeIds: [],
     blockedNodeIds: [],
   };
 }
@@ -37,7 +36,6 @@ export function executionPlanForTargetNodeIds(nodeIds: Iterable<string>): Execut
   return {
     targetNodeIds: sortedUnique(nodeIds),
     providedMatoutIds: [],
-    seedNodeIds: [],
     blockedNodeIds: [],
   };
 }
@@ -46,7 +44,6 @@ export function executionPlanFromRequest(request: ExecutionRequest): ExecutionPl
   return {
     targetNodeIds: request.workspace.nodes.map((node) => node.id).sort(),
     providedMatoutIds: [...request.providedMatoutIds].sort(),
-    seedNodeIds: [...request.seedNodeIds].sort(),
     blockedNodeIds: [...request.blockedNodeIds].sort(),
   };
 }
@@ -65,7 +62,6 @@ export function mergeExecutionPlans(
     return {
       targetNodeIds: [...computed.targetNodeIds].sort(),
       providedMatoutIds: [...computed.providedMatoutIds].sort(),
-      seedNodeIds: [...computed.seedNodeIds].sort(),
       blockedNodeIds: [...computed.blockedNodeIds].sort(),
     };
   }
@@ -79,7 +75,6 @@ export function mergeExecutionPlans(
   return {
     targetNodeIds: combine(current.targetNodeIds, computed.targetNodeIds),
     providedMatoutIds: combine(current.providedMatoutIds, computed.providedMatoutIds),
-    seedNodeIds: combine(current.seedNodeIds, computed.seedNodeIds),
     blockedNodeIds: combine(current.blockedNodeIds, computed.blockedNodeIds),
   };
 }
@@ -94,7 +89,6 @@ export function trimExecutionPlan(
   return {
     targetNodeIds: plan.targetNodeIds.filter((id) => nodeIds.has(id)),
     providedMatoutIds: plan.providedMatoutIds.filter((id) => matoutIds.has(id)),
-    seedNodeIds: plan.seedNodeIds.filter((id) => nodeIds.has(id)),
     blockedNodeIds: plan.blockedNodeIds.filter((id) => nodeIds.has(id)),
   };
 }
@@ -127,7 +121,6 @@ export function buildExecutionRequestFromPlan(
   }
   return {
     workspace: scopedWorkspace,
-    seedNodeIds: plan.seedNodeIds.filter((id) => targetNodeIds.has(id)).sort(),
     blockedNodeIds: plan.blockedNodeIds.filter((id) => targetNodeIds.has(id)).sort(),
     providedMatoutIds: plan.providedMatoutIds.filter((id) => referencedIds.has(id)).sort(),
   };
