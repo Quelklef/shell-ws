@@ -207,6 +207,10 @@ export default function ShellNode({ data }: NodeProps) {
     () => outputPortsForKind(model.kind).map((port) => ({ key: port, port, activeAt: runtime.portActivity[port] })),
     [model.kind, runtime.portActivity],
   );
+  const handleSignature = useMemo(
+    () => `${leftPorts.map((port) => port.key).join("|")}::${rightPorts.map((port) => port.key).join("|")}`,
+    [leftPorts, rightPorts],
+  );
 
   const previewButtons = (
     <div className="port-preview-tabs">
@@ -446,10 +450,14 @@ export default function ShellNode({ data }: NodeProps) {
 
   useEffect(() => {
     const handle = window.requestAnimationFrame(() => {
+      // React Flow needs an explicit internals refresh when the handle set changes,
+      // otherwise newly-added argv ports can accept logical connections before the
+      // edge renderer knows about their DOM positions.
       refreshNodeInternals(model.id);
     });
     return () => window.cancelAnimationFrame(handle);
   }, [
+    handleSignature,
     isEditingComment,
     model.id,
     model.kind,
