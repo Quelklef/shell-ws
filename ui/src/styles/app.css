@@ -1071,6 +1071,8 @@ textarea {
 }
 
 .selection-actions button.selection-actions-plan-target {
+  border-bottom-color: color-mix(in srgb, var(--exec-plan-color) 48%, transparent);
+  background: color-mix(in srgb, var(--exec-plan-color) 10%, transparent);
   color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
 }
 
