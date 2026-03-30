@@ -328,6 +328,7 @@ export interface FlowEdgeData extends Record<string, unknown> {
   buffering: BufferingMode;
   executionPlan?: boolean;
   execSelectionGestureActive?: boolean;
+  selectionPreview?: boolean;
   onDelete?: (edgeId: string) => void;
   onCycle?: (edgeId: string) => void;
 }

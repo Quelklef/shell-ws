@@ -596,6 +596,7 @@ function toFlowEdge(
       buffering: edge.buffering,
       executionPlan: executionPlan.edgeIds.includes(edge.id),
       execSelectionGestureActive,
+      selectionPreview: false,
       onDelete,
       onCycle,
     },
@@ -1254,6 +1255,7 @@ function WorkspaceCanvas() {
             buffering: edge.data?.buffering ?? "unbuffered",
             executionPlan,
             execSelectionGestureActive,
+            selectionPreview: edge.data?.selectionPreview ?? false,
             onDelete: edge.data?.onDelete,
             onCycle: edge.data?.onCycle,
           },
@@ -1428,6 +1430,26 @@ function WorkspaceCanvas() {
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !userSelectionActive || !userSelectionRect) {
+      const previousSelectedIds = selectionPreviewEdgeIdsRef.current;
+      if (previousSelectedIds.size > 0) {
+        setEdges((current) => {
+          let changed = false;
+          const next = current.map((edge) => {
+            if (!previousSelectedIds.has(edge.id) || !edge.data?.selectionPreview) {
+              return edge;
+            }
+            changed = true;
+            return {
+              ...edge,
+              data: {
+                ...edge.data,
+                selectionPreview: false,
+              },
+            };
+          });
+          return changed ? next : current;
+        });
+      }
       selectionPreviewEdgeIdsRef.current = new Set();
       gesturePreviewEdgeIdsRef.current = [];
       setGesturePreviewEdgeIds((current) => current.length === 0 ? current : []);
@@ -1466,11 +1488,17 @@ function WorkspaceCanvas() {
         setEdges((current) => {
           let changed = false;
           const next = current.map((edge) => {
-            if (!previousSelectedIds.has(edge.id) || !edge.selected) {
+            if (!previousSelectedIds.has(edge.id) || !edge.data?.selectionPreview) {
               return edge;
             }
             changed = true;
-            return { ...edge, selected: false };
+            return {
+              ...edge,
+              data: {
+                ...edge.data,
+                selectionPreview: false,
+              },
+            };
           });
           return changed ? next : current;
         });
@@ -1498,12 +1526,20 @@ function WorkspaceCanvas() {
         if (!changedIds.has(edge.id)) {
           return edge;
         }
-        const selected = selectedEdgeIds.has(edge.id);
-        if (!!edge.selected === selected) {
+        const selectionPreview = selectedEdgeIds.has(edge.id);
+        if ((edge.data?.selectionPreview ?? false) === selectionPreview) {
           return edge;
         }
         changed = true;
-        return { ...edge, selected };
+        return {
+          ...edge,
+          data: edge.data
+            ? {
+                ...edge.data,
+                selectionPreview,
+              }
+            : edge.data,
+        };
       });
       return changed ? next : current;
     });
@@ -1823,11 +1859,21 @@ function WorkspaceCanvas() {
         setEdges((current) => {
           let changed = false;
           const next = current.map((edge) => {
-            if (!edge.selected) {
+            const selectionPreview = edge.data?.selectionPreview ?? false;
+            if (!edge.selected && !selectionPreview) {
               return edge;
             }
             changed = true;
-            return { ...edge, selected: false };
+            return {
+              ...edge,
+              selected: false,
+              data: edge.data
+                ? {
+                    ...edge.data,
+                    selectionPreview: false,
+                  }
+                : edge.data,
+            };
           });
           return changed ? next : current;
         });
@@ -1842,6 +1888,29 @@ function WorkspaceCanvas() {
             }
             changed = true;
             return { ...node, selected };
+          });
+          return changed ? next : current;
+        });
+        const selectedEdgeIds = selectionPreviewEdgeIdsRef.current;
+        setEdges((current) => {
+          let changed = false;
+          const next = current.map((edge) => {
+            const selected = selectedEdgeIds.has(edge.id);
+            const selectionPreview = edge.data?.selectionPreview ?? false;
+            if (edge.selected === selected && !selectionPreview) {
+              return edge;
+            }
+            changed = true;
+            return {
+              ...edge,
+              selected,
+              data: edge.data
+                ? {
+                    ...edge.data,
+                    selectionPreview: false,
+                  }
+                : edge.data,
+            };
           });
           return changed ? next : current;
         });

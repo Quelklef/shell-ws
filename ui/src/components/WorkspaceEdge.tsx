@@ -36,31 +36,33 @@ function WorkspaceEdge({
   const buffering = String(typedData.buffering ?? "line_or_1024");
   const inExecutionPlan = typedData.executionPlan ?? false;
   const preferExecutionPlan = inExecutionPlan && typedData.execSelectionGestureActive;
-  const edgeStroke = selected && !preferExecutionPlan
+  const selectionPreview = typedData.selectionPreview ?? false;
+  const visiblySelected = selected || selectionPreview;
+  const edgeStroke = visiblySelected && !preferExecutionPlan
     ? "color-mix(in srgb, var(--selection) 82%, white 18%)"
     : inExecutionPlan
       ? "color-mix(in srgb, var(--exec-plan-color) 82%, white 18%)"
       : "rgba(242, 192, 120, 0.9)";
-  const edgeGlow = selected && !preferExecutionPlan
+  const edgeGlow = visiblySelected && !preferExecutionPlan
     ? "drop-shadow(0 0 5px color-mix(in srgb, var(--selection) 36%, transparent))"
     : inExecutionPlan
       ? "drop-shadow(0 0 5px color-mix(in srgb, var(--exec-plan-color) 30%, transparent))"
       : "drop-shadow(0 0 4px rgba(242, 192, 120, 0.14))";
   const edgeStyle = {
     stroke: edgeStroke,
-    strokeWidth: selected && !preferExecutionPlan ? 4.2 : inExecutionPlan ? 4 : 3.1,
+    strokeWidth: visiblySelected && !preferExecutionPlan ? 4.2 : inExecutionPlan ? 4 : 3.1,
     filter: edgeGlow,
     ...(style ?? {}),
   };
   const completeEdgeStyle = {
     stroke: edgeStroke,
-    strokeWidth: selected && !preferExecutionPlan ? 6.6 : inExecutionPlan ? 6 : 5.2,
+    strokeWidth: visiblySelected && !preferExecutionPlan ? 6.6 : inExecutionPlan ? 6 : 5.2,
     filter: edgeGlow,
     ...(style ?? {}),
   };
   const completeEdgeCutoutStyle = {
     stroke: "rgba(12, 14, 16, 0.96)",
-    strokeWidth: selected && !preferExecutionPlan ? 2.6 : 2.2,
+    strokeWidth: visiblySelected && !preferExecutionPlan ? 2.6 : 2.2,
     ...(style ?? {}),
   };
 
@@ -68,11 +70,11 @@ function WorkspaceEdge({
     <>
       {buffering === "on_complete" ? (
         <>
-          <BaseEdge id={`${id}-complete-outer`} path={path} style={completeEdgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${selected ? "is-selected" : ""}`} />
+          <BaseEdge id={`${id}-complete-outer`} path={path} style={completeEdgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${visiblySelected ? "is-selected" : ""}`} />
           <BaseEdge id={`${id}-complete-cutout`} path={path} style={completeEdgeCutoutStyle} className="workspace-edge-path workspace-edge-path-on_complete-cutout" />
         </>
       ) : (
-        <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${animated ? "is-animated" : ""} ${selected ? "is-selected" : ""}`} />
+        <BaseEdge id={id} path={path} style={edgeStyle} markerEnd={markerEnd} className={`workspace-edge-path workspace-edge-path-${buffering} ${animated ? "is-animated" : ""} ${visiblySelected ? "is-selected" : ""}`} />
       )}
       <path
         d={path}
@@ -89,7 +91,7 @@ function WorkspaceEdge({
       />
       <EdgeLabelRenderer>
         <div
-          className={`edge-toolbar nodrag nopan ${selected ? "is-selected" : ""} ${hovered ? "is-visible" : ""}`}
+          className={`edge-toolbar nodrag nopan ${visiblySelected ? "is-selected" : ""} ${hovered ? "is-visible" : ""}`}
           style={{
             transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
           }}
