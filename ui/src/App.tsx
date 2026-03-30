@@ -1890,14 +1890,20 @@ function WorkspaceCanvas() {
     if (selectionGestureClearTimerRef.current !== null) {
       window.clearTimeout(selectionGestureClearTimerRef.current);
     }
+    const execSelectionActive = selectionExecModifierRef.current.alt;
+    const execSelectionShift = selectionExecModifierRef.current.shift;
+    const finalPreviewNodeIds = new Set(selectionPreviewNodeIdsRef.current);
+    const finalPreviewEdgeIds = new Set(selectionPreviewEdgeIdsRef.current);
+    const finalGestureNodeIds = [...gesturePreviewNodeIdsRef.current];
+    const finalGestureEdgeIds = [...gesturePreviewEdgeIdsRef.current];
     // React Flow can deliver the final select changes just after selection-end fires.
     selectionGestureClearTimerRef.current = window.setTimeout(() => {
-      if (selectionExecModifierRef.current.alt) {
+      if (execSelectionActive) {
         const computedPlan = executionPlanForSelection(
-          gesturePreviewNodeIdsRef.current,
-          gesturePreviewEdgeIdsRef.current,
+          finalGestureNodeIds,
+          finalGestureEdgeIds,
         );
-        setExecutionPlan((current) => mergeExecutionPlans(current, computedPlan, selectionExecModifierRef.current.shift));
+        setExecutionPlan((current) => mergeExecutionPlans(current, computedPlan, execSelectionShift));
         gesturePreviewNodeIdsRef.current = [];
         gesturePreviewEdgeIdsRef.current = [];
         setNodes((current) => {
@@ -1933,7 +1939,7 @@ function WorkspaceCanvas() {
           return changed ? next : current;
         });
       } else {
-        const selectedNodeIds = selectionPreviewNodeIdsRef.current;
+        const selectedNodeIds = finalPreviewNodeIds;
         setNodes((current) => {
           let changed = false;
           const next = current.map((node) => {
@@ -1946,7 +1952,7 @@ function WorkspaceCanvas() {
           });
           return changed ? next : current;
         });
-        const selectedEdgeIds = selectionPreviewEdgeIdsRef.current;
+        const selectedEdgeIds = finalPreviewEdgeIds;
         setEdges((current) => {
           let changed = false;
           const next = current.map((edge) => {
@@ -1969,6 +1975,8 @@ function WorkspaceCanvas() {
           });
           return changed ? next : current;
         });
+        selectionPreviewNodeIdsRef.current = new Set();
+        selectionPreviewEdgeIdsRef.current = new Set();
       }
       selectionGestureActiveRef.current = false;
       selectionGestureClearTimerRef.current = null;
@@ -2757,30 +2765,8 @@ function WorkspaceCanvas() {
 
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
-      const selectionGestureActive = selectionGestureActiveRef.current || userSelectionActive;
-      const filteredChanges = changes.filter((change) =>
-        change.type !== "select"
-        || !selectionGestureActive,
-      );
+      const filteredChanges = changes.filter((change) => change.type !== "select");
       if (filteredChanges.length === 0) {
-        return;
-      }
-      if (filteredChanges.every((change) => change.type === "select")) {
-        // Pure select churn is frequent enough that the generic React Flow change
-        // reconciler is overkill here; patch just the affected node ids.
-        const selectedById = new Map(
-          filteredChanges.map((change) => [change.id, Boolean(change.selected)]),
-        );
-        patchNodesById(selectedById.keys(), (node) => {
-          const selected = selectedById.get(node.id);
-          if (selected === undefined || node.selected === selected) {
-            return node;
-          }
-          return {
-            ...node,
-            selected,
-          };
-        });
         return;
       }
       setNodes((current) => {
@@ -2789,7 +2775,7 @@ function WorkspaceCanvas() {
           if (change.type === "position") {
             return !change.dragging;
           }
-          return change.type !== "select" && change.type !== "dimensions";
+          return change.type !== "dimensions";
         });
         const shouldPersistLayout = filteredChanges.some(
           (change) => change.type === "dimensions" && !change.resizing,
@@ -2803,7 +2789,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [patchNodesById, persistLayoutSoon, persistSoon, setNodes, userSelectionActive],
+    [persistLayoutSoon, persistSoon, setNodes],
   );
 
   const onEdgesChange = useCallback(
