@@ -237,6 +237,7 @@ export function executionPlanPortKeysForNode(
   argvSlots: number[] | undefined,
   plan: ExecutionPlanState,
   edges: WorkspaceEdge[],
+  matvals: ExecutionPlanNodeMatval[] = executionPlanMatvalsForNode(node, plan),
 ): string[] {
   const portKeys = new Set<string>();
   if (plan.executableNodeIds.includes(node.id)) {
@@ -264,7 +265,7 @@ export function executionPlanPortKeysForNode(
       portKeys.add(localPortKey(edge.to));
     }
   }
-  for (const entry of executionPlanMatvalsForNode(node, plan)) {
+  for (const entry of matvals) {
     if (entry.included) {
       portKeys.add(entry.key);
     }

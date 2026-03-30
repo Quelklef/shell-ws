@@ -1166,6 +1166,10 @@ textarea {
   gap: 8px;
 }
 
+.canvas-shell.is-exec-selection-active .execution-plan-floating {
+  display: none;
+}
+
 .execution-plan-toggle-row {
   display: flex;
   align-items: center;
