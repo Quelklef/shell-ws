@@ -390,6 +390,10 @@ function SelectionActionsAnchor({
   const viewportTransform = useStore((store) => store.transform);
   const selectionActionsRef = useRef<HTMLDivElement | null>(null);
   const [selectionActionsSize, setSelectionActionsSize] = useState({ width: 180, height: 240 });
+  const nodeById = useMemo(
+    () => new Map(nodes.map((node) => [node.id, node])),
+    [nodes],
+  );
 
   const selectedEdgeBounds = useMemo(() => {
     if (selectedEdges.length === 0) {
@@ -397,8 +401,8 @@ function SelectionActionsAnchor({
     }
     const [viewportX, viewportY, zoom] = viewportTransform;
     const anchors = selectedEdges.flatMap((edge) => {
-      const sourceNode = nodes.find((node) => node.id === edge.source);
-      const targetNode = nodes.find((node) => node.id === edge.target);
+      const sourceNode = nodeById.get(edge.source);
+      const targetNode = nodeById.get(edge.target);
       if (!sourceNode || !targetNode) {
         return [];
       }
@@ -426,7 +430,7 @@ function SelectionActionsAnchor({
       top: rightmost.top,
       right: rightmost.right,
     };
-  }, [edges, nodes, selectedEdges, viewportTransform]);
+  }, [edges, nodeById, selectedEdges, viewportTransform]);
 
   useLayoutEffect(() => {
     const element = selectionActionsRef.current;
