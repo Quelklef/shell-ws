@@ -1145,12 +1145,28 @@ textarea {
   box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
 }
 
+.react-flow__node.is-execution-plan-preview .shell-node .node-card {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
+}
+
 .react-flow__node.is-selection-preview .shell-node.is-execution-target .node-card {
   border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
   box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
 }
 
 .canvas-shell.is-exec-plan-modifier-active .react-flow__node.is-selection-preview .shell-node.is-execution-target .node-card {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
+  box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
+}
+
+.canvas-shell.is-exec-selection-active .shell-node.is-execution-target .node-card {
+  border-color: var(--line);
+  box-shadow: var(--shadow);
+}
+
+.canvas-shell.is-exec-selection-active .react-flow__node.is-execution-plan-preview .shell-node .node-card,
+.canvas-shell.is-exec-selection-active .react-flow__node.is-selection-preview.is-execution-plan-preview .shell-node .node-card {
   border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
   box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
 }
@@ -1833,6 +1849,16 @@ textarea {
 .shell-handle.is-execution-target::before {
   opacity: 0.7;
   background: color-mix(in srgb, var(--exec-plan-color) 24%, transparent);
+}
+
+.canvas-shell.is-exec-selection-active .shell-handle.is-execution-target {
+  border-color: rgb(var(--handle-rgb, 242, 192, 120));
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.45);
+}
+
+.canvas-shell.is-exec-selection-active .shell-handle.is-execution-target::before {
+  opacity: 0;
+  background: rgba(var(--handle-rgb, 242, 192, 120), 0.2);
 }
 
 .shell-handle-stdout {

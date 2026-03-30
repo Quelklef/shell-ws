@@ -522,8 +522,15 @@ function SelectionGestureHint({
   );
 }
 
-function selectionPreviewNodeClassName(selectionPreview: boolean) {
-  return selectionPreview ? "is-selection-preview" : undefined;
+function selectionPreviewNodeClassName(selectionPreview: boolean, execSelectionPreview = false) {
+  const classes = [];
+  if (selectionPreview) {
+    classes.push("is-selection-preview");
+  }
+  if (execSelectionPreview) {
+    classes.push("is-execution-plan-preview");
+  }
+  return classes.length > 0 ? classes.join(" ") : undefined;
 }
 
 function toFlowNode(
@@ -976,6 +983,8 @@ function WorkspaceCanvas() {
   const gesturePreviewEdgeIdsRef = useRef<string[]>([]);
   const selectionPreviewNodeIdsRef = useRef<Set<string>>(new Set());
   const selectionPreviewEdgeIdsRef = useRef<Set<string>>(new Set());
+  const execSelectionPreviewNodeIdsRef = useRef<Set<string>>(new Set());
+  const displayedExecutionPlanGestureActiveRef = useRef(false);
 
   const flow = useReactFlow<FlowNode, FlowEdge>();
   const userSelectionRect = useStore((store) => store.userSelectionRect);
@@ -1035,6 +1044,29 @@ function WorkspaceCanvas() {
       return changed ? next : current;
     });
   }, [setNodes]);
+
+  const patchNodeChromeClasses = useCallback(
+    (
+      nodeIds: Iterable<string>,
+      selectionPreviewIds = selectionPreviewNodeIdsRef.current,
+      execSelectionPreviewIds = execSelectionPreviewNodeIdsRef.current,
+    ) => {
+      patchNodesById(nodeIds, (node) => {
+        const className = selectionPreviewNodeClassName(
+          selectionPreviewIds.has(node.id),
+          execSelectionPreviewIds.has(node.id),
+        );
+        if (node.className === className) {
+          return node;
+        }
+        return {
+          ...node,
+          className,
+        };
+      });
+    },
+    [patchNodesById],
+  );
 
   const updateNodePreviewControlsLocation = useCallback((nextLocation: Workspace["ui"]["previewControlsLocation"]) => {
     patchNodesById(nodesRef.current.map((node) => node.id), (node) =>
@@ -1293,6 +1325,33 @@ function WorkspaceCanvas() {
     });
   }, [setEdges, userSelectionActive]);
 
+  const updateNodeExecutionPlanPreviewClasses = useCallback((nextPlan: ExecutionPlanState) => {
+    const previousPreviewIds = execSelectionPreviewNodeIdsRef.current;
+    const nextPreviewIds = participatingNodeIdsForCurrentPlan(nextPlan);
+    const changedNodeIds = new Set<string>();
+    for (const id of previousPreviewIds) {
+      if (!nextPreviewIds.has(id)) {
+        changedNodeIds.add(id);
+      }
+    }
+    for (const id of nextPreviewIds) {
+      if (!previousPreviewIds.has(id)) {
+        changedNodeIds.add(id);
+      }
+    }
+    execSelectionPreviewNodeIdsRef.current = nextPreviewIds;
+    patchNodeChromeClasses(changedNodeIds);
+  }, [participatingNodeIdsForCurrentPlan, patchNodeChromeClasses]);
+
+  const clearNodeExecutionPlanPreviewClasses = useCallback(() => {
+    const previousPreviewIds = execSelectionPreviewNodeIdsRef.current;
+    if (previousPreviewIds.size === 0) {
+      return;
+    }
+    execSelectionPreviewNodeIdsRef.current = new Set();
+    patchNodeChromeClasses(previousPreviewIds);
+  }, [patchNodeChromeClasses]);
+
   const buildDisplayedExecutionPlan = useCallback((modifier = selectionExecModifierRef.current) => {
     if (!userSelectionActiveRef.current || !modifier.alt) {
       return executionPlanRef.current;
@@ -1308,15 +1367,30 @@ function WorkspaceCanvas() {
 
   const syncDisplayedExecutionPlan = useCallback((nextPlan: ExecutionPlanState) => {
     const previousPlan = displayedExecutionPlanRef.current;
-    if (sameExecutionPlan(previousPlan, nextPlan)) {
+    const execSelectionGestureActive = selectionExecModifierRef.current.alt && userSelectionActiveRef.current;
+    if (
+      sameExecutionPlan(previousPlan, nextPlan)
+      && displayedExecutionPlanGestureActiveRef.current === execSelectionGestureActive
+    ) {
       return;
     }
     // Exec-selection drags are hot enough that mirroring preview ids through React state
     // causes too much whole-canvas rerender churn. Diff and patch the displayed plan directly.
-    updateNodeExecutionPlanData(previousPlan, nextPlan);
+    if (execSelectionGestureActive) {
+      updateNodeExecutionPlanPreviewClasses(nextPlan);
+    } else {
+      clearNodeExecutionPlanPreviewClasses();
+      updateNodeExecutionPlanData(previousPlan, nextPlan);
+    }
     updateEdgeExecutionPlanData(previousPlan, nextPlan);
     displayedExecutionPlanRef.current = nextPlan;
-  }, [updateEdgeExecutionPlanData, updateNodeExecutionPlanData]);
+    displayedExecutionPlanGestureActiveRef.current = execSelectionGestureActive;
+  }, [
+    clearNodeExecutionPlanPreviewClasses,
+    updateEdgeExecutionPlanData,
+    updateNodeExecutionPlanData,
+    updateNodeExecutionPlanPreviewClasses,
+  ]);
 
   useEffect(() => {
     workspaceMetaRef.current = workspaceMeta;
@@ -1468,23 +1542,13 @@ function WorkspaceCanvas() {
     }
     // During drag selection we only want to touch nodes whose preview bit flipped.
     selectionPreviewNodeIdsRef.current = nextPreviewIds;
-    patchNodesById(changedIds, (node) => {
-      const selectionPreview = nextPreviewIds.has(node.id);
-      const className = selectionPreviewNodeClassName(selectionPreview);
-      if (node.className === className) {
-        return node;
-      }
-      return {
-        ...node,
-        className,
-      };
-    });
+    patchNodeChromeClasses(changedIds, nextPreviewIds);
     const previewNodeIds = Array.from(nextPreviewIds).sort();
     gesturePreviewNodeIdsRef.current = previewNodeIds;
     if (selectionExecModifierRef.current.alt && userSelectionActive) {
       syncDisplayedExecutionPlan(buildDisplayedExecutionPlan());
     }
-  }, [buildDisplayedExecutionPlan, flow, patchNodesById, syncDisplayedExecutionPlan, userSelectionActive, userSelectionRect]);
+  }, [buildDisplayedExecutionPlan, flow, patchNodeChromeClasses, syncDisplayedExecutionPlan, userSelectionActive, userSelectionRect]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
