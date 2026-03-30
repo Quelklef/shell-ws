@@ -4,11 +4,11 @@ import {
   getSmoothStepPath,
   type EdgeProps,
 } from "@xyflow/react";
-import { useState } from "react";
+import { memo, useState } from "react";
 
 import type { FlowEdgeData } from "../lib/types";
 
-export default function WorkspaceEdge({
+function WorkspaceEdge({
   id,
   sourceX,
   sourceY,
@@ -115,3 +115,18 @@ export default function WorkspaceEdge({
     </>
   );
 }
+
+export default memo(WorkspaceEdge, (previous, next) =>
+  previous.id === next.id
+  && previous.sourceX === next.sourceX
+  && previous.sourceY === next.sourceY
+  && previous.targetX === next.targetX
+  && previous.targetY === next.targetY
+  && previous.sourcePosition === next.sourcePosition
+  && previous.targetPosition === next.targetPosition
+  && previous.style === next.style
+  && previous.markerEnd === next.markerEnd
+  && previous.data === next.data
+  && previous.animated === next.animated
+  && previous.selected === next.selected,
+);
