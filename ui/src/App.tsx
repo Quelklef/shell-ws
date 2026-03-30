@@ -4095,13 +4095,14 @@ function WorkspaceCanvas() {
           </Panel>
           <Background gap={28} size={1} color="rgba(250, 244, 233, 0.08)" />
         </ReactFlow>
-        <SelectionActionsAnchor
-          canvasRef={canvasRef}
-          nodes={nodes}
-          edges={edges}
-          selectedNodes={selectedNodes}
-          selectedEdges={selectedEdges}
-        >
+        {!userSelectionActive && (
+          <SelectionActionsAnchor
+            canvasRef={canvasRef}
+            nodes={nodes}
+            edges={edges}
+            selectedNodes={selectedNodes}
+            selectedEdges={selectedEdges}
+          >
             <button type="button" onClick={duplicateSelected} disabled={selectedNodes.length === 0}>
               <span className="selection-actions-icon" aria-hidden="true">
                 <svg viewBox="0 0 16 16" focusable="false">
@@ -4220,7 +4221,8 @@ function WorkspaceCanvas() {
               </span>
               <span>delete</span>
             </button>
-        </SelectionActionsAnchor>
+          </SelectionActionsAnchor>
+        )}
         {userSelectionActive && userSelectionRect && (
           <SelectionGestureHint
             rect={userSelectionRect}
