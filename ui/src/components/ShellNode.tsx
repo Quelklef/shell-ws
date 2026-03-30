@@ -142,6 +142,21 @@ function outputHandle(
 function ShellNode({ data }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
+  const {
+    generation,
+    getActionReason,
+    onConvertKind,
+    onGenerate,
+    onPickFile,
+    onRun,
+    onResizeWidth,
+    onResizePaneHeight,
+    onResizePaneWidth,
+    onSelectExecutionTarget,
+    onToggleExecutionPlanMatout,
+    onToggleAutorun,
+    onUpdate,
+  } = typedData;
   const executionPlan = typedData.executionPlan ?? {
     isExecutable: false,
     isParticipating: false,
@@ -162,7 +177,10 @@ function ShellNode({ data }: NodeProps) {
   const [showFormulaHelp, setShowFormulaHelp] = useState(false);
   const previewTabs = typedData.previewTabs ?? nodePreviewTabs(model.kind);
   const previewControlsLocation = typedData.previewControlsLocation ?? "floating";
-  const getVisiblePreview = (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port];
+  const getVisiblePreview = useCallback(
+    (port: string) => runtime.livePreviews?.[port] ?? runtime.previews?.[port],
+    [runtime.livePreviews, runtime.previews],
+  );
   const htmlBytes = getVisiblePreview("stdin")?.bytes ?? new Uint8Array();
   const htmlContent = new TextDecoder().decode(htmlBytes);
   const handleOpenHtmlInNewTab = useCallback(() => {
@@ -184,14 +202,14 @@ function ShellNode({ data }: NodeProps) {
   const execArgs = model.args ?? [];
   const paneSizeSignature = useMemo(() => JSON.stringify(model.uiState?.paneSizes ?? {}), [model.uiState?.paneSizes]);
   const handleNodePaneWidthChange = useCallback((width: number) => {
-    typedData.onResizeWidth(model.id, width);
-  }, [model.id, typedData]);
+    onResizeWidth(model.id, width);
+  }, [model.id, onResizeWidth]);
   const handlePaneHeightChange = useCallback((paneId: string, height: number) => {
-    typedData.onResizePaneHeight(model.id, paneId, height);
-  }, [model.id, typedData]);
+    onResizePaneHeight(model.id, paneId, height);
+  }, [model.id, onResizePaneHeight]);
   const handlePaneWidthChange = useCallback((paneId: string, width: number) => {
-    typedData.onResizePaneWidth(model.id, paneId, width);
-  }, [model.id, typedData]);
+    onResizePaneWidth(model.id, paneId, width);
+  }, [model.id, onResizePaneWidth]);
   const handleLayoutChange = useCallback(() => {
     refreshNodeInternals(model.id);
   }, [model.id, refreshNodeInternals]);
@@ -230,7 +248,7 @@ function ShellNode({ data }: NodeProps) {
     [leftPorts, rightPorts],
   );
 
-  const previewButtons = (
+  const previewButtons = useMemo(() => (
     <div className="port-preview-tabs">
       {previewTabs.map((port) => {
         const isOpen = openPreviewTabs.includes(port);
@@ -248,7 +266,7 @@ function ShellNode({ data }: NodeProps) {
               const nextTabs = isOpen
                 ? openPreviewTabs.filter((entry) => entry !== port)
                 : [...openPreviewTabs, port];
-              typedData.onUpdate(model.id, {
+              onUpdate(model.id, {
                 uiState: {
                   ...(model.uiState ?? {}),
                   openPreviewTabs: nextTabs,
@@ -267,7 +285,7 @@ function ShellNode({ data }: NodeProps) {
         title={openPreviewTabs.length > 0 ? "collapse all previews" : "open all previews"}
         aria-label={openPreviewTabs.length > 0 ? "collapse all previews" : "open all previews"}
         onClick={() => {
-          typedData.onUpdate(model.id, {
+          onUpdate(model.id, {
             uiState: {
               ...(model.uiState ?? {}),
               openPreviewTabs: openPreviewTabs.length > 0 ? [] : [...previewTabs],
@@ -296,9 +314,9 @@ function ShellNode({ data }: NodeProps) {
         )}
       </button>
     </div>
-  );
+  ), [model.id, model.uiState, onUpdate, openPreviewTabs, previewTabs, runtime.livePreviews, runtime.previews]);
 
-  const floatingPreviewPanes = orderedOpenPreviewTabs.map((port) => {
+  const floatingPreviewPanes = useMemo(() => orderedOpenPreviewTabs.map((port) => {
     const preview = getVisiblePreview(port);
     const previewText = new TextDecoder().decode(preview?.bytes ?? new Uint8Array());
     const renderedPreview = preview
@@ -309,7 +327,7 @@ function ShellNode({ data }: NodeProps) {
         };
     const paneId = previewPaneId(port);
     const closePreviewPane = () => {
-      typedData.onUpdate(model.id, {
+      onUpdate(model.id, {
         uiState: {
           ...(model.uiState ?? {}),
           openPreviewTabs: openPreviewTabs.filter((entry) => entry !== port),
@@ -317,8 +335,8 @@ function ShellNode({ data }: NodeProps) {
       });
     };
     const minimizePreviewPane = () => {
-      typedData.onResizePaneWidth(model.id, paneId, defaultPaneWidth(paneId, model.size.width));
-      typedData.onResizePaneHeight(model.id, paneId, defaultPaneHeight(paneId));
+      onResizePaneWidth(model.id, paneId, defaultPaneWidth(paneId, model.size.width));
+      onResizePaneHeight(model.id, paneId, defaultPaneHeight(paneId));
     };
     const fitPreviewPane = (event: React.MouseEvent<HTMLButtonElement>) => {
       const paneElement = event.currentTarget.closest(".port-preview-pane") as HTMLElement | null;
@@ -346,8 +364,8 @@ function ShellNode({ data }: NodeProps) {
         nextWidth = Math.min(maxWidth, Math.max(180, Math.ceil(desiredPreWidth + widthChrome + PREVIEW_SCROLLBAR_BUFFER)));
       }
       const nextHeight = Math.min(maxHeight, Math.max(96, Math.ceil(contentHeight + headerHeight + heightChrome)));
-      typedData.onResizePaneWidth(model.id, paneId, nextWidth);
-      typedData.onResizePaneHeight(model.id, paneId, nextHeight);
+      onResizePaneWidth(model.id, paneId, nextWidth);
+      onResizePaneHeight(model.id, paneId, nextHeight);
     };
     return (
       <ResizablePane
@@ -428,7 +446,20 @@ function ShellNode({ data }: NodeProps) {
         <div className="port-preview-body">{renderedPreview.content}</div>
       </ResizablePane>
     );
-  });
+  }), [
+    getVisiblePreview,
+    handleLayoutChange,
+    handlePaneHeightChange,
+    handlePaneWidthChange,
+    model.id,
+    model.size.width,
+    model.uiState,
+    onResizePaneHeight,
+    onResizePaneWidth,
+    onUpdate,
+    openPreviewTabs,
+    orderedOpenPreviewTabs,
+  ]);
 
   useLayoutEffect(() => {
     const element = commentRef.current;
@@ -487,6 +518,412 @@ function ShellNode({ data }: NodeProps) {
     showFormulaHelp,
   ]);
 
+  const commentFloating = useMemo(() => (
+    <div className="node-comment-floating">
+      {isEditingComment ? (
+        <textarea
+          ref={commentRef}
+          className="nodrag nopan"
+          value={model.comment}
+          placeholder="Add a comment"
+          onWheelCapture={(event) => event.stopPropagation()}
+          onBlur={() => setIsEditingComment(false)}
+          onKeyDown={(event) => {
+            if (event.key === "Escape") {
+              event.preventDefault();
+              setIsEditingComment(false);
+            }
+          }}
+          onChange={(event) => onUpdate(model.id, { comment: event.target.value })}
+        />
+      ) : (
+        <div
+          className={`node-comment-display nodrag nopan ${model.comment.trim() ? "has-comment" : "is-empty"}`}
+          role="button"
+          tabIndex={0}
+          onClick={() => setIsEditingComment(true)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              setIsEditingComment(true);
+            }
+          }}
+        >
+          {model.comment.trim() ? (
+            <>
+              <div className="node-comment-headline">{commentHeadline}</div>
+              {commentBody && <div className="node-comment-body">{commentBody}</div>}
+            </>
+          ) : (
+            <div className="node-comment-placeholder">Add a comment</div>
+          )}
+        </div>
+      )}
+    </div>
+  ), [commentBody, commentHeadline, isEditingComment, model.comment, model.id, onUpdate]);
+
+  const nodeCard = useMemo(() => (
+    <div className="node-card">
+      <div className="node-meta">
+        <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
+        {model.kind === "formula" && (
+          <button
+            type="button"
+            className={`node-kind-icon-button nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
+            title="formula syntax help"
+            aria-label="formula syntax help"
+            onClick={() => setShowFormulaHelp((current) => !current)}
+          >
+            ?
+          </button>
+        )}
+        {(model.kind === "display" || model.kind === "passthru") && (
+          <button
+            type="button"
+            className="node-kind-icon-button nodrag nopan"
+            title={model.kind === "display" ? "convert to passthru" : "convert to display"}
+            aria-label={model.kind === "display" ? "convert to passthru" : "convert to display"}
+            onClick={() => onConvertKind(model.id, model.kind === "display" ? "passthru" : "display")}
+          >
+            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+              <path d="M3 5h7" />
+              <path d="M8 3l2 2-2 2" />
+              <path d="M13 11H6" />
+              <path d="M8 9l-2 2 2 2" />
+            </svg>
+          </button>
+        )}
+        <span className={`node-state-pill ${runtime.running ? "is-running" : "is-idle"}`}>
+          {runtime.running ? "running" : "idle"}
+        </span>
+        {model.materialized?.lastExitCode != null && (
+          <span className={`node-state-pill node-exit-pill ${model.materialized.lastExitCode === 0 ? "is-success" : "is-failed"}`}>
+            exit {model.materialized.lastExitCode}
+          </span>
+        )}
+      </div>
+
+      {(model.kind === "script" || model.kind === "ai_script") && (
+        <>
+          <input
+            className="shell-input nodrag nopan"
+            value={model.shell ?? "bash"}
+            onWheelCapture={(event) => event.stopPropagation()}
+            onChange={(event) => onUpdate(model.id, { shell: event.target.value })}
+            placeholder="shell"
+          />
+          {model.kind === "ai_script" && (
+            <>
+              {renderResizablePane(
+                "ai-prompt",
+                "resizable-pane input-pane nodrag nopan",
+                <textarea
+                  className="resizable-input script-editor ai-description-editor"
+                  value={model.description ?? ""}
+                  placeholder="describe the script you want generated"
+                  onChange={(event) => onUpdate(model.id, { description: event.target.value })}
+                />,
+              )}
+              <div className="ai-generate-shell">
+                <button
+                  type="button"
+                  className="nodrag nopan"
+                  disabled={generation?.loading}
+                  onClick={() => void onGenerate(model.id)}
+                >
+                  {generation?.loading ? "generating..." : "generate"}
+                </button>
+                <label className="ai-generate-samples nodrag nopan">
+                  <input
+                    type="checkbox"
+                    checked={model.includeSampleInputs ?? false}
+                    onChange={(event) =>
+                      onUpdate(model.id, {
+                        includeSampleInputs: event.target.checked,
+                      })
+                    }
+                  />
+                  <span>include sample inputs from previous execution</span>
+                </label>
+                {generation?.error && (
+                  <div className="node-inline-error">{generation.error}</div>
+                )}
+              </div>
+            </>
+          )}
+          {renderResizablePane(
+            "script",
+            "resizable-pane codemirror-pane script-editor-codemirror nodrag nopan",
+            <CodeMirror
+              className="codemirror-host"
+              value={model.script ?? ""}
+              height="100%"
+              theme={oneDark}
+              extensions={shellExtensions}
+              basicSetup={{
+                lineNumbers: false,
+                foldGutter: false,
+                highlightActiveLine: false,
+                highlightActiveLineGutter: false,
+              }}
+              onChange={(value) => onUpdate(model.id, { script: value })}
+            />,
+            112,
+          )}
+        </>
+      )}
+
+      {model.kind === "exec" && (
+        <>
+          <input
+            className="shell-input nodrag nopan"
+            value={model.path ?? ""}
+            onWheelCapture={(event) => event.stopPropagation()}
+            onChange={(event) => onUpdate(model.id, { path: event.target.value })}
+            placeholder="binary path"
+          />
+          <div className="exec-args-shell">
+            {execArgs.map((arg, index) => (
+              <div key={`${model.id}-arg-${index}`} className="exec-arg-row">
+                <select
+                  className="exec-arg-mode nodrag nopan"
+                  value={arg.source}
+                  onWheelCapture={(event) => event.stopPropagation()}
+                  onChange={(event) => {
+                    const nextArgs = [...execArgs];
+                    nextArgs[index] = event.target.value === "argv"
+                      ? { source: "argv", slot: 1 }
+                      : { source: "literal", value: arg.source === "literal" ? arg.value : "" };
+                    onUpdate(model.id, { args: nextArgs });
+                  }}
+                >
+                  <option value="literal">text</option>
+                  <option value="argv">argv</option>
+                </select>
+                {arg.source === "literal" ? (
+                  <textarea
+                    className="exec-arg-editor nodrag nopan"
+                    value={arg.value}
+                    placeholder={`arg ${index + 1}`}
+                    onWheelCapture={(event) => event.stopPropagation()}
+                    onChange={(event) => {
+                      const nextArgs = [...execArgs];
+                      nextArgs[index] = { ...arg, value: event.target.value };
+                      onUpdate(model.id, { args: nextArgs });
+                    }}
+                  />
+                ) : (
+                  <label className="exec-arg-argv nodrag nopan">
+                    <span>argv #</span>
+                    <input
+                      className="shell-input nodrag nopan"
+                      type="number"
+                      min={1}
+                      value={arg.slot}
+                      onWheelCapture={(event) => event.stopPropagation()}
+                      onChange={(event) => {
+                        const nextArgs = [...execArgs];
+                        nextArgs[index] = { source: "argv", slot: Math.max(1, Number(event.target.value) || 1) };
+                        onUpdate(model.id, { args: nextArgs });
+                      }}
+                    />
+                  </label>
+                )}
+                <button
+                  type="button"
+                  className="nodrag nopan exec-arg-delete"
+                  onClick={() => {
+                    const nextArgs = [...execArgs];
+                    nextArgs.splice(index, 1);
+                    onUpdate(model.id, { args: nextArgs });
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              className="nodrag nopan exec-arg-add"
+              onClick={() => onUpdate(model.id, { args: [...execArgs, { source: "literal", value: "" }] })}
+            >
+              add arg
+            </button>
+          </div>
+        </>
+      )}
+
+      {model.kind === "file" && (
+        <div className="file-input-row">
+          <input
+            className="shell-input nodrag nopan"
+            value={model.path ?? ""}
+            onWheelCapture={(event) => event.stopPropagation()}
+            onChange={(event) => onUpdate(model.id, { path: event.target.value })}
+            placeholder="file path"
+          />
+          <button
+            type="button"
+            className="nodrag nopan file-picker-button"
+            onClick={() => void onPickFile(model.id)}
+          >
+            pick
+          </button>
+        </div>
+      )}
+
+      {model.kind === "text" && (
+        renderResizablePane(
+          "text",
+          "resizable-pane input-pane nodrag nopan",
+          <textarea
+            className="resizable-input script-editor"
+            value={model.text ?? ""}
+            placeholder="text output"
+            onChange={(event) => onUpdate(model.id, { text: event.target.value })}
+          />,
+          96,
+        )
+      )}
+
+      {model.kind === "formula" && (
+        <div className="formula-shell">
+          {showFormulaHelp && (
+            <div className="formula-help-panel nodrag nopan">
+              <pre>{FORMULA_SYNTAX_OVERVIEW}</pre>
+            </div>
+          )}
+          {renderResizablePane(
+            "formula",
+            `resizable-pane codemirror-pane formula-editor-codemirror nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`,
+            <CodeMirror
+              className="codemirror-host"
+              value={model.formula ?? ""}
+              height="100%"
+              theme={oneDark}
+              basicSetup={{
+                lineNumbers: false,
+                foldGutter: false,
+                highlightActiveLine: false,
+                highlightActiveLineGutter: false,
+              }}
+              onChange={(value) => onUpdate(model.id, { formula: value })}
+            />,
+            84,
+          )}
+          {formulaAnalysis.ok ? (
+            <div className="formula-preview nodrag nopan" dangerouslySetInnerHTML={{ __html: formulaHtml ?? "" }} />
+          ) : (
+            <div className="node-inline-error">{formulaAnalysis.error}</div>
+          )}
+        </div>
+      )}
+
+      {model.kind === "html" && (
+        renderResizablePane(
+          "html",
+          "resizable-pane html-pane nodrag nopan",
+          <>
+            <div className="html-pane-header">
+              <div className="display-label">html</div>
+              <button
+                type="button"
+                className="html-open-tab nodrag nopan"
+                onClick={handleOpenHtmlInNewTab}
+                title="open in new tab"
+                aria-label="open in new tab"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M14 5h5v5" />
+                  <path d="M10 14 19 5" />
+                  <path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
+                </svg>
+              </button>
+            </div>
+            <iframe
+              className="html-frame"
+              sandbox="allow-scripts allow-forms"
+              srcDoc={htmlContent}
+              title={`html-${model.id}`}
+            />
+          </>,
+          120,
+        )
+      )}
+
+      <div className="node-toolbar node-action-toolbar">
+        {ACTIONS.map(({ action, label, icon }) => {
+          const reason = getActionReason(model.id, action);
+          const disabled = reason !== null;
+          return (
+            <button
+              key={action}
+              className="nodrag nopan node-action-button"
+              data-exec-action="true"
+              type="button"
+              disabled={disabled}
+              title={disabled ? `${label}: ${reason}` : label}
+              aria-label={label}
+              onClick={(event) => {
+                if (event.altKey) {
+                  onSelectExecutionTarget(model.id, action, event.shiftKey);
+                  return;
+                }
+                onRun(model.id, action);
+              }}
+            >
+              {icon}
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={`nodrag nopan ${model.uiState?.showAutoControls ? "is-live" : ""}`}
+          onClick={() =>
+            onUpdate(model.id, {
+              uiState: {
+                ...(model.uiState ?? {}),
+                showAutoControls: !model.uiState?.showAutoControls,
+              },
+            })
+          }
+          title="toggle auto controls"
+        >
+          auto
+        </button>
+      </div>
+
+      {model.uiState?.showAutoControls && (
+        <AutoRunControls config={autoRun} onChange={(next) => onToggleAutorun(model.id, next)} />
+      )}
+
+      {previewControlsLocation === "node" && previewButtons}
+    </div>
+  ), [
+    autoRun,
+    execArgs,
+    formulaAnalysis,
+    formulaHtml,
+    generation,
+    getActionReason,
+    handleOpenHtmlInNewTab,
+    htmlContent,
+    model,
+    onConvertKind,
+    onGenerate,
+    onPickFile,
+    onRun,
+    onSelectExecutionTarget,
+    onToggleAutorun,
+    onUpdate,
+    previewButtons,
+    previewControlsLocation,
+    renderResizablePane,
+    runtime.running,
+    shellExtensions,
+    showFormulaHelp,
+  ]);
+
   return (
     <div
       className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${executionPlan.isParticipating ? "is-execution-target" : ""}`}
@@ -500,7 +937,7 @@ function ShellNode({ data }: NodeProps) {
                   key={`${entry.source}:${entry.key}:${entry.id}`}
                   type="button"
                   className={`execution-plan-matval nodrag nopan ${entry.included ? "is-included" : ""}`}
-                  onClick={() => typedData.onToggleExecutionPlanMatout(model.id, entry.id)}
+                  onClick={() => onToggleExecutionPlanMatout(model.id, entry.id)}
                   title={`${entry.source === "input" ? "input" : "output"} ${entry.key}`}
                 >
                   <span className="execution-plan-matval-kind">{entry.source === "input" ? "in" : "out"}</span>
@@ -530,384 +967,8 @@ function ShellNode({ data }: NodeProps) {
         outputHandle(port, PORT_STACK_TOP + index * PORT_SPACING, key, activeAt, executionPlanPortKeys.has(key)),
       )}
 
-      <div className="node-comment-floating">
-        {isEditingComment ? (
-          <textarea
-            ref={commentRef}
-            className="nodrag nopan"
-            value={model.comment}
-            placeholder="Add a comment"
-            onWheelCapture={(event) => event.stopPropagation()}
-            onBlur={() => setIsEditingComment(false)}
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                setIsEditingComment(false);
-              }
-            }}
-            onChange={(event) => typedData.onUpdate(model.id, { comment: event.target.value })}
-          />
-        ) : (
-          <div
-            className={`node-comment-display nodrag nopan ${model.comment.trim() ? "has-comment" : "is-empty"}`}
-            role="button"
-            tabIndex={0}
-            onClick={() => setIsEditingComment(true)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" || event.key === " ") {
-                event.preventDefault();
-                setIsEditingComment(true);
-              }
-            }}
-          >
-            {model.comment.trim() ? (
-              <>
-                <div className="node-comment-headline">{commentHeadline}</div>
-                {commentBody && <div className="node-comment-body">{commentBody}</div>}
-              </>
-            ) : (
-              <div className="node-comment-placeholder">Add a comment</div>
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="node-card">
-        <div className="node-meta">
-          <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
-          {model.kind === "formula" && (
-            <button
-              type="button"
-              className={`node-kind-icon-button nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
-              title="formula syntax help"
-              aria-label="formula syntax help"
-              onClick={() => setShowFormulaHelp((current) => !current)}
-            >
-              ?
-            </button>
-          )}
-          {(model.kind === "display" || model.kind === "passthru") && (
-            <button
-              type="button"
-              className="node-kind-icon-button nodrag nopan"
-              title={model.kind === "display" ? "convert to passthru" : "convert to display"}
-              aria-label={model.kind === "display" ? "convert to passthru" : "convert to display"}
-              onClick={() => typedData.onConvertKind(model.id, model.kind === "display" ? "passthru" : "display")}
-            >
-              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-                <path d="M3 5h7" />
-                <path d="M8 3l2 2-2 2" />
-                <path d="M13 11H6" />
-                <path d="M8 9l-2 2 2 2" />
-              </svg>
-            </button>
-          )}
-          <span className={`node-state-pill ${runtime.running ? "is-running" : "is-idle"}`}>
-            {runtime.running ? "running" : "idle"}
-          </span>
-          {model.materialized?.lastExitCode != null && (
-            <span className={`node-state-pill node-exit-pill ${model.materialized.lastExitCode === 0 ? "is-success" : "is-failed"}`}>
-              exit {model.materialized.lastExitCode}
-            </span>
-          )}
-        </div>
-
-        {(model.kind === "script" || model.kind === "ai_script") && (
-          <>
-            <input
-              className="shell-input nodrag nopan"
-              value={model.shell ?? "bash"}
-              onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) => typedData.onUpdate(model.id, { shell: event.target.value })}
-              placeholder="shell"
-            />
-            {model.kind === "ai_script" && (
-              <>
-                {renderResizablePane(
-                  "ai-prompt",
-                  "resizable-pane input-pane nodrag nopan",
-                  <textarea
-                    className="resizable-input script-editor ai-description-editor"
-                    value={model.description ?? ""}
-                    placeholder="describe the script you want generated"
-                    onChange={(event) => typedData.onUpdate(model.id, { description: event.target.value })}
-                  />,
-                )}
-                <div className="ai-generate-shell">
-                  <button
-                    type="button"
-                    className="nodrag nopan"
-                    disabled={typedData.generation?.loading}
-                    onClick={() => void typedData.onGenerate(model.id)}
-                  >
-                    {typedData.generation?.loading ? "generating..." : "generate"}
-                  </button>
-                  <label className="ai-generate-samples nodrag nopan">
-                    <input
-                      type="checkbox"
-                      checked={model.includeSampleInputs ?? false}
-                      onChange={(event) =>
-                        typedData.onUpdate(model.id, {
-                          includeSampleInputs: event.target.checked,
-                        })
-                      }
-                    />
-                    <span>include sample inputs from previous execution</span>
-                  </label>
-                  {typedData.generation?.error && (
-                    <div className="node-inline-error">{typedData.generation.error}</div>
-                  )}
-                </div>
-              </>
-            )}
-            {renderResizablePane(
-              "script",
-              "resizable-pane codemirror-pane script-editor-codemirror nodrag nopan",
-              <CodeMirror
-                className="codemirror-host"
-                value={model.script ?? ""}
-                height="100%"
-                theme={oneDark}
-                extensions={shellExtensions}
-                basicSetup={{
-                  lineNumbers: false,
-                  foldGutter: false,
-                  highlightActiveLine: false,
-                  highlightActiveLineGutter: false,
-                }}
-                onChange={(value) => typedData.onUpdate(model.id, { script: value })}
-              />,
-              112,
-            )}
-          </>
-        )}
-
-        {model.kind === "exec" && (
-          <>
-            <input
-              className="shell-input nodrag nopan"
-              value={model.path ?? ""}
-              onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) => typedData.onUpdate(model.id, { path: event.target.value })}
-              placeholder="binary path"
-            />
-            <div className="exec-args-shell">
-              {execArgs.map((arg, index) => (
-                <div key={`${model.id}-arg-${index}`} className="exec-arg-row">
-                  <select
-                    className="exec-arg-mode nodrag nopan"
-                    value={arg.source}
-                    onWheelCapture={(event) => event.stopPropagation()}
-                    onChange={(event) => {
-                      const nextArgs = [...execArgs];
-                      nextArgs[index] = event.target.value === "argv"
-                        ? { source: "argv", slot: 1 }
-                        : { source: "literal", value: arg.source === "literal" ? arg.value : "" };
-                      typedData.onUpdate(model.id, { args: nextArgs });
-                    }}
-                  >
-                    <option value="literal">text</option>
-                    <option value="argv">argv</option>
-                  </select>
-                  {arg.source === "literal" ? (
-                    <textarea
-                      className="exec-arg-editor nodrag nopan"
-                      value={arg.value}
-                      placeholder={`arg ${index + 1}`}
-                      onWheelCapture={(event) => event.stopPropagation()}
-                      onChange={(event) => {
-                        const nextArgs = [...execArgs];
-                        nextArgs[index] = { ...arg, value: event.target.value };
-                        typedData.onUpdate(model.id, { args: nextArgs });
-                      }}
-                    />
-                  ) : (
-                    <label className="exec-arg-argv nodrag nopan">
-                      <span>argv #</span>
-                      <input
-                        className="shell-input nodrag nopan"
-                        type="number"
-                        min={1}
-                        value={arg.slot}
-                        onWheelCapture={(event) => event.stopPropagation()}
-                        onChange={(event) => {
-                          const nextArgs = [...execArgs];
-                          nextArgs[index] = { source: "argv", slot: Math.max(1, Number(event.target.value) || 1) };
-                          typedData.onUpdate(model.id, { args: nextArgs });
-                        }}
-                      />
-                    </label>
-                  )}
-                  <button
-                    type="button"
-                    className="nodrag nopan exec-arg-delete"
-                    onClick={() => {
-                      const nextArgs = [...execArgs];
-                      nextArgs.splice(index, 1);
-                      typedData.onUpdate(model.id, { args: nextArgs });
-                    }}
-                  >
-                    ×
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                className="nodrag nopan exec-arg-add"
-                onClick={() => typedData.onUpdate(model.id, { args: [...execArgs, { source: "literal", value: "" }] })}
-              >
-                add arg
-              </button>
-            </div>
-          </>
-        )}
-
-        {model.kind === "file" && (
-          <div className="file-input-row">
-            <input
-              className="shell-input nodrag nopan"
-              value={model.path ?? ""}
-              onWheelCapture={(event) => event.stopPropagation()}
-              onChange={(event) => typedData.onUpdate(model.id, { path: event.target.value })}
-              placeholder="file path"
-            />
-            <button
-              type="button"
-              className="nodrag nopan file-picker-button"
-              onClick={() => void typedData.onPickFile(model.id)}
-            >
-              pick
-            </button>
-          </div>
-        )}
-
-        {model.kind === "text" && (
-          renderResizablePane(
-            "text",
-            "resizable-pane input-pane nodrag nopan",
-            <textarea
-              className="resizable-input script-editor"
-              value={model.text ?? ""}
-              placeholder="text output"
-              onChange={(event) => typedData.onUpdate(model.id, { text: event.target.value })}
-            />,
-            96,
-          )
-        )}
-
-        {model.kind === "formula" && (
-          <div className="formula-shell">
-            {showFormulaHelp && (
-              <div className="formula-help-panel nodrag nopan">
-                <pre>{FORMULA_SYNTAX_OVERVIEW}</pre>
-              </div>
-            )}
-            {renderResizablePane(
-              "formula",
-              `resizable-pane codemirror-pane formula-editor-codemirror nodrag nopan ${formulaAnalysis.ok ? "" : "is-invalid"}`,
-              <CodeMirror
-                className="codemirror-host"
-                value={model.formula ?? ""}
-                height="100%"
-                theme={oneDark}
-                basicSetup={{
-                  lineNumbers: false,
-                  foldGutter: false,
-                  highlightActiveLine: false,
-                  highlightActiveLineGutter: false,
-                }}
-                onChange={(value) => typedData.onUpdate(model.id, { formula: value })}
-              />,
-              84,
-            )}
-            {formulaAnalysis.ok ? (
-              <div className="formula-preview nodrag nopan" dangerouslySetInnerHTML={{ __html: formulaHtml ?? "" }} />
-            ) : (
-              <div className="node-inline-error">{formulaAnalysis.error}</div>
-            )}
-          </div>
-        )}
-
-        {model.kind === "html" && (
-          renderResizablePane(
-            "html",
-            "resizable-pane html-pane nodrag nopan",
-            <>
-              <div className="html-pane-header">
-                <div className="display-label">html</div>
-                <button
-                  type="button"
-                  className="html-open-tab nodrag nopan"
-                  onClick={handleOpenHtmlInNewTab}
-                  title="open in new tab"
-                  aria-label="open in new tab"
-                >
-                  <svg viewBox="0 0 24 24" aria-hidden="true">
-                    <path d="M14 5h5v5" />
-                    <path d="M10 14 19 5" />
-                    <path d="M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4" />
-                  </svg>
-                </button>
-              </div>
-              <iframe
-                className="html-frame"
-                sandbox="allow-scripts allow-forms"
-                srcDoc={htmlContent}
-                title={`html-${model.id}`}
-              />
-            </>,
-            120,
-          )
-        )}
-
-        <div className="node-toolbar node-action-toolbar">
-          {ACTIONS.map(({ action, label, icon }) => {
-            const reason = typedData.getActionReason(model.id, action);
-            const disabled = reason !== null;
-            return (
-              <button
-                key={action}
-                className="nodrag nopan node-action-button"
-                data-exec-action="true"
-                type="button"
-                disabled={disabled}
-                title={disabled ? `${label}: ${reason}` : label}
-                aria-label={label}
-                onClick={(event) => {
-                  if (event.altKey) {
-                    typedData.onSelectExecutionTarget(model.id, action, event.shiftKey);
-                    return;
-                  }
-                  typedData.onRun(model.id, action);
-                }}
-              >
-                {icon}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            className={`nodrag nopan ${model.uiState?.showAutoControls ? "is-live" : ""}`}
-            onClick={() =>
-              typedData.onUpdate(model.id, {
-                uiState: {
-                  ...(model.uiState ?? {}),
-                  showAutoControls: !model.uiState?.showAutoControls,
-                },
-              })
-            }
-            title="toggle auto controls"
-          >
-            auto
-          </button>
-        </div>
-
-        {model.uiState?.showAutoControls && (
-          <AutoRunControls config={autoRun} onChange={(next) => typedData.onToggleAutorun(model.id, next)} />
-        )}
-
-        {previewControlsLocation === "node" && previewButtons}
-      </div>
+      {commentFloating}
+      {nodeCard}
 
       {(previewControlsLocation === "floating" || floatingPreviewPanes.length > 0) && (
         <div className="port-preview-floating-shell">
