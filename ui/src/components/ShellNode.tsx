@@ -4,7 +4,7 @@ import { shell } from "@codemirror/legacy-modes/mode/shell";
 import { oneDark } from "@codemirror/theme-one-dark";
 import katex from "katex";
 import { Handle, Position, type NodeProps, useUpdateNodeInternals } from "@xyflow/react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import ResizablePane from "./ResizablePane";
 
@@ -139,7 +139,7 @@ function outputHandle(
   );
 }
 
-export default function ShellNode({ data }: NodeProps) {
+function ShellNode({ data }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
   const executionPlan = typedData.executionPlan ?? {
@@ -920,3 +920,7 @@ export default function ShellNode({ data }: NodeProps) {
     </div>
   );
 }
+
+// Selection churn is hot. React Flow still flips top-level node props like `selected`,
+// but this component only renders from `data`, so ignore wrapper-only prop changes.
+export default memo(ShellNode, (previous, next) => previous.data === next.data);
