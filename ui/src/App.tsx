@@ -1831,6 +1831,20 @@ function WorkspaceCanvas() {
           });
           return changed ? next : current;
         });
+      } else {
+        const selectedNodeIds = selectionPreviewNodeIdsRef.current;
+        setNodes((current) => {
+          let changed = false;
+          const next = current.map((node) => {
+            const selected = selectedNodeIds.has(node.id);
+            if (node.selected === selected) {
+              return node;
+            }
+            changed = true;
+            return { ...node, selected };
+          });
+          return changed ? next : current;
+        });
       }
       selectionGestureActiveRef.current = false;
       selectionGestureClearTimerRef.current = null;
@@ -2619,12 +2633,10 @@ function WorkspaceCanvas() {
 
   const onNodesChange = useCallback(
     (changes: NodeChange<FlowNode>[]) => {
+      const selectionGestureActive = selectionGestureActiveRef.current || userSelectionActive;
       const filteredChanges = changes.filter((change) =>
         change.type !== "select"
-        || (
-          !selectionExecModifierRef.current.alt
-          && (selectionGestureActiveRef.current || userSelectionActive)
-        ),
+        || !selectionGestureActive,
       );
       if (filteredChanges.length === 0) {
         return;
