@@ -3358,20 +3358,11 @@ function WorkspaceCanvas() {
   );
   const executionPlanHasTargets =
     executionPlan.executableNodeIds.length > 0 || executionPlan.edgeIds.length > 0;
-  const selectedExecutionPlanNodeIds = useMemo(
-    () => selectedNodes.map((node) => node.id).sort(),
-    [selectedNodes],
-  );
-  const selectedExecutionPlanEdgeIds = useMemo(
-    () => selectedEdges.map((edge) => edge.id).sort(),
-    [selectedEdges],
-  );
   const gestureExecutionPlan = useMemo(
-    () => executionPlanForSelection(
-      selectionExecModifier.alt ? gesturePreviewNodeIds : selectedExecutionPlanNodeIds,
-      selectionExecModifier.alt ? gesturePreviewEdgeIds : selectedExecutionPlanEdgeIds,
-    ),
-    [gesturePreviewEdgeIds, gesturePreviewNodeIds, selectedExecutionPlanEdgeIds, selectedExecutionPlanNodeIds, selectionExecModifier.alt],
+    () => selectionExecModifier.alt
+      ? executionPlanForSelection(gesturePreviewNodeIds, gesturePreviewEdgeIds)
+      : emptyExecutionPlan(),
+    [gesturePreviewEdgeIds, gesturePreviewNodeIds, selectionExecModifier.alt],
   );
   const displayedExecutionPlan = useMemo(() => {
     if (!userSelectionActive || !selectionExecModifier.alt) {
