@@ -3347,12 +3347,14 @@ function WorkspaceCanvas() {
     [selectedEdges],
   );
   const selectedPreviewNodes = useMemo(
-    () => selectedNodes.map((node) => ({
-      id: node.id,
-      previewTabs: node.data.previewTabs ?? nodePreviewTabs(node.data.model.kind),
-      openPreviewTabs: node.data.model.uiState?.openPreviewTabs ?? [],
-    })),
-    [selectedNodes],
+    () => userSelectionActive
+      ? []
+      : selectedNodes.map((node) => ({
+          id: node.id,
+          previewTabs: node.data.previewTabs ?? nodePreviewTabs(node.data.model.kind),
+          openPreviewTabs: node.data.model.uiState?.openPreviewTabs ?? [],
+        })),
+    [selectedNodes, userSelectionActive],
   );
   const executionPlanHasTargets =
     executionPlan.executableNodeIds.length > 0 || executionPlan.edgeIds.length > 0;
@@ -3399,8 +3401,8 @@ function WorkspaceCanvas() {
     displayedExecutionPlanRef.current = displayedExecutionPlan;
   }, [displayedExecutionPlan, updateEdgeExecutionPlanData, updateNodeExecutionPlanData]);
   const canTuckSelection = useMemo(
-    () => isClosedSelection(selectedNodeIds, edges),
-    [edges, selectedNodeIds],
+    () => userSelectionActive ? false : isClosedSelection(selectedNodeIds, edges),
+    [edges, selectedNodeIds, userSelectionActive],
   );
   const tuckDisabledReason = selectedNodeIds.size === 0
     ? 'select a subgraph first'
@@ -3414,14 +3416,16 @@ function WorkspaceCanvas() {
   );
 
   const canToggleSelectedPreviewTabs = useMemo(
-    () => ({
-      all: selectionSupportsPreviewCategory(selectedPreviewNodes, "all"),
-      stdin: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdin"),
-      stdout: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdout"),
-      stderr: selectionSupportsPreviewCategory(selectedPreviewNodes, "stderr"),
-      argv: selectionSupportsPreviewCategory(selectedPreviewNodes, "argv"),
-    }),
-    [selectedPreviewNodes],
+    () => userSelectionActive
+      ? { all: false, stdin: false, stdout: false, stderr: false, argv: false }
+      : {
+          all: selectionSupportsPreviewCategory(selectedPreviewNodes, "all"),
+          stdin: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdin"),
+          stdout: selectionSupportsPreviewCategory(selectedPreviewNodes, "stdout"),
+          stderr: selectionSupportsPreviewCategory(selectedPreviewNodes, "stderr"),
+          argv: selectionSupportsPreviewCategory(selectedPreviewNodes, "argv"),
+        },
+    [selectedPreviewNodes, userSelectionActive],
   );
 
   const deleteTuckShell = useCallback((tuckId: string) => {
