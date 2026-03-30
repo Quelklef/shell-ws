@@ -514,6 +514,10 @@ function SelectionGestureHint({
   );
 }
 
+function selectionPreviewNodeClassName(selectionPreview: boolean) {
+  return selectionPreview ? "is-selection-preview" : undefined;
+}
+
 function toFlowNode(
   node: WorkspaceNode,
   runtime: Record<string, NodeRuntimeState>,
@@ -535,7 +539,6 @@ function toFlowNode(
       model: node,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
       generation: generation[node.id],
-      selectionPreview: false,
       executionPlan: {
         isExecutable: executionPlan.executableNodeIds.includes(node.id),
         isParticipating: participatingNodeIds.has(node.id),
@@ -566,6 +569,7 @@ function toFlowNode(
     initialWidth: node.size.width,
     draggable: true,
     selectable: true,
+    className: selectionPreviewNodeClassName(false),
     style: {
       width: node.size.width,
     },
@@ -1403,15 +1407,13 @@ function WorkspaceCanvas() {
     selectionPreviewNodeIdsRef.current = nextPreviewIds;
     patchNodesById(changedIds, (node) => {
       const selectionPreview = nextPreviewIds.has(node.id);
-      if (node.data.selectionPreview === selectionPreview) {
+      const className = selectionPreviewNodeClassName(selectionPreview);
+      if (node.className === className) {
         return node;
       }
       return {
         ...node,
-        data: {
-          ...node.data,
-          selectionPreview,
-        },
+        className,
       };
     });
     const previewNodeIds = Array.from(nextPreviewIds).sort();

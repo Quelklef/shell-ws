@@ -1135,7 +1135,7 @@ textarea {
   box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.18), var(--shadow);
 }
 
-.shell-node.is-selection-preview .node-card {
+.react-flow__node.is-selection-preview .shell-node .node-card {
   border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
   box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
 }
@@ -1145,12 +1145,12 @@ textarea {
   box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
 }
 
-.shell-node.is-execution-target.is-selection-preview .node-card {
+.react-flow__node.is-selection-preview .shell-node.is-execution-target .node-card {
   border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
   box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
 }
 
-.canvas-shell.is-exec-plan-modifier-active .shell-node.is-execution-target.is-selection-preview .node-card {
+.canvas-shell.is-exec-plan-modifier-active .react-flow__node.is-selection-preview .shell-node.is-execution-target .node-card {
   border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
   box-shadow: 0 0 0 calc(4px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--exec-plan-color) 36%, transparent), var(--shadow);
 }

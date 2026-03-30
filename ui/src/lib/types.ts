@@ -307,7 +307,6 @@ export interface ShellNodeData extends Record<string, unknown> {
   previewTabs?: string[];
   previewControlsLocation?: PreviewControlsLocation;
   generation?: AiGenerationState;
-  selectionPreview?: boolean;
   executionPlan?: NodeExecutionPlanState;
   onUpdate: (nodeId: string, patch: Partial<WorkspaceNode>) => void;
   onRun: (nodeId: string, action: ExecutionAction) => void;

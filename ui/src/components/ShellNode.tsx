@@ -489,7 +489,7 @@ function ShellNode({ data }: NodeProps) {
 
   return (
     <div
-      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${typedData.selectionPreview ? "is-selection-preview" : ""} ${executionPlan.isParticipating ? "is-execution-target" : ""}`}
+      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${executionPlan.isParticipating ? "is-execution-target" : ""}`}
     >
       {executionPlan.isParticipating && (
         <div className="execution-plan-floating nodrag nopan">
