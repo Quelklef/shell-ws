@@ -3331,12 +3331,12 @@ function WorkspaceCanvas() {
   }, [workspaceSummaries]);
 
   const selectedNodes = useMemo(
-    () => nodes.filter((node) => node.selected),
-    [nodes],
+    () => userSelectionActive ? [] : nodes.filter((node) => node.selected),
+    [nodes, userSelectionActive],
   );
   const selectedEdges = useMemo(
-    () => edges.filter((edge) => edge.selected),
-    [edges],
+    () => userSelectionActive ? [] : edges.filter((edge) => edge.selected),
+    [edges, userSelectionActive],
   );
   const selectedNodeIds = useMemo(
     () => new Set(selectedNodes.map((node) => node.id)),
