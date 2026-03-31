@@ -1,4 +1,5 @@
 import type { NodeMaterialized, TuckedSubgraph, Workspace, WorkspaceEdge, WorkspaceNode } from "./types";
+import { normalizeWorkspaceNodeDrawOrders } from "./drawOrder";
 import { normalizeWorkspaceUi } from "./workspaceUi";
 
 function sanitizeNodeMaterialized(materialized: WorkspaceNode["materialized"]): NodeMaterialized {
@@ -11,9 +12,10 @@ function sanitizeNodeMaterialized(materialized: WorkspaceNode["materialized"]): 
 
 function sanitizeNodesAndEdges(nodesInput: WorkspaceNode[], edgesInput: WorkspaceEdge[]) {
   const validNodeIds = new Set(nodesInput.map((node) => node.id));
+  const normalizedDrawOrder = normalizeWorkspaceNodeDrawOrders(nodesInput);
 
   return {
-    nodes: nodesInput.map((node) => ({
+    nodes: normalizedDrawOrder.nodes.map((node) => ({
       ...node,
       materialized: sanitizeNodeMaterialized(node.materialized),
       uiState: node.uiState
@@ -27,6 +29,7 @@ function sanitizeNodesAndEdges(nodesInput: WorkspaceNode[], edgesInput: Workspac
     edges: edgesInput.filter(
       (edge) => validNodeIds.has(edge.from.nodeId) && validNodeIds.has(edge.to.nodeId),
     ),
+    nextDrawOrder: normalizedDrawOrder.nextDrawOrder,
   };
 }
 
@@ -47,13 +50,17 @@ function sanitizeTuckedSubgraph(item: TuckedSubgraph): TuckedSubgraph {
 
 export function sanitizeWorkspace(workspace: Workspace): Workspace {
   const sanitized = sanitizeNodesAndEdges(workspace.nodes ?? [], workspace.edges ?? []);
+  const normalizedUi = normalizeWorkspaceUi(workspace.ui);
   return {
     ...workspace,
     createdAt: workspace.createdAt ?? 0,
     sortOrder: workspace.sortOrder ?? workspace.createdAt ?? 0,
     cwd: workspace.cwd ?? "",
     openaiApiKey: workspace.openaiApiKey ?? "",
-    ui: normalizeWorkspaceUi(workspace.ui),
+    ui: {
+      ...normalizedUi,
+      nextDrawOrder: Math.max(normalizedUi.nextDrawOrder, sanitized.nextDrawOrder),
+    },
     nodes: sanitized.nodes,
     edges: sanitized.edges,
     tuckspace: (workspace.tuckspace ?? []).map(sanitizeTuckedSubgraph),

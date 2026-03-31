@@ -54,11 +54,12 @@ export function saveGlobalSidebarState(sidebars: WorkspaceSidebars) {
   window.localStorage.setItem(SIDEBAR_STORAGE_KEY, JSON.stringify(sidebars));
 }
 
-export function normalizeWorkspaceUi(ui: { viewportX?: number; viewportY?: number; zoom?: number; sidebars?: Partial<WorkspaceSidebars>; previewControlsLocation?: PreviewControlsLocation } | undefined): Workspace["ui"] {
+export function normalizeWorkspaceUi(ui: { viewportX?: number; viewportY?: number; zoom?: number; nextDrawOrder?: number; sidebars?: Partial<WorkspaceSidebars>; previewControlsLocation?: PreviewControlsLocation } | undefined): Workspace["ui"] {
   return {
     viewportX: typeof ui?.viewportX === "number" ? ui.viewportX : 0,
     viewportY: typeof ui?.viewportY === "number" ? ui.viewportY : 0,
     zoom: typeof ui?.zoom === "number" ? ui.zoom : 1,
+    nextDrawOrder: typeof ui?.nextDrawOrder === "number" ? ui.nextDrawOrder : 0,
     sidebars: normalizeWorkspaceSidebars(ui?.sidebars),
     previewControlsLocation: normalizePreviewControlsLocation(ui?.previewControlsLocation),
   };

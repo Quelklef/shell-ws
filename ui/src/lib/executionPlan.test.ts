@@ -39,6 +39,7 @@ function workspace(nodes: WorkspaceNode[], edges: Workspace["edges"]): Workspace
       viewportX: 0,
       viewportY: 0,
       zoom: 1,
+      nextDrawOrder: 0,
       sidebars: {
         workspaces: { width: 240, collapsed: false },
         settings: { width: 300, collapsed: false },

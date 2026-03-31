@@ -67,6 +67,7 @@ export interface NodeUiState {
   openPreviewTabs?: string[];
   showAutoControls?: boolean;
   paneSizes?: Record<string, PaneSizeState>;
+  drawOrder?: number;
 }
 
 export interface TopologyPreviewNode {
@@ -110,6 +111,7 @@ export interface Workspace {
     viewportX: number;
     viewportY: number;
     zoom: number;
+    nextDrawOrder: number;
     sidebars: WorkspaceSidebars;
     previewControlsLocation: PreviewControlsLocation;
   };

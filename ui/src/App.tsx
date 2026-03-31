@@ -41,6 +41,7 @@ import {
 } from "./lib/api";
 import { collectAiScriptSamples } from "./lib/aiScript";
 import { compileExecutionRequest } from "./lib/compileExecutionRequest";
+import { allocateBumpedDrawOrders, nodeDrawOrder } from "./lib/drawOrder";
 import {
   buildExecutionRequestFromPlan,
   emptyExecutionPlan,
@@ -584,6 +585,7 @@ function toFlowNode(
     initialWidth: node.size.width,
     draggable: true,
     selectable: true,
+    zIndex: nodeDrawOrder(node),
     className: selectionPreviewNodeClassName(false),
     style: {
       width: node.size.width,
@@ -1892,6 +1894,71 @@ function WorkspaceCanvas() {
     [buildWorkspace, updateNodePreviewControlsLocation],
   );
 
+  const setNextDrawOrder = useCallback((nextDrawOrder: number) => {
+    if (!workspaceMetaRef.current || workspaceMetaRef.current.ui.nextDrawOrder === nextDrawOrder) {
+      return;
+    }
+    const nextMeta = {
+      ...workspaceMetaRef.current,
+      ui: {
+        ...workspaceMetaRef.current.ui,
+        nextDrawOrder,
+      },
+    };
+    workspaceMetaRef.current = nextMeta;
+    setWorkspaceMeta(nextMeta);
+  }, []);
+
+  const reserveDrawOrders = useCallback((count: number) => {
+    const start = workspaceMetaRef.current?.ui.nextDrawOrder ?? nodesRef.current.length;
+    if (count > 0) {
+      setNextDrawOrder(start + count);
+    }
+    return start;
+  }, [setNextDrawOrder]);
+
+  const bumpNodeDrawOrder = useCallback((ids: Iterable<string>) => {
+    const currentNodes = nodesRef.current;
+    const { drawOrderById, nextDrawOrder } = allocateBumpedDrawOrders(
+      currentNodes.map((node) => ({
+        id: node.id,
+        drawOrder: nodeDrawOrder(node.data.model),
+      })),
+      ids,
+      workspaceMetaRef.current?.ui.nextDrawOrder ?? currentNodes.length,
+    );
+    if (drawOrderById.size === 0) {
+      return;
+    }
+
+    const nextNodes = currentNodes.map((node) => {
+      const drawOrder = drawOrderById.get(node.id);
+      if (drawOrder === undefined) {
+        return node;
+      }
+      return {
+        ...node,
+        zIndex: drawOrder,
+        data: {
+          ...node.data,
+          model: {
+            ...node.data.model,
+            uiState: {
+              ...(node.data.model.uiState ?? {}),
+              drawOrder,
+            },
+          },
+        },
+      };
+    });
+
+    // Recency order is persisted. A drag or click only needs a single bump at start,
+    // not per-frame z-index churn during movement.
+    setNextDrawOrder(nextDrawOrder);
+    setNodes(nextNodes);
+    persistSoon(nextNodes, edgesRef.current);
+  }, [persistSoon, setNextDrawOrder, setNodes]);
+
   const persistMaterializedOutputStore = useCallback((nextStore: MaterializedOutputStore) => {
     materializedOutputStoreRef.current = nextStore;
     saveMaterializedOutputs(nextStore).catch((error) => setToast(String(error)));
@@ -2004,18 +2071,48 @@ function WorkspaceCanvas() {
         });
       } else {
         const selectedNodeIds = finalPreviewNodeIds;
+        const { drawOrderById, nextDrawOrder } = allocateBumpedDrawOrders(
+          nodesRef.current.map((node) => ({
+            id: node.id,
+            drawOrder: nodeDrawOrder(node.data.model),
+          })),
+          selectedNodeIds,
+          workspaceMetaRef.current?.ui.nextDrawOrder ?? nodesRef.current.length,
+        );
         setNodes((current) => {
           let changed = false;
           const next = current.map((node) => {
             const selected = selectedNodeIds.has(node.id);
-            if (node.selected === selected) {
+            const drawOrder = drawOrderById.get(node.id);
+            if (node.selected === selected && drawOrder === undefined) {
               return node;
             }
             changed = true;
-            return { ...node, selected };
+            if (drawOrder === undefined) {
+              return { ...node, selected };
+            }
+            return {
+              ...node,
+              selected,
+              zIndex: drawOrder,
+              data: {
+                ...node.data,
+                model: {
+                  ...node.data.model,
+                  uiState: {
+                    ...(node.data.model.uiState ?? {}),
+                    drawOrder,
+                  },
+                },
+              },
+            };
           });
+          if (changed) {
+            persistSoon(next, edgesRef.current);
+          }
           return changed ? next : current;
         });
+        setNextDrawOrder(nextDrawOrder);
         const selectedEdgeIds = finalPreviewEdgeIds;
         setEdges((current) => {
           let changed = false;
@@ -2045,7 +2142,7 @@ function WorkspaceCanvas() {
       selectionGestureActiveRef.current = false;
       selectionGestureClearTimerRef.current = null;
     }, 0);
-  }, [setEdges, setNodes]);
+  }, [persistSoon, setEdges, setNextDrawOrder, setNodes]);
 
   // Keep nodes visually active for a short minimum duration so fast runs do not flicker.
   const scheduleRunningClear = useCallback((nodeId: string, execId: string) => {
@@ -3336,8 +3433,13 @@ function WorkspaceCanvas() {
             y: canvasBounds.top + canvasBounds.height / 2,
           })
         : null;
+      const drawOrder = reserveDrawOrders(1);
       setNodes((current) => {
         const nextNodeModel = makeNode(kind, current.length + 1);
+        nextNodeModel.uiState = {
+          ...(nextNodeModel.uiState ?? {}),
+          drawOrder,
+        };
         const desiredPosition = centeredPosition ?? nextNodeModel.position;
         nextNodeModel.position = chooseNodePosition(
           desiredPosition,
@@ -3365,7 +3467,7 @@ function WorkspaceCanvas() {
         return next;
       });
     },
-    [flow, persistSoon, runtime, setNodes, stableNodeActions],
+    [flow, persistSoon, reserveDrawOrders, runtime, setNodes, stableNodeActions],
   );
 
   const renameTuckedSubgraph = useCallback((tuckId: string, name: string) => {
@@ -3428,7 +3530,14 @@ function WorkspaceCanvas() {
         })
       : null;
     // Restored subgraphs should appear where the user is currently looking, not at their old absolute coordinates.
-    const restoredModels = viewportCenter ? recenterTuckedNodes(item.nodes, viewportCenter) : item.nodes;
+    const restoredDrawOrderStart = reserveDrawOrders(item.nodes.length);
+    const restoredModels = (viewportCenter ? recenterTuckedNodes(item.nodes, viewportCenter) : item.nodes).map((node, index) => ({
+      ...node,
+      uiState: {
+        ...(node.uiState ?? {}),
+        drawOrder: restoredDrawOrderStart + index,
+      },
+    }));
     const nextTuckspace = shouldKeepShellOnRestore(item)
       ? tuckspaceRef.current.map((entry) => (entry.id === tuckId ? emptyTuckedSubgraph(entry) : entry))
       : tuckspaceRef.current.filter((entry) => entry.id !== tuckId);
@@ -3472,7 +3581,7 @@ function WorkspaceCanvas() {
     setEdges(nextEdges);
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, nextTuckspace, nextRuntime);
-  }, [cycleEdgeBuffering, deleteEdge, flow, persistWorkspaceSnapshot, setEdges, setNodes, stableNodeActions]);
+  }, [cycleEdgeBuffering, deleteEdge, flow, persistWorkspaceSnapshot, reserveDrawOrders, setEdges, setNodes, stableNodeActions]);
 
   const reorderTuckedSubgraphs = useCallback((draggedId: string, targetId: string, position: "before" | "after") => {
     const nextTuckspace = reorderTuckspaceWithPlacement(tuckspaceRef.current, draggedId, targetId, position);
@@ -3606,6 +3715,18 @@ function WorkspaceCanvas() {
     });
   }, [setEdges, setNodes]);
 
+  const bringClickedNodeToFront = useCallback((_: unknown, node: FlowNode) => {
+    bumpNodeDrawOrder([node.id]);
+  }, [bumpNodeDrawOrder]);
+
+  const bringDraggedNodesToFront = useCallback((_: unknown, node: FlowNode) => {
+    bumpNodeDrawOrder(
+      node.selected
+        ? nodesRef.current.filter((entry) => entry.selected).map((entry) => entry.id)
+        : [node.id],
+    );
+  }, [bumpNodeDrawOrder]);
+
   const visibleTuckspace = useMemo(() => {
     const query = tuckspaceQuery.trim().toLowerCase();
     if (!query) {
@@ -3697,7 +3818,8 @@ function WorkspaceCanvas() {
     }
     const selectedNodeIds = new Set(selectedNodes.map((node) => node.id));
     let nextStore = materializedOutputStoreRef.current;
-    const duplicatedModels = selectedNodes.map((node) => {
+    const duplicatedDrawOrderStart = reserveDrawOrders(selectedNodes.length);
+    const duplicatedModels = selectedNodes.map((node, index) => {
       const model = flowNodeToPersistedWorkspaceNode(node, runtimeRef.current);
       const duplicated = {
         ...model,
@@ -3706,6 +3828,10 @@ function WorkspaceCanvas() {
         position: {
           x: model.position.x + 48,
           y: model.position.y + 48,
+        },
+        uiState: {
+          ...(model.uiState ?? {}),
+          drawOrder: duplicatedDrawOrderStart + index,
         },
       };
       const result = duplicateNodeMaterialized(model, duplicated, nextStore);
@@ -3776,7 +3902,7 @@ function WorkspaceCanvas() {
     setEdges(nextEdges);
     setNodes(nextNodes);
     persistWorkspaceSnapshot(nextNodes, nextEdges, tuckspaceRef.current, nextRuntime, nextStore);
-  }, [cycleEdgeBuffering, deleteEdge, persistWorkspaceSnapshot, setEdges, setNodes, stableNodeActions]);
+  }, [cycleEdgeBuffering, deleteEdge, persistWorkspaceSnapshot, reserveDrawOrders, setEdges, setNodes, stableNodeActions]);
 
   const setSelectedEdgeBuffering = useCallback((buffering: BufferingMode) => {
     const selectedEdgeIds = new Set(
@@ -4204,6 +4330,8 @@ function WorkspaceCanvas() {
           edgeTypes={edgeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onNodeClick={bringClickedNodeToFront}
+          onNodeDragStart={bringDraggedNodesToFront}
           onConnect={onConnect}
           selectionOnDrag
           selectionMode={SelectionMode.Partial}
