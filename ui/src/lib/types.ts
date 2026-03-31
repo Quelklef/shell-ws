@@ -178,6 +178,7 @@ export type ServerEvent =
   | {
       type: "exec_started";
       exec_id: string;
+      client_request_id?: string;
       node_id: string;
       timestamp: number;
     }
@@ -195,6 +196,9 @@ export type ServerEvent =
       node_id: string;
       exit_code: number | null;
       materialized: boolean;
+      materialized_state: NodeMaterialized;
+      upserted_entries: MaterializedOutputStore;
+      deleted_ids: string[];
       timestamp: number;
     }
   | {
@@ -234,11 +238,13 @@ export type ServerEvent =
   | {
       type: "execution_stopped";
       exec_id: string;
+      outcome: "completed" | "stopped" | "failed";
       timestamp: number;
     }
   | {
       type: "error";
       message: string;
+      client_request_id?: string;
       timestamp: number;
     };
 
@@ -254,6 +260,7 @@ export type ExecutionGraph = Workspace;
 
 export interface ExecutionRequest {
   graph: ExecutionGraph;
+  clientRequestId?: string;
   matouts: Record<PortRefKey, MatOutId>;
   activeMatouts: PortRefKey[];
 }
@@ -276,6 +283,12 @@ export interface NodeExecutionPlanState {
   isParticipating: boolean;
   portKeys: string[];
   matvals: ExecutionPlanNodeMatval[];
+}
+
+export interface NodeExecutionStatus {
+  phase: "waiting" | "running" | "done";
+  success?: boolean;
+  execId?: string | null;
 }
 
 export interface NodeRuntimeState {
@@ -305,6 +318,7 @@ export interface GenerateScriptResponse {
 export interface ShellNodeData extends Record<string, unknown> {
   model: WorkspaceNode;
   runtime: NodeRuntimeState;
+  executionStatus?: NodeExecutionStatus;
   argvSlots?: number[];
   previewTabs?: string[];
   previewControlsLocation?: PreviewControlsLocation;

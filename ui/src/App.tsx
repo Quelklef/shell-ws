@@ -43,6 +43,17 @@ import { collectAiScriptSamples } from "./lib/aiScript";
 import { compileExecutionRequest } from "./lib/compileExecutionRequest";
 import { allocateBumpedDrawOrders, nodeDrawOrder } from "./lib/drawOrder";
 import {
+  createTrackedExecution,
+  finishTrackedExecution,
+  removePendingTrackedExecution,
+  removeTrackedExecution,
+  removeTerminalTrackedExecutions,
+  summarizeTrackedExecution,
+  upsertExecutionFinished,
+  upsertExecutionStarted,
+  type TrackedExecution,
+} from "./lib/executionTracking";
+import {
   buildExecutionRequestFromPlan,
   emptyExecutionPlan,
   executionPlanForSelection,
@@ -68,6 +79,7 @@ import type {
   FlowEdge,
   FlowNode,
   MaterializedOutputStore,
+  NodeExecutionStatus,
   NodeKind,
   NodeMaterialized,
   NodeRuntimeState,
@@ -546,6 +558,7 @@ function toFlowNode(
   previewControlsLocation: Workspace["ui"]["previewControlsLocation"],
   executionPlan: ExecutionPlanState,
   participatingNodeIds: Set<string>,
+  executionStatus?: NodeExecutionStatus,
 ): FlowNode {
   return {
     id: node.id,
@@ -554,6 +567,7 @@ function toFlowNode(
     data: {
       model: node,
       runtime: runtime[node.id] ?? { running: false, portActivity: {} },
+      executionStatus,
       generation: generation[node.id],
       executionPlan: {
         isExecutable: executionPlan.executableNodeIds.includes(node.id),
@@ -932,9 +946,8 @@ function WorkspaceCanvas() {
   const [materializedOutputStore, setMaterializedOutputStore] = useState<MaterializedOutputStore>({});
   const [executionPlan, setExecutionPlan] = useState<ExecutionPlanState>(() => emptyExecutionPlan());
   const [tuckspace, setTuckspace] = useState<TuckedSubgraph[]>([]);
-  const [activeExecutions, setActiveExecutions] = useState<
-    { execId: string; nodeId: string }[]
-  >([]);
+  const [activeExecutions, setActiveExecutions] = useState<TrackedExecution[]>([]);
+  const [nodeExecutionStatuses, setNodeExecutionStatuses] = useState<Record<string, NodeExecutionStatus>>({});
   const [tuckspaceQuery, setTuckspaceQuery] = useState("");
   const [toast, setToast] = useState<string | null>(null);
   const socketRef = useRef<ReturnType<typeof connectKernel> | null>(null);
@@ -968,6 +981,8 @@ function WorkspaceCanvas() {
   const materializedOutputStoreRef = useRef<MaterializedOutputStore>({});
   const executionPlanRef = useRef<ExecutionPlanState>(executionPlan);
   const displayedExecutionPlanRef = useRef<ExecutionPlanState>(executionPlan);
+  const activeExecutionsRef = useRef<TrackedExecution[]>([]);
+  const nodeExecutionStatusesRef = useRef<Record<string, NodeExecutionStatus>>({});
   const persistTimerRef = useRef<number | null>(null);
   const layoutPersistTimerRef = useRef<number | null>(null);
   const generationRef = useRef<Record<string, AiGenerationState>>({});
@@ -1165,6 +1180,56 @@ function WorkspaceCanvas() {
           };
     });
   }, [patchNodesById]);
+
+  const updateNodeExecutionStatusData = useCallback((updates: Record<string, NodeExecutionStatus | undefined>) => {
+    const nodeIds = Object.keys(updates);
+    if (nodeIds.length === 0) {
+      return;
+    }
+    patchNodesById(nodeIds, (node) => {
+      const nextExecutionStatus = updates[node.id];
+      return node.data.executionStatus === nextExecutionStatus
+        ? node
+        : {
+            ...node,
+            data: {
+              ...node.data,
+              executionStatus: nextExecutionStatus,
+            },
+          };
+    });
+  }, [patchNodesById]);
+
+  const clearTrackedExecutionStatuses = useCallback((executionsToClear: readonly TrackedExecution[]) => {
+    if (executionsToClear.length === 0) {
+      return;
+    }
+    const nextStatuses = { ...nodeExecutionStatusesRef.current };
+    const updates: Record<string, NodeExecutionStatus | undefined> = {};
+    for (const execution of executionsToClear) {
+      for (const nodeId of execution.nodeIds) {
+        const currentStatus = nextStatuses[nodeId];
+        if (!currentStatus) {
+          continue;
+        }
+        if (execution.execId) {
+          if (currentStatus.execId !== execution.execId) {
+            continue;
+          }
+        } else if (currentStatus.execId != null) {
+          continue;
+        }
+        delete nextStatuses[nodeId];
+        updates[nodeId] = undefined;
+      }
+    }
+    if (Object.keys(updates).length === 0) {
+      return;
+    }
+    nodeExecutionStatusesRef.current = nextStatuses;
+    setNodeExecutionStatuses(nextStatuses);
+    updateNodeExecutionStatusData(updates);
+  }, [updateNodeExecutionStatusData]);
 
   const updateNodeExecutionPlanData = useCallback((previousPlan: ExecutionPlanState, nextPlan: ExecutionPlanState) => {
     const previousParticipatingNodeIds = participatingNodeIdsForCurrentPlan(previousPlan);
@@ -1430,6 +1495,14 @@ function WorkspaceCanvas() {
   useEffect(() => {
     executionPlanRef.current = executionPlan;
   }, [executionPlan]);
+
+  useEffect(() => {
+    activeExecutionsRef.current = activeExecutions;
+  }, [activeExecutions]);
+
+  useEffect(() => {
+    nodeExecutionStatusesRef.current = nodeExecutionStatuses;
+  }, [nodeExecutionStatuses]);
 
   useEffect(() => {
     userSelectionActiveRef.current = userSelectionActive;
@@ -1918,45 +1991,46 @@ function WorkspaceCanvas() {
   }, [setNextDrawOrder]);
 
   const bumpNodeDrawOrder = useCallback((ids: Iterable<string>) => {
-    const currentNodes = nodesRef.current;
-    const { drawOrderById, nextDrawOrder } = allocateBumpedDrawOrders(
-      currentNodes.map((node) => ({
-        id: node.id,
-        drawOrder: nodeDrawOrder(node.data.model),
-      })),
-      ids,
-      workspaceMetaRef.current?.ui.nextDrawOrder ?? currentNodes.length,
-    );
-    if (drawOrderById.size === 0) {
-      return;
-    }
-
-    const nextNodes = currentNodes.map((node) => {
-      const drawOrder = drawOrderById.get(node.id);
-      if (drawOrder === undefined) {
-        return node;
+    setNodes((current) => {
+      const { drawOrderById, nextDrawOrder } = allocateBumpedDrawOrders(
+        current.map((node) => ({
+          id: node.id,
+          drawOrder: nodeDrawOrder(node.data.model),
+        })),
+        ids,
+        workspaceMetaRef.current?.ui.nextDrawOrder ?? current.length,
+      );
+      if (drawOrderById.size === 0) {
+        return current;
       }
-      return {
-        ...node,
-        zIndex: drawOrder,
-        data: {
-          ...node.data,
-          model: {
-            ...node.data.model,
-            uiState: {
-              ...(node.data.model.uiState ?? {}),
-              drawOrder,
+
+      const nextNodes = current.map((node) => {
+        const drawOrder = drawOrderById.get(node.id);
+        if (drawOrder === undefined) {
+          return node;
+        }
+        return {
+          ...node,
+          zIndex: drawOrder,
+          data: {
+            ...node.data,
+            model: {
+              ...node.data.model,
+              uiState: {
+                ...(node.data.model.uiState ?? {}),
+                drawOrder,
+              },
             },
           },
-        },
-      };
-    });
+        };
+      });
 
-    // Recency order is persisted. A drag or click only needs a single bump at start,
-    // not per-frame z-index churn during movement.
-    setNextDrawOrder(nextDrawOrder);
-    setNodes(nextNodes);
-    persistSoon(nextNodes, edgesRef.current);
+      // Recency order is persisted. A drag or click only needs a single bump at start,
+      // not per-frame z-index churn during movement, and it must preserve any fresh node data.
+      setNextDrawOrder(nextDrawOrder);
+      persistSoon(nextNodes, edgesRef.current);
+      return nextNodes;
+    });
   }, [persistSoon, setNextDrawOrder, setNodes]);
 
   const persistMaterializedOutputStore = useCallback((nextStore: MaterializedOutputStore) => {
@@ -2187,9 +2261,18 @@ function WorkspaceCanvas() {
         setToast(String(error));
         return;
       }
+      // Waiting nodes only exist client-side until the kernel allocates a real exec id, so we
+      // attach a request correlation id here and stitch the pending record back together on
+      // the first exec_started event.
+      const clientRequestId = encodeId("exec-request");
+      const trackedExecution = createTrackedExecution(clientRequestId, request.graph.nodes.map((node) => node.id), nodeId);
+      const requestWithId: ExecutionRequest = {
+        ...request,
+        clientRequestId,
+      };
       const event: ClientEvent = {
         type: "run_node",
-        request,
+        request: requestWithId,
       };
       if (!socketRef.current?.ready) {
         if (!silenceIfDisconnected) {
@@ -2197,18 +2280,48 @@ function WorkspaceCanvas() {
         }
         return;
       }
+      if (trackedExecution.nodeIds.length > 0) {
+        // Finished runs keep their stripes until dismissed or the next run starts.
+        const { remaining, removed } = removeTerminalTrackedExecutions(activeExecutionsRef.current);
+        if (removed.length > 0) {
+          clearTrackedExecutionStatuses(removed);
+        }
+        const nextExecutions = [...remaining, trackedExecution];
+        activeExecutionsRef.current = nextExecutions;
+        setActiveExecutions(nextExecutions);
+        const nextStatuses = {
+          ...nodeExecutionStatusesRef.current,
+        };
+        for (const targetNodeId of trackedExecution.nodeIds) {
+          nextStatuses[targetNodeId] = {
+            phase: "waiting",
+            execId: null,
+          };
+        }
+        nodeExecutionStatusesRef.current = nextStatuses;
+        setNodeExecutionStatuses(nextStatuses);
+        updateNodeExecutionStatusData(Object.fromEntries(
+          trackedExecution.nodeIds.map((targetNodeId) => [targetNodeId, nextStatuses[targetNodeId]]),
+        ));
+      }
       socketRef.current.send(event);
     },
-    [buildWorkspace],
+    [buildWorkspace, clearTrackedExecutionStatuses, updateNodeExecutionStatusData],
   );
 
   const sendExecutionRequest = useCallback((
     request: ExecutionRequest,
+    originNodeId?: string,
     silenceIfDisconnected = false,
   ) => {
+    const clientRequestId = encodeId("exec-request");
+    const requestWithId: ExecutionRequest = {
+      ...request,
+      clientRequestId,
+    };
     const event: ClientEvent = {
       type: "run_node",
-      request,
+      request: requestWithId,
     };
     if (!socketRef.current?.ready) {
       if (!silenceIfDisconnected) {
@@ -2216,9 +2329,34 @@ function WorkspaceCanvas() {
       }
       return false;
     }
+    const trackedExecution = createTrackedExecution(clientRequestId, request.graph.nodes.map((node) => node.id), originNodeId);
+    if (trackedExecution.nodeIds.length > 0) {
+      // Starting a new run clears any retained finished-run chrome from the previous one.
+      const { remaining, removed } = removeTerminalTrackedExecutions(activeExecutionsRef.current);
+      if (removed.length > 0) {
+        clearTrackedExecutionStatuses(removed);
+      }
+      const nextExecutions = [...remaining, trackedExecution];
+      activeExecutionsRef.current = nextExecutions;
+      setActiveExecutions(nextExecutions);
+      const nextStatuses = {
+        ...nodeExecutionStatusesRef.current,
+      };
+      for (const nodeId of trackedExecution.nodeIds) {
+        nextStatuses[nodeId] = {
+          phase: "waiting",
+          execId: null,
+        };
+      }
+      nodeExecutionStatusesRef.current = nextStatuses;
+      setNodeExecutionStatuses(nextStatuses);
+      updateNodeExecutionStatusData(Object.fromEntries(
+        trackedExecution.nodeIds.map((nodeId) => [nodeId, nextStatuses[nodeId]]),
+      ));
+    }
     socketRef.current.send(event);
     return true;
-  }, []);
+  }, [clearTrackedExecutionStatuses, updateNodeExecutionStatusData]);
 
   const runCurrentExecutionPlan = useCallback(() => {
     const workspace = buildWorkspace();
@@ -2242,7 +2380,18 @@ function WorkspaceCanvas() {
       type: "stop_execution",
       exec_id: execId,
     });
-  }, [persistRuntimeSoon]);
+  }, []);
+
+  const dismissExecution = useCallback((execKey: string) => {
+    const { remaining, removed } = removeTrackedExecution(activeExecutionsRef.current, execKey);
+    if (removed) {
+      clearTrackedExecutionStatuses([removed]);
+    }
+    activeExecutionsRef.current = remaining;
+    setActiveExecutions(remaining);
+  }, [clearTrackedExecutionStatuses]);
+
+  const hasOngoingExecutions = activeExecutions.some((execution) => execution.outcome == null);
 
   const getActionReason = useCallback((nodeId: string, action: ExecutionAction) => {
     const node = nodesRef.current.find((item) => item.id === nodeId)?.data.model;
@@ -2434,6 +2583,7 @@ function WorkspaceCanvas() {
                   workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
                   executionPlanRef.current,
                   participatingNodeIds,
+                  nodeExecutionStatusesRef.current[cleared.node.id],
                 ),
                 selected: candidate.selected,
               }
@@ -2635,18 +2785,90 @@ function WorkspaceCanvas() {
     const connection = connectKernel(
       (event) => {
         if (event.type === "exec_started") {
-          setActiveExecutions((current) =>
-            current.some((entry) => entry.execId === event.exec_id)
-              ? current
-              : [...current, { execId: event.exec_id, nodeId: event.node_id }],
-          );
-        } else if (
-          event.type === "exec_finished" ||
-          event.type === "execution_stopped"
-        ) {
-          setActiveExecutions((current) =>
-            current.filter((entry) => entry.execId !== event.exec_id),
-          );
+          const nextExecutions = upsertExecutionStarted(activeExecutionsRef.current, {
+            clientRequestId: event.client_request_id,
+            execId: event.exec_id,
+            nodeId: event.node_id,
+          });
+          activeExecutionsRef.current = nextExecutions;
+          setActiveExecutions(nextExecutions);
+          const nextStatuses = {
+            ...nodeExecutionStatusesRef.current,
+            [event.node_id]: {
+              phase: "running" as const,
+              execId: event.exec_id,
+            },
+          };
+          nodeExecutionStatusesRef.current = nextStatuses;
+          setNodeExecutionStatuses(nextStatuses);
+          updateNodeExecutionStatusData({
+            [event.node_id]: nextStatuses[event.node_id],
+          });
+        } else if (event.type === "exec_finished") {
+          const success = event.exit_code === 0;
+          const nextExecutions = upsertExecutionFinished(activeExecutionsRef.current, event.exec_id, event.node_id, success);
+          activeExecutionsRef.current = nextExecutions;
+          setActiveExecutions(nextExecutions);
+          const nextStatuses = {
+            ...nodeExecutionStatusesRef.current,
+            [event.node_id]: {
+              phase: "done" as const,
+              success,
+              execId: event.exec_id,
+            },
+          };
+          nodeExecutionStatusesRef.current = nextStatuses;
+          setNodeExecutionStatuses(nextStatuses);
+          updateNodeExecutionStatusData({
+            [event.node_id]: nextStatuses[event.node_id],
+          });
+        } else if (event.type === "execution_stopped") {
+          const { next, finished } = finishTrackedExecution(activeExecutionsRef.current, event.exec_id, event.outcome);
+          if (finished) {
+            const nextStatuses = {
+              ...nodeExecutionStatusesRef.current,
+            };
+            const updates: Record<string, NodeExecutionStatus | undefined> = {};
+            const succeeded = new Set(finished.succeededNodeIds);
+            for (const nodeId of finished.nodeIds) {
+              if (succeeded.has(nodeId)) {
+                continue;
+              }
+              if (event.outcome === "completed") {
+                delete nextStatuses[nodeId];
+                updates[nodeId] = undefined;
+              } else {
+                nextStatuses[nodeId] = {
+                  phase: "done",
+                  success: false,
+                  execId: finished.execId ?? event.exec_id,
+                };
+                updates[nodeId] = nextStatuses[nodeId];
+              }
+            }
+            nodeExecutionStatusesRef.current = nextStatuses;
+            setNodeExecutionStatuses(nextStatuses);
+            updateNodeExecutionStatusData(updates);
+          }
+          activeExecutionsRef.current = next;
+          setActiveExecutions(next);
+        } else if (event.type === "error" && event.client_request_id) {
+          const { remaining, removed } = removePendingTrackedExecution(activeExecutionsRef.current, event.client_request_id!);
+          if (removed) {
+            const nextStatuses = {
+              ...nodeExecutionStatusesRef.current,
+            };
+            const updates: Record<string, NodeExecutionStatus | undefined> = {};
+            for (const nodeId of removed.nodeIds) {
+              delete nextStatuses[nodeId];
+              updates[nodeId] = undefined;
+            }
+            nodeExecutionStatusesRef.current = nextStatuses;
+            setNodeExecutionStatuses(nextStatuses);
+            updateNodeExecutionStatusData(updates);
+          }
+          activeExecutionsRef.current = remaining;
+          setActiveExecutions(remaining);
         }
 
         setRuntime((current) => {
@@ -2711,29 +2933,24 @@ function WorkspaceCanvas() {
               return next;
             }
             case "exec_finished": {
-              const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
-              if (node) {
-                updateNodeMaterializedData(event.node_id, {
-                  ...(node.materialized ?? { inputs: {}, outputs: {} }),
-                  lastExitCode: event.materialized
-                    ? event.exit_code
-                    : node.materialized?.lastExitCode ?? null,
-                });
+              const nextStore = { ...materializedOutputStoreRef.current, ...event.upserted_entries };
+              for (const id of event.deleted_ids) {
+                delete nextStore[id];
               }
+              materializedOutputStoreRef.current = nextStore;
+              setMaterializedOutputStore(nextStore);
+              const nextMaterialized = { ...event.materialized_state };
+              // Finished nodes ship their authoritative materialized snapshot in the same event so
+              // we never have to rebuild it from nodesRef and race a fresher materialized_state.
+              updateNodeMaterializedData(event.node_id, nextMaterialized);
+              const node = nodesRef.current.find((item) => item.id === event.node_id)?.data.model;
               const previous = current[event.node_id] ?? {
                 running: false,
                 portActivity: {},
               };
-              const committed = { ...(previous.previews ?? {}) };
               const live = { ...(previous.livePreviews ?? {}) };
-              if (node) {
-                for (const port of previewOutputPortsForKind(node.kind)) {
-                  const candidate = live[port];
-                  if (event.materialized && candidate) {
-                    committed[port] = { ...candidate, completed: true };
-                  }
-                  delete live[port];
-                }
+              for (const port of node ? previewOutputPortsForKind(node.kind) : ["stdout", "stderr"]) {
+                delete live[port];
               }
               const keepRunning = scheduleRunningClear(event.node_id, event.exec_id);
               const next = {
@@ -2741,7 +2958,15 @@ function WorkspaceCanvas() {
                 [event.node_id]: {
                   ...previous,
                   running: keepRunning ? true : false,
-                  previews: committed,
+                  previews: node
+                    ? runtimePreviewsFromNode(
+                        {
+                          ...node,
+                          materialized: nextMaterialized,
+                        },
+                        nextStore,
+                      )
+                    : previous.previews,
                   livePreviews: Object.keys(live).length > 0 ? live : undefined,
                 },
               };
@@ -2858,7 +3083,7 @@ function WorkspaceCanvas() {
     socketRef.current = connection;
     connection.onOpen(() => setKernelConnected(true));
     return () => connection.close();
-  }, [clearRunningTimer, scheduleRunningClear, updateNodeMaterializedData, updateNodeRuntimeData, updateNodesRuntimeData]);
+  }, [clearRunningTimer, scheduleRunningClear, updateNodeExecutionStatusData, updateNodeMaterializedData, updateNodeRuntimeData, updateNodesRuntimeData]);
 
   useEffect(() => {
     const desired = new Map(
@@ -3109,6 +3334,7 @@ function WorkspaceCanvas() {
         loaded.ui.previewControlsLocation,
         emptyExecutionPlan(),
         participatingNodeIds,
+        undefined,
       ),
     );
 
@@ -3128,6 +3354,7 @@ function WorkspaceCanvas() {
     runtimeRef.current = loadedRuntime;
     incomingEdgeSummaryRef.current = incomingSummaries;
     executionPlanRef.current = emptyExecutionPlan();
+    nodeExecutionStatusesRef.current = {};
 
     setWorkspaceSummaries((current) =>
       upsertWorkspaceSummary(current, { id: loaded.id, name: loaded.name, createdAt: loaded.createdAt, sortOrder: loaded.sortOrder }),
@@ -3136,7 +3363,9 @@ function WorkspaceCanvas() {
     setGeneration({});
     setRuntime(loadedRuntime);
     setExecutionPlan(emptyExecutionPlan());
+    activeExecutionsRef.current = [];
     setActiveExecutions([]);
+    setNodeExecutionStatuses({});
     setWorkspaceDeleteConfirmingId(null);
     setWorkspaceRenamingId(null);
     setWorkspaceRenameDraft("");
@@ -3155,7 +3384,7 @@ function WorkspaceCanvas() {
     if (workspaceMetaRef.current?.id === workspaceId) {
       return;
     }
-    if (activeExecutions.length > 0) {
+    if (hasOngoingExecutions) {
       setToast("stop active executions before switching workspaces");
       return;
     }
@@ -3169,10 +3398,10 @@ function WorkspaceCanvas() {
     } finally {
       setWorkspaceSwitching(false);
     }
-  }, [activeExecutions.length, applyLoadedWorkspace, flushPendingWorkspaceSave]);
+  }, [applyLoadedWorkspace, flushPendingWorkspaceSave, hasOngoingExecutions]);
 
   const createAndLoadWorkspace = useCallback(async () => {
-    if (activeExecutions.length > 0) {
+    if (hasOngoingExecutions) {
       setToast("stop active executions before creating a workspace");
       return;
     }
@@ -3186,11 +3415,11 @@ function WorkspaceCanvas() {
     } finally {
       setWorkspaceSwitching(false);
     }
-  }, [activeExecutions.length, applyLoadedWorkspace, flushPendingWorkspaceSave]);
+  }, [applyLoadedWorkspace, flushPendingWorkspaceSave, hasOngoingExecutions]);
 
 
   const confirmDeleteWorkspace = useCallback(async (workspaceId: string) => {
-    if (activeExecutions.length > 0) {
+    if (hasOngoingExecutions) {
       setToast("stop active executions before deleting a workspace");
       return;
     }
@@ -3461,6 +3690,7 @@ function WorkspaceCanvas() {
           workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
           executionPlanRef.current,
           participatingNodeIdsForCurrentPlan(executionPlanRef.current),
+          undefined,
         );
         const next = [...current, nextNode];
         persistSoon(next, edgesRef.current);
@@ -3502,7 +3732,20 @@ function WorkspaceCanvas() {
     setGeneration((current) => Object.fromEntries(
       Object.entries(current).filter(([nodeId]) => !selectedIds.has(nodeId)),
     ));
-    setActiveExecutions((current) => current.filter((entry) => !selectedIds.has(entry.nodeId)));
+    const nextExecutions = activeExecutionsRef.current.filter((entry) => !entry.nodeIds.some((nodeId) => selectedIds.has(nodeId)));
+    activeExecutionsRef.current = nextExecutions;
+    setActiveExecutions(nextExecutions);
+    if (selectedIds.size > 0) {
+      const nextStatuses = { ...nodeExecutionStatusesRef.current };
+      const updates: Record<string, NodeExecutionStatus | undefined> = {};
+      for (const nodeId of selectedIds) {
+        delete nextStatuses[nodeId];
+        updates[nodeId] = undefined;
+      }
+      nodeExecutionStatusesRef.current = nextStatuses;
+      setNodeExecutionStatuses(nextStatuses);
+      updateNodeExecutionStatusData(updates);
+    }
     incomingEdgeSummaryRef.current = nextIncomingSummaries;
     setTuckspace(nextTuckspace);
     setRuntime(nextRuntime);
@@ -3571,6 +3814,7 @@ function WorkspaceCanvas() {
         workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
         executionPlanRef.current,
         participatingNodeIds,
+        undefined,
       ),
       selected: true,
     }));
@@ -3664,6 +3908,26 @@ function WorkspaceCanvas() {
       matoutCount: executionPlan.providedMatoutIds.length,
     }),
     [executionPlan, executionPlanParticipatingNodeIds.length],
+  );
+  const activeExecutionSummaries = useMemo(
+    () => activeExecutions.map((execution) => {
+      const counts = summarizeTrackedExecution(execution);
+      const originNode = execution.originNodeId
+        ? nodes.find((item) => item.id === execution.originNodeId)
+        : undefined;
+      const label = originNode?.data.model.comment.trim()
+        || originNode?.data.model.title.trim()
+        || originNode?.data.model.kind
+        || "plan";
+      return {
+        ...execution,
+        ...counts,
+        execKey: execution.execId ?? execution.clientRequestId,
+        isTerminal: execution.outcome != null,
+        label,
+      };
+    }),
+    [activeExecutions, nodes],
   );
 
   useEffect(() => {
@@ -3800,6 +4064,7 @@ function WorkspaceCanvas() {
               workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
               executionPlanRef.current,
               participatingNodeIdsForCurrentPlan(executionPlanRef.current),
+              nodeExecutionStatusesRef.current[updated.id],
             ),
             selected: node.selected,
           }
@@ -3892,6 +4157,7 @@ function WorkspaceCanvas() {
           workspaceMetaRef.current?.ui.previewControlsLocation ?? "node",
           executionPlanRef.current,
           participatingNodeIds,
+          undefined,
         ),
         selected: true,
       })),
@@ -4047,7 +4313,7 @@ function WorkspaceCanvas() {
     return <div className="app-loading">loading workspace...</div>;
   }
 
-  const sidebarActionsDisabled = workspaceSwitching || activeExecutions.length > 0;
+  const sidebarActionsDisabled = workspaceSwitching || hasOngoingExecutions;
   const sidebarWidths = {
     workspaces: sidebarUi.workspaces.collapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarUi.workspaces.width,
     nodes: sidebarUi.nodes.collapsed ? COLLAPSED_SIDEBAR_WIDTH : sidebarUi.nodes.width,
@@ -4077,28 +4343,6 @@ function WorkspaceCanvas() {
             <span className={`kernel-pill ${kernelConnected ? "online" : "offline"}`}>
               {kernelConnected ? "kernel online" : "kernel offline"}
             </span>
-            {activeExecutions.length > 0 && (
-              <section className="execution-panel">
-                <div className="node-palette-label">running</div>
-                <div className="execution-list">
-                  {activeExecutions.map((execution) => {
-                    const node = nodes.find((item) => item.id === execution.nodeId);
-                    const label = node?.data.model.comment.trim() || node?.data.model.kind || execution.nodeId;
-                    return (
-                      <div key={execution.execId} className="execution-item">
-                        <div className="execution-text">
-                          <div className="execution-label">{label}</div>
-                          <div className="execution-id">{execution.execId.slice(0, 8)}</div>
-                        </div>
-                        <button type="button" onClick={() => stopExecution(execution.execId)}>
-                          stop
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            )}
           </section>
 
           <div className="sidebar-divider" />
@@ -4176,7 +4420,7 @@ function WorkspaceCanvas() {
                             type="button"
                             className="workspace-list-confirm workspace-list-delete is-confirming"
                             onClick={() => void confirmDeleteWorkspace(workspace.id)}
-                            disabled={workspaceSwitching || activeExecutions.length > 0}
+                            disabled={workspaceSwitching || hasOngoingExecutions}
                             title="confirm delete workspace"
                             aria-label="confirm delete workspace"
                           >
@@ -4198,7 +4442,7 @@ function WorkspaceCanvas() {
                           type="button"
                           className="workspace-list-action workspace-list-delete"
                           onClick={() => requestWorkspaceDelete(workspace.id)}
-                          disabled={workspaceSwitching || activeExecutions.length > 0}
+                          disabled={workspaceSwitching || hasOngoingExecutions}
                           title="delete workspace"
                           aria-label="delete workspace"
                         >
@@ -4223,7 +4467,7 @@ function WorkspaceCanvas() {
             </div>
             {workspaceSwitching ? (
               <span className="workspace-picker-status">switching…</span>
-            ) : activeExecutions.length > 0 ? (
+            ) : hasOngoingExecutions ? (
               <span className="workspace-picker-status">stop runs to switch or delete</span>
             ) : null}
           </section>
@@ -4370,23 +4614,58 @@ function WorkspaceCanvas() {
               </span>
             </ControlButton>
           </Controls>
-          {executionPlanHasTargets && (
-            <Panel position="top-right" className="exec-plan-panel">
-              <div className="exec-plan-panel-summary">
-                plan · {executionPlanSummary.nodeCount} nodes · {executionPlanSummary.edgeCount} wires · {executionPlanSummary.matoutCount} matvals
-              </div>
-              <div className="exec-plan-panel-buttons">
-                <button type="button" onClick={runCurrentExecutionPlan}>
-                  play
-                </button>
-                <button
-                  type="button"
-                  className="danger"
-                  onClick={() => setExecutionPlan(emptyExecutionPlan())}
-                >
-                  reset
-                </button>
-              </div>
+          {(activeExecutionSummaries.length > 0 || executionPlanHasTargets) && (
+            <Panel position="top-right" className="top-right-panels">
+              {activeExecutionSummaries.length > 0 && (
+                <section className="execution-overlay">
+                  <div className="execution-overlay-title">executions</div>
+                  <div className="execution-list">
+                    {activeExecutionSummaries.map((execution) => (
+                      <div
+                        key={execution.execKey}
+                        className={`execution-item ${execution.isTerminal ? "is-terminal" : ""}`}
+                      >
+                        <div className="execution-text">
+                          <div className="execution-label">{execution.label}</div>
+                          <div className="execution-id">{execution.execKey.slice(0, 8)}</div>
+                          <div className="execution-counts">
+                            {execution.outcome ? `${execution.outcome} · ` : ""}
+                            {execution.targetCount} target · {execution.runningCount} running · {execution.succeededCount} done · {execution.failedCount} failed
+                          </div>
+                        </div>
+                        {execution.isTerminal ? (
+                          <button type="button" onClick={() => dismissExecution(execution.execKey)}>
+                            dismiss
+                          </button>
+                        ) : (
+                          <button type="button" disabled={!execution.execId} onClick={() => execution.execId && stopExecution(execution.execId)}>
+                            stop
+                          </button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
+              {executionPlanHasTargets && (
+                <section className="exec-plan-panel">
+                  <div className="exec-plan-panel-summary">
+                    plan · {executionPlanSummary.nodeCount} nodes · {executionPlanSummary.edgeCount} wires · {executionPlanSummary.matoutCount} matvals
+                  </div>
+                  <div className="exec-plan-panel-buttons">
+                    <button type="button" onClick={runCurrentExecutionPlan}>
+                      play
+                    </button>
+                    <button
+                      type="button"
+                      className="danger"
+                      onClick={() => setExecutionPlan(emptyExecutionPlan())}
+                    >
+                      reset
+                    </button>
+                  </div>
+                </section>
+              )}
             </Panel>
           )}
           <Panel position="bottom-left" className="zoom-controls-note">

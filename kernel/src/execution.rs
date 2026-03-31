@@ -24,7 +24,7 @@ use crate::materialized_outputs::{
     MaterializedMutation,
 };
 use crate::model::{
-    default_cwd, BufferingMode, Edge, ExecutionRequest, MaterializedOutputStore, Node, NodeKind,
+    default_cwd, BufferingMode, Edge, ExecutionOutcome, ExecutionRequest, MaterializedOutputStore, Node, NodeKind,
     NodeMaterialized, PortKind, PortRef, ServerEvent, Workspace,
 };
 use crate::port_schema::node_port_schema;
@@ -118,6 +118,7 @@ impl ExecutionManager {
         let exec_id_for_remove = exec_id.clone();
         let cancel_for_task = cancel.clone();
         let task = tokio::spawn(async move {
+            let client_request_id = request.client_request_id.clone();
             let context = match ExecutionContext::new(
                 exec_id_for_task.clone(),
                 request,
@@ -129,22 +130,35 @@ impl ExecutionManager {
                 Err(message) => {
                     let _ = manager.broadcaster.send(ServerEvent::Error {
                         message,
+                        client_request_id,
                         timestamp: now_ms(),
                     });
                     return;
                 }
             };
 
-            if let Err(message) = context.clone().run().await {
+            let outcome = if let Err(message) = context.clone().run().await {
                 if !context.cancel.is_cancelled() {
                     let _ = manager.broadcaster.send(ServerEvent::Error {
                         message,
+                        client_request_id: context.client_request_id.clone(),
                         timestamp: now_ms(),
                     });
+                    ExecutionOutcome::Failed
+                } else {
+                    ExecutionOutcome::Stopped
                 }
-            }
+            } else {
+                ExecutionOutcome::Completed
+            };
 
-            manager.active.lock().remove(&exec_id_for_remove);
+            if manager.active.lock().remove(&exec_id_for_remove).is_some() {
+                let _ = manager.broadcaster.send(ServerEvent::ExecutionStopped {
+                    exec_id: exec_id_for_remove.clone(),
+                    outcome,
+                    timestamp: now_ms(),
+                });
+            }
         });
 
         self.active.lock().insert(
@@ -163,6 +177,7 @@ impl ExecutionManager {
             handle.cancel.cancel();
             let _ = self.broadcaster.send(ServerEvent::ExecutionStopped {
                 exec_id: exec_id.to_string(),
+                outcome: ExecutionOutcome::Stopped,
                 timestamp: now_ms(),
             });
         }
@@ -193,6 +208,7 @@ struct StreamingExecutionPlan {
 
 struct ExecutionContext {
     exec_id: String,
+    client_request_id: Option<String>,
     workspace: Workspace,
     broadcaster: broadcast::Sender<ServerEvent>,
     cancel: CancellationToken,
@@ -216,6 +232,7 @@ impl ExecutionContext {
         broadcaster: broadcast::Sender<ServerEvent>,
         cancel: CancellationToken,
     ) -> Result<Self, String> {
+        let client_request_id = request.client_request_id.clone();
         let workspace = request.graph.clone();
         let nodes: HashMap<String, Node> = workspace
             .nodes
@@ -346,6 +363,7 @@ impl ExecutionContext {
 
         Ok(Self {
             exec_id,
+            client_request_id,
             workspace,
             broadcaster,
             cancel,
@@ -599,7 +617,7 @@ impl ExecutionContext {
         node_id: &str,
         outputs: HashMap<String, Vec<u8>>,
         exit_code: Option<i32>,
-    ) {
+    ) -> MaterializedMutation {
         self.replace_materialized_output_bytes(node_id, outputs.clone());
         self.last_exit_codes
             .lock()
@@ -607,7 +625,7 @@ impl ExecutionContext {
         let mut nodes = self.materialized_nodes.lock();
         let mut store = self.materialized_output_store.lock();
         let Some(node) = self.nodes.get(node_id) else {
-            return;
+            return MaterializedMutation::default();
         };
         let state = nodes.entry(node_id.to_string()).or_default();
         let mut shadow = node.clone();
@@ -615,25 +633,39 @@ impl ExecutionContext {
         shadow.materialized.last_exit_code = exit_code;
         let mutation = create_output_entries(&mut shadow, &self.exec_id, outputs, exit_code, &mut store);
         *state = shadow.materialized.clone();
-        drop(store);
-        drop(nodes);
-        self.emit_materialized_state(node_id, mutation);
+        mutation
     }
 
     fn emit_started(&self, node_id: &str) {
         let _ = self.broadcaster.send(ServerEvent::ExecStarted {
             exec_id: self.exec_id.clone(),
+            client_request_id: self.client_request_id.clone(),
             node_id: node_id.to_string(),
             timestamp: now_ms(),
         });
     }
 
-    fn emit_finished(&self, node_id: &str, exit_code: Option<i32>, materialized: bool) {
+    fn emit_finished(
+        &self,
+        node_id: &str,
+        exit_code: Option<i32>,
+        materialized: bool,
+        mutation: MaterializedMutation,
+    ) {
+        let materialized_state = self
+            .materialized_nodes
+            .lock()
+            .get(node_id)
+            .cloned()
+            .unwrap_or_default();
         let _ = self.broadcaster.send(ServerEvent::ExecFinished {
             exec_id: self.exec_id.clone(),
             node_id: node_id.to_string(),
             exit_code,
             materialized,
+            materialized_state,
+            upserted_entries: mutation.upserted_entries,
+            deleted_ids: mutation.deleted_ids,
             timestamp: now_ms(),
         });
     }
@@ -684,7 +716,7 @@ struct RunController {
     edge_buffers: HashMap<String, EdgeBufferState>,
     live_inputs: HashMap<String, HashMap<String, Vec<u8>>>,
     live_outputs: HashMap<String, HashMap<String, Vec<u8>>>,
-    pending_finish_events: HashMap<String, (Option<i32>, bool)>,
+    pending_finish_events: HashMap<String, (Option<i32>, bool, MaterializedMutation)>,
     pending_delivery_counts: HashMap<String, usize>,
     next_delivery_sequence: HashMap<String, u64>,
     next_delivery_to_process: HashMap<String, u64>,
@@ -922,7 +954,7 @@ impl RunController {
         }
     }
 
-    fn commit_live_outputs(&mut self, node_id: &str, exit_code: Option<i32>) {
+    fn commit_live_outputs(&mut self, node_id: &str, exit_code: Option<i32>) -> MaterializedMutation {
         let outputs = self.live_outputs.remove(node_id).unwrap_or_default();
         let node = self.context.nodes.get(node_id).expect("node");
         let mut next = HashMap::new();
@@ -931,7 +963,7 @@ impl RunController {
             next.insert(key.clone(), outputs.get(&key).cloned().unwrap_or_default());
         }
         self.context
-            .replace_materialized_outputs(node_id, next, exit_code);
+            .replace_materialized_outputs(node_id, next, exit_code)
     }
 
     fn has_fresh_stdin_edge(&self, node_id: &str) -> bool {
@@ -1471,11 +1503,12 @@ impl RunController {
             state.replaying_materialized = false;
         }
 
-        if materialized {
-            self.commit_live_outputs(node_id, exit_code);
+        let mutation = if materialized {
+            self.commit_live_outputs(node_id, exit_code)
         } else {
             self.live_outputs.remove(node_id);
-        }
+            MaterializedMutation::default()
+        };
 
         let edges = self
             .context
@@ -1520,7 +1553,7 @@ impl RunController {
         }
 
         self.pending_finish_events
-            .insert(node_id.to_string(), (exit_code, materialized));
+            .insert(node_id.to_string(), (exit_code, materialized, mutation));
         self.finish_node_if_delivery_drained(node_id);
         Ok(())
     }
@@ -1537,8 +1570,9 @@ impl RunController {
         {
             return;
         }
-        if let Some((exit_code, materialized)) = self.pending_finish_events.remove(node_id) {
-            self.context.emit_finished(node_id, exit_code, materialized);
+        if let Some((exit_code, materialized, mutation)) = self.pending_finish_events.remove(node_id) {
+            self.context
+                .emit_finished(node_id, exit_code, materialized, mutation);
         }
     }
 
@@ -2143,6 +2177,7 @@ mod tests {
                 }
                 matouts.extend(active_matout_map.clone());
                 return ExecutionRequest {
+                    client_request_id: None,
                     graph: workspace,
                     matouts,
                     active_matouts: sorted_keys(&active_matout_map),
@@ -2242,6 +2277,7 @@ mod tests {
         }
         matouts.extend(active_matout_map.clone());
         ExecutionRequest {
+            client_request_id: None,
             graph: request_graph,
             matouts,
             active_matouts: sorted_keys(&active_matout_map),
@@ -3114,6 +3150,7 @@ mod tests {
                         exec_id: seen,
                         node_id,
                         timestamp,
+                        ..
                     }) if seen == exec_id && node_id == "script-2" => {
                         sink_started_at = Some(timestamp);
                         if source_finished_at.is_some() {
@@ -3355,6 +3392,7 @@ mod tests {
     fn request_rejects_missing_matouts() {
         let target = node(NodeKind::Script, "target");
         let request = ExecutionRequest {
+            client_request_id: None,
             graph: workspace(vec![target], vec![]),
             matouts: HashMap::from([(
                 request_port_ref_key(&PortRef {
@@ -3400,6 +3438,7 @@ mod tests {
             .cloned()
             .expect("stdin id");
         let request = ExecutionRequest {
+            client_request_id: None,
             graph: workspace(
                 vec![source, sink],
                 vec![edge(
@@ -3462,6 +3501,7 @@ mod tests {
         let no_replay = ExecutionContext::new(
             "no-replay-exit".to_string(),
             ExecutionRequest {
+                client_request_id: None,
                 graph: workspace(vec![source.clone()], vec![]),
                 matouts: HashMap::new(),
                 active_matouts: vec![],
@@ -3476,6 +3516,7 @@ mod tests {
         let replay = ExecutionContext::new(
             "replay-exit".to_string(),
             ExecutionRequest {
+                client_request_id: None,
                 graph: workspace(vec![source], vec![]),
                 matouts: HashMap::from([(
                     request_port_ref_key(&PortRef {
@@ -3502,6 +3543,7 @@ mod tests {
     #[test]
     fn request_accepts_disconnected_scope() {
         let request = ExecutionRequest {
+            client_request_id: None,
             graph: workspace(
                 vec![node(NodeKind::Text, "a"), node(NodeKind::Text, "b")],
                 vec![],
@@ -3534,6 +3576,7 @@ mod tests {
         let mut right_sink = node(NodeKind::Script, "right-sink");
         right_sink.script = Some("cat".to_string());
         let request = ExecutionRequest {
+            client_request_id: None,
             graph: workspace(
                 vec![left_root, left_sink, right_root, right_sink],
                 vec![

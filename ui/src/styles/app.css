@@ -524,10 +524,34 @@ textarea {
   background: linear-gradient(180deg, rgba(244, 236, 223, 0.06), rgba(244, 236, 223, 0.02));
 }
 
-.execution-panel {
+.top-right-panels {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.execution-panel,
+.execution-overlay {
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.execution-overlay {
+  min-width: 280px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--exec-plan-color) 46%, rgba(255, 255, 255, 0.12));
+  background: rgba(16, 12, 24, 0.92);
+  box-shadow: var(--shadow);
+}
+
+.execution-overlay-title {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--exec-plan-color) 72%, white 28%);
 }
 
 .execution-list {
@@ -541,9 +565,14 @@ textarea {
   align-items: center;
   gap: 8px;
   padding: 8px;
-  border: 1px solid rgba(244, 236, 223, 0.12);
+  border: 1px solid color-mix(in srgb, var(--exec-plan-color) 40%, rgba(255, 255, 255, 0.12));
   border-radius: 7px;
-  background: rgba(9, 11, 13, 0.44);
+  background: color-mix(in srgb, var(--exec-plan-color) 8%, rgba(9, 11, 13, 0.52));
+}
+
+.execution-item.is-terminal {
+  border-color: color-mix(in srgb, var(--exec-plan-color) 30%, rgba(255, 255, 255, 0.12));
+  background: color-mix(in srgb, var(--exec-plan-color) 5%, rgba(9, 11, 13, 0.44));
 }
 
 .execution-text {
@@ -563,23 +592,22 @@ textarea {
   font-size: 9px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text-soft);
+  color: color-mix(in srgb, var(--exec-plan-color) 58%, white 18%);
 }
 
 .execution-item button {
-  border: 1px solid rgba(222, 93, 93, 0.45);
-  color: #f4c3c3;
-  background: rgba(46, 18, 18, 0.88);
+  border: 1px solid color-mix(in srgb, var(--exec-plan-color) 48%, rgba(255, 255, 255, 0.12));
+  color: color-mix(in srgb, var(--exec-plan-color) 82%, white 18%);
+  background: color-mix(in srgb, var(--exec-plan-color) 16%, rgba(18, 12, 29, 0.92));
   border-radius: 8px;
   padding: 6px 8px;
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 10px;
-  cursor: default;
 }
 
 .execution-item button:hover {
-  border-color: rgba(222, 93, 93, 0.7);
+  border-color: color-mix(in srgb, var(--exec-plan-color) 78%, white 22%);
 }
 
 .node-palette-group {
@@ -1130,11 +1158,6 @@ textarea {
   overflow: visible;
 }
 
-.shell-node.is-running .node-card {
-  border-color: rgba(242, 192, 120, 0.42);
-  box-shadow: 0 0 0 1px rgba(242, 192, 120, 0.18), var(--shadow);
-}
-
 .react-flow__node.is-selection-preview .shell-node .node-card {
   border-color: color-mix(in srgb, var(--selection) 78%, white 22%);
   box-shadow: 0 0 0 calc(2px / max(var(--canvas-zoom, 1), 0.01)) color-mix(in srgb, var(--selection) 34%, transparent), var(--shadow);
@@ -1361,19 +1384,50 @@ textarea {
   height: auto;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 14px;
+  gap: 0;
 }
 
 .node-card {
   font-size: 12px;
   border-radius: 14px;
   border: 1px solid var(--line);
+  overflow: hidden;
   background:
     linear-gradient(180deg, rgba(242, 192, 120, 0.06), transparent 14%),
     linear-gradient(180deg, rgba(255, 255, 255, 0.03), transparent 100%),
     var(--card);
   box-shadow: var(--shadow);
+}
+
+.node-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px 14px 14px;
+}
+
+.node-execution-strip {
+  width: 100%;
+  height: max(5px, calc(2px / max(var(--canvas-zoom, 1), 0.01)));
+  border-radius: 14px 14px 0 0;
+  background: rgba(244, 236, 223, 0.28);
+  flex: 0 0 auto;
+}
+
+.node-execution-strip.is-waiting {
+  background: color-mix(in srgb, var(--accent-soft) 86%, white 14%);
+}
+
+.node-execution-strip.is-running {
+  background: color-mix(in srgb, var(--accent) 86%, white 14%);
+}
+
+.node-execution-strip.is-done.is-success {
+  background: color-mix(in srgb, var(--success) 86%, white 14%);
+}
+
+.node-execution-strip.is-done.is-failed {
+  background: color-mix(in srgb, var(--danger) 86%, white 14%);
 }
 
 .script-editor,
@@ -1588,7 +1642,6 @@ textarea {
   align-items: center;
   gap: 8px;
   min-height: 18px;
-  padding-right: 28px;
   color: var(--text-soft);
   font-size: 10px;
   text-transform: uppercase;
@@ -1613,8 +1666,19 @@ textarea {
   color: var(--accent-soft);
 }
 
-.node-state-pill.is-idle {
-  color: var(--text-soft);
+.node-state-pill.is-waiting {
+  border-color: rgba(242, 192, 120, 0.22);
+  color: var(--accent-soft);
+}
+
+.node-state-pill.is-done.is-success {
+  border-color: color-mix(in srgb, var(--success) 30%, transparent);
+  color: color-mix(in srgb, var(--success) 78%, white 22%);
+}
+
+.node-state-pill.is-done.is-failed {
+  border-color: color-mix(in srgb, var(--danger) 30%, transparent);
+  color: color-mix(in srgb, var(--danger) 82%, white 18%);
 }
 
 .node-exit-pill.is-success {
@@ -1623,6 +1687,11 @@ textarea {
 
 .node-exit-pill.is-failed {
   color: color-mix(in srgb, var(--danger) 82%, white 18%);
+}
+
+.execution-counts {
+  color: var(--text-soft);
+  font-size: 10px;
 }
 
 .autorun-shell {

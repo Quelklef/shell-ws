@@ -20,7 +20,7 @@ function summarizeServerEvent(event: ServerEvent) {
     case "materialized_state":
       return `mat ${event.node_id} upserts=${Object.keys(event.upserted_entries).length} deletes=${event.deleted_ids.length}`;
     case "exec_finished":
-      return `finish ${event.node_id} ${event.exec_id} code=${event.exit_code ?? "null"} mat=${event.materialized ? 1 : 0}`;
+      return `finish ${event.node_id} ${event.exec_id} code=${event.exit_code ?? "null"} mat=${event.materialized ? 1 : 0} upserts=${Object.keys(event.upserted_entries).length} deletes=${event.deleted_ids.length}`;
     case "port_activity":
       return `port ${event.node_id}.${event.port} bytes=${event.bytes}`;
     case "node_output":

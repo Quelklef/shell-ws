@@ -142,6 +142,29 @@ function outputHandle(
 function ShellNode({ data }: NodeProps) {
   const typedData = data as unknown as ShellNodeData;
   const { model, runtime } = typedData;
+  const executionStatus = typedData.executionStatus;
+  const statePillText = useMemo(() => {
+    if (!executionStatus && model.materialized?.lastExitCode == null) {
+      return null;
+    }
+    if (!executionStatus) {
+      return `EXIT ${model.materialized?.lastExitCode}`;
+    }
+    const phaseLabel = executionStatus.phase.toUpperCase();
+    if (executionStatus.phase !== "done" || model.materialized?.lastExitCode == null) {
+      return phaseLabel;
+    }
+    return `${phaseLabel} · EXIT ${model.materialized.lastExitCode}`;
+  }, [executionStatus, model.materialized?.lastExitCode]);
+  const statePillClassName = useMemo(() => {
+    if (executionStatus) {
+      return `node-state-pill is-${executionStatus.phase} ${executionStatus.phase === "done" ? (executionStatus.success ? "is-success" : "is-failed") : ""}`;
+    }
+    if (model.materialized?.lastExitCode != null) {
+      return `node-state-pill node-exit-pill ${model.materialized.lastExitCode === 0 ? "is-success" : "is-failed"}`;
+    }
+    return "";
+  }, [executionStatus, model.materialized?.lastExitCode]);
   const {
     generation,
     getActionReason,
@@ -564,44 +587,45 @@ function ShellNode({ data }: NodeProps) {
 
   const nodeCard = useMemo(() => (
     <div className="node-card">
-      <div className="node-meta">
-        <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
-        {model.kind === "formula" && (
-          <button
-            type="button"
-            className={`node-kind-icon-button nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
-            title="formula syntax help"
-            aria-label="formula syntax help"
-            onClick={() => setShowFormulaHelp((current) => !current)}
-          >
-            ?
-          </button>
-        )}
-        {(model.kind === "display" || model.kind === "passthru") && (
-          <button
-            type="button"
-            className="node-kind-icon-button nodrag nopan"
-            title={model.kind === "display" ? "convert to passthru" : "convert to display"}
-            aria-label={model.kind === "display" ? "convert to passthru" : "convert to display"}
-            onClick={() => onConvertKind(model.id, model.kind === "display" ? "passthru" : "display")}
-          >
-            <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
-              <path d="M3 5h7" />
-              <path d="M8 3l2 2-2 2" />
-              <path d="M13 11H6" />
-              <path d="M8 9l-2 2 2 2" />
-            </svg>
-          </button>
-        )}
-        <span className={`node-state-pill ${runtime.running ? "is-running" : "is-idle"}`}>
-          {runtime.running ? "running" : "idle"}
-        </span>
-        {model.materialized?.lastExitCode != null && (
-          <span className={`node-state-pill node-exit-pill ${model.materialized.lastExitCode === 0 ? "is-success" : "is-failed"}`}>
-            exit {model.materialized.lastExitCode}
-          </span>
-        )}
-      </div>
+      <div
+        className={`node-execution-strip ${executionStatus ? `is-${executionStatus.phase}` : "is-idle"} ${executionStatus?.phase === "done" ? (executionStatus.success ? "is-success" : "is-failed") : ""}`}
+      />
+      <div className="node-card-body">
+        <div className="node-meta">
+          <span className="node-kind-label">{model.kind.replaceAll("_", " ")}</span>
+          {model.kind === "formula" && (
+            <button
+              type="button"
+              className={`node-kind-icon-button nodrag nopan ${showFormulaHelp ? "is-open" : ""}`}
+              title="formula syntax help"
+              aria-label="formula syntax help"
+              onClick={() => setShowFormulaHelp((current) => !current)}
+            >
+              ?
+            </button>
+          )}
+          {(model.kind === "display" || model.kind === "passthru") && (
+            <button
+              type="button"
+              className="node-kind-icon-button nodrag nopan"
+              title={model.kind === "display" ? "convert to passthru" : "convert to display"}
+              aria-label={model.kind === "display" ? "convert to passthru" : "convert to display"}
+              onClick={() => onConvertKind(model.id, model.kind === "display" ? "passthru" : "display")}
+            >
+              <svg viewBox="0 0 16 16" focusable="false" aria-hidden="true">
+                <path d="M3 5h7" />
+                <path d="M8 3l2 2-2 2" />
+                <path d="M13 11H6" />
+                <path d="M8 9l-2 2 2 2" />
+              </svg>
+            </button>
+          )}
+          {statePillText && (
+            <span className={statePillClassName}>
+              {statePillText}
+            </span>
+          )}
+        </div>
 
       {(model.kind === "script" || model.kind === "ai_script") && (
         <>
@@ -898,6 +922,7 @@ function ShellNode({ data }: NodeProps) {
       )}
 
       {previewControlsLocation === "node" && previewButtons}
+      </div>
     </div>
   ), [
     autoRun,
@@ -919,14 +944,14 @@ function ShellNode({ data }: NodeProps) {
     previewButtons,
     previewControlsLocation,
     renderResizablePane,
-    runtime.running,
+    executionStatus,
     shellExtensions,
     showFormulaHelp,
   ]);
 
   return (
     <div
-      className={`shell-node nopan kind-${model.kind} ${runtime.running ? "is-running" : ""} ${executionPlan.isParticipating ? "is-execution-target" : ""}`}
+      className={`shell-node nopan kind-${model.kind} ${executionPlan.isParticipating ? "is-execution-target" : ""}`}
     >
       {executionPlan.isParticipating && (
         <div className="execution-plan-floating nodrag nopan">

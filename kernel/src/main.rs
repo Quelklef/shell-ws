@@ -348,6 +348,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                             if let Err(error) = handle_client_event(event, state.clone()).await {
                                 let _ = state.broadcaster.send(ServerEvent::Error {
                                     message: error.to_string(),
+                                    client_request_id: None,
                                     timestamp: current_ms(),
                                 });
                             }
@@ -355,6 +356,7 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
                         Err(error) => {
                             let _ = state.broadcaster.send(ServerEvent::Error {
                                 message: format!("Invalid client event: {error}"),
+                                client_request_id: None,
                                 timestamp: current_ms(),
                             });
                         }
@@ -494,7 +496,7 @@ fn summarize_server_event(event: &ServerEvent) -> String {
                 completed
             )
         }
-        ServerEvent::ExecutionStopped { exec_id, .. } => format!("stopped {}", exec_id),
+        ServerEvent::ExecutionStopped { exec_id, outcome, .. } => format!("stopped {} {:?}", exec_id, outcome),
         ServerEvent::Error { message, .. } => format!("error {}", message),
     }
 }

@@ -457,9 +457,19 @@ pub type ExecutionGraph = Workspace;
 pub struct ExecutionRequest {
     pub graph: ExecutionGraph,
     #[serde(default)]
+    pub client_request_id: Option<String>,
+    #[serde(default)]
     pub matouts: HashMap<String, String>,
     #[serde(default)]
     pub active_matouts: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutionOutcome {
+    Completed,
+    Stopped,
+    Failed,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -467,6 +477,8 @@ pub struct ExecutionRequest {
 pub enum ServerEvent {
     ExecStarted {
         exec_id: String,
+        #[serde(default)]
+        client_request_id: Option<String>,
         node_id: String,
         timestamp: u64,
     },
@@ -482,6 +494,9 @@ pub enum ServerEvent {
         node_id: String,
         exit_code: Option<i32>,
         materialized: bool,
+        materialized_state: NodeMaterialized,
+        upserted_entries: MaterializedOutputStore,
+        deleted_ids: Vec<String>,
         timestamp: u64,
     },
     PortActivity {
@@ -520,10 +535,13 @@ pub enum ServerEvent {
     },
     ExecutionStopped {
         exec_id: String,
+        outcome: ExecutionOutcome,
         timestamp: u64,
     },
     Error {
         message: String,
+        #[serde(default)]
+        client_request_id: Option<String>,
         timestamp: u64,
     },
 }
