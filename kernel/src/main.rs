@@ -10,6 +10,7 @@ mod tuckspace_store;
 mod workspace_store;
 
 use std::{
+    ffi::OsString,
     net::SocketAddr,
     path::{Path as FsPath, PathBuf},
     process::Stdio,
@@ -53,35 +54,171 @@ const APP_DATA_DIR: &str = "app-data";
 const APP_WORKSPACES_DIR: &str = "workspaces";
 const APP_TUCKSPACE_FILE: &str = "tuckspace.json";
 const APP_MATERIALIZED_OUTPUTS_FILE: &str = "materialized-outputs.json";
+const UI_DIST_ENV_VAR: &str = "SHELL_WS_UI_DIST";
+const DEFAULT_PORT: u16 = 4000;
 
-fn app_data_dir(root: &FsPath) -> PathBuf {
+#[derive(Debug)]
+struct ServeCommand {
+    port: u16,
+    data_dir: PathBuf,
+}
+
+#[derive(Debug)]
+enum CliCommand {
+    Help,
+    Serve(ServeCommand),
+}
+
+fn help_text() -> &'static str {
+    "shell-ws
+
+Starts the shell-ws kernel and serves the bundled frontend
+
+Usage:
+  shell-ws [serve] [--port PORT] [--data-dir PATH]
+  shell-ws help
+
+Commands:
+  serve   Start the local server (default)
+  help    Show this help text
+
+Serve options:
+  --port PORT      Listen on 127.0.0.1:PORT (default: 4000)
+  --data-dir PATH  Store app state in this directory (default: ./app-data)
+  -h, --help       Show this help text"
+}
+
+fn default_bind_address(port: u16) -> SocketAddr {
+    SocketAddr::from(([127, 0, 0, 1], port))
+}
+
+fn default_app_data_dir(root: &FsPath) -> PathBuf {
     root.join(APP_DATA_DIR)
 }
 
-fn app_workspaces_dir(root: &FsPath) -> PathBuf {
-    app_data_dir(root).join(APP_WORKSPACES_DIR)
+fn parse_cli(args: impl IntoIterator<Item = OsString>) -> Result<CliCommand, String> {
+    let mut args = args.into_iter();
+    let _program = args.next();
+    let mut remaining = args
+        .map(|value| {
+            value
+                .into_string()
+                .map_err(|value| format!("non-utf8 argument: {}", value.to_string_lossy()))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    match remaining.first().map(String::as_str) {
+        Some("help") => {
+            if remaining.len() > 1 {
+                return Err(format!("unexpected argument for help: {}", remaining[1]));
+            }
+            return Ok(CliCommand::Help);
+        }
+        Some("serve") => {
+            remaining.remove(0);
+        }
+        Some("-h" | "--help") => return Ok(CliCommand::Help),
+        Some(value) if !value.starts_with('-') => return Err(format!("unknown command: {value}")),
+        _ => {}
+    }
+
+    let mut port = DEFAULT_PORT;
+    let mut data_dir = default_app_data_dir(FsPath::new("."));
+    let mut index = 0;
+    while index < remaining.len() {
+        match remaining[index].as_str() {
+            "--port" => {
+                let value = remaining
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --port".to_string())?;
+                port = value
+                    .parse()
+                    .map_err(|error| format!("invalid --port {value}: {error}"))?;
+                index += 2;
+            }
+            value if value.starts_with("--port=") => {
+                let value = &value["--port=".len()..];
+                if value.is_empty() {
+                    return Err("missing value for --port".to_string());
+                }
+                port = value
+                    .parse()
+                    .map_err(|error| format!("invalid --port {value}: {error}"))?;
+                index += 1;
+            }
+            "--data-dir" => {
+                let value = remaining
+                    .get(index + 1)
+                    .ok_or_else(|| "missing value for --data-dir".to_string())?;
+                data_dir = PathBuf::from(value);
+                index += 2;
+            }
+            value if value.starts_with("--data-dir=") => {
+                let value = &value["--data-dir=".len()..];
+                if value.is_empty() {
+                    return Err("missing value for --data-dir".to_string());
+                }
+                data_dir = PathBuf::from(value);
+                index += 1;
+            }
+            "-h" | "--help" => return Ok(CliCommand::Help),
+            value => return Err(format!("unknown argument: {value}")),
+        }
+    }
+
+    Ok(CliCommand::Serve(ServeCommand { port, data_dir }))
 }
 
-fn app_tuckspace_path(root: &FsPath) -> PathBuf {
-    app_data_dir(root).join(APP_TUCKSPACE_FILE)
+fn ui_dist_dir() -> PathBuf {
+    if let Some(path) = std::env::var_os(UI_DIST_ENV_VAR) {
+        return PathBuf::from(path);
+    }
+
+    PathBuf::from("ui/dist")
 }
 
-fn app_materialized_outputs_path(root: &FsPath) -> PathBuf {
-    app_data_dir(root).join(APP_MATERIALIZED_OUTPUTS_FILE)
+fn app_workspaces_dir(app_data_dir: &FsPath) -> PathBuf {
+    app_data_dir.join(APP_WORKSPACES_DIR)
+}
+
+fn app_tuckspace_path(app_data_dir: &FsPath) -> PathBuf {
+    app_data_dir.join(APP_TUCKSPACE_FILE)
+}
+
+fn app_materialized_outputs_path(app_data_dir: &FsPath) -> PathBuf {
+    app_data_dir.join(APP_MATERIALIZED_OUTPUTS_FILE)
 }
 
 async fn prepare_app_data_layout(
-    root: &FsPath,
+    app_data_dir: &FsPath,
 ) -> Result<(PathBuf, PathBuf, PathBuf), std::io::Error> {
-    let workspaces_dir = app_workspaces_dir(root);
-    let tuckspace_path = app_tuckspace_path(root);
-    let materialized_outputs_path = app_materialized_outputs_path(root);
+    let workspaces_dir = app_workspaces_dir(app_data_dir);
+    let tuckspace_path = app_tuckspace_path(app_data_dir);
+    let materialized_outputs_path = app_materialized_outputs_path(app_data_dir);
     fs::create_dir_all(&workspaces_dir).await?;
     Ok((workspaces_dir, tuckspace_path, materialized_outputs_path))
 }
 
 #[tokio::main]
 async fn main() {
+    let cli = match parse_cli(std::env::args_os()) {
+        Ok(cli) => cli,
+        Err(error) => {
+            eprintln!("{error}");
+            eprintln!();
+            eprintln!("{}", help_text());
+            std::process::exit(2);
+        }
+    };
+
+    let serve = match cli {
+        CliCommand::Help => {
+            println!("{}", help_text());
+            return;
+        }
+        CliCommand::Serve(serve) => serve,
+    };
+
     tracing_subscriber::fmt()
         .with_env_filter(
             std::env::var("RUST_LOG")
@@ -90,7 +227,7 @@ async fn main() {
         .init();
 
     let (workspaces_dir, tuckspace_path, materialized_outputs_path) =
-        prepare_app_data_layout(FsPath::new("."))
+        prepare_app_data_layout(&serve.data_dir)
             .await
             .expect("prepare app data");
     let store = WorkspaceStore::new(&workspaces_dir)
@@ -115,6 +252,7 @@ async fn main() {
         broadcaster,
         openai_client,
     };
+    let ui_dist_dir = ui_dist_dir();
 
     let app = Router::new()
         .route("/api/health", get(health))
@@ -137,11 +275,12 @@ async fn main() {
         .route("/api/pick-file", post(pick_file))
         .route("/api/generate-script", post(generate_script_handler))
         .route("/ws", get(ws_handler))
-        .fallback_service(ServeDir::new("ui/dist").append_index_html_on_directories(true))
+        .fallback_service(ServeDir::new(ui_dist_dir).append_index_html_on_directories(true))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let address = SocketAddr::from(([127, 0, 0, 1], 4000));
+    let address = default_bind_address(serve.port);
+    info!("shell-ws data dir at {}", serve.data_dir.display());
     info!("shell-ws kernel listening on http://{address}");
     axum::serve(
         tokio::net::TcpListener::bind(address)
@@ -151,6 +290,79 @@ async fn main() {
     )
     .await
     .expect("start server");
+}
+
+#[cfg(test)]
+mod cli_tests {
+    use super::{parse_cli, CliCommand};
+    use std::{ffi::OsString, path::PathBuf};
+
+    fn parse(args: &[&str]) -> Result<CliCommand, String> {
+        parse_cli(args.iter().map(OsString::from).collect::<Vec<_>>())
+    }
+
+    #[test]
+    fn cli_defaults_to_serve() {
+        let command = parse(&["shell-ws"]).expect("parse");
+        match command {
+            CliCommand::Serve(serve) => {
+                assert_eq!(serve.port, super::DEFAULT_PORT);
+                assert_eq!(serve.data_dir, PathBuf::from("./app-data"));
+            }
+            CliCommand::Help => panic!("expected serve"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_help_commands() {
+        assert!(matches!(parse(&["shell-ws", "help"]), Ok(CliCommand::Help)));
+        assert!(matches!(
+            parse(&["shell-ws", "--help"]),
+            Ok(CliCommand::Help)
+        ));
+        assert!(matches!(
+            parse(&["shell-ws", "serve", "--help"]),
+            Ok(CliCommand::Help)
+        ));
+    }
+
+    #[test]
+    fn cli_parses_serve_options() {
+        let command = parse(&[
+            "shell-ws",
+            "serve",
+            "--port",
+            "4011",
+            "--data-dir",
+            "/tmp/ws",
+        ])
+        .expect("parse");
+        match command {
+            CliCommand::Serve(serve) => {
+                assert_eq!(serve.port, 4011);
+                assert_eq!(serve.data_dir, PathBuf::from("/tmp/ws"));
+            }
+            CliCommand::Help => panic!("expected serve"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_equals_options() {
+        let command = parse(&["shell-ws", "--port=4012", "--data-dir=/tmp/ws-2"]).expect("parse");
+        match command {
+            CliCommand::Serve(serve) => {
+                assert_eq!(serve.port, 4012);
+                assert_eq!(serve.data_dir, PathBuf::from("/tmp/ws-2"));
+            }
+            CliCommand::Help => panic!("expected serve"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_unknown_command() {
+        let error = parse(&["shell-ws", "dance"]).expect_err("error");
+        assert!(error.contains("unknown command"));
+    }
 }
 
 async fn health() -> &'static str {
@@ -496,7 +708,9 @@ fn summarize_server_event(event: &ServerEvent) -> String {
                 completed
             )
         }
-        ServerEvent::ExecutionStopped { exec_id, outcome, .. } => format!("stopped {} {:?}", exec_id, outcome),
+        ServerEvent::ExecutionStopped {
+            exec_id, outcome, ..
+        } => format!("stopped {} {:?}", exec_id, outcome),
         ServerEvent::Error { message, .. } => format!("error {}", message),
     }
 }
