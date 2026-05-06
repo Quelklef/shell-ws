@@ -3,3 +3,6 @@ model_reasoning_effort = "high"
 approvals_reviewer = "user"
 [projects."/per/dev/shell-ws"]
 trust_level = "trusted"
+
+[tui]
+theme = "coldark-dark"

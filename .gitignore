@@ -6,7 +6,7 @@ app-data/
 .codex/*
 !.codex/config.toml
 ui/tsconfig.tsbuildinfo
-working.md
+result
 
 # Local backups
 *.bak
