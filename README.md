@@ -1,34 +1,24 @@
-# shell-ws
+# `shell-ws`
 
-`shell-ws` is an interactive 2D shell workspace with a browser UI and a local Rust kernel.
+`shell-ws` is an interactive 2d computation workspace
 
-## Architecture
+![](./screenshot.png)
 
-- The browser UI owns the live workspace state and sends a full workspace snapshot to the kernel for each run.
-- The Rust kernel is responsible for execution and disk persistence, but execution no longer reloads workspace state from disk.
-- Workspace saves are separate from execution, so failed persistence does not change what the user runs.
+It's a little like a computational notebook (such as [Jupyter](https://jupyter.org/#jupyter-notebook-the-classic-notebook-interface) or [Marimo](https://marimo.io/)), but:
 
-## Run
+1. For the shell instead of specifically Python; and
+2. Computations are represented as explicit graphs, not sequences
 
-For the reproducible path on NixOS:
+Because of the graph representation, `shell-ws` makes it impossible to run a part of your computation without first running its dependencies (unlike Jupyter).
 
-```bash
-nix develop -c just dev
+`shell-ws` also offers some extra niceties. One is native AI integration; you can have AI write part of your pipeline on your behalf. Another is that HTML produced by computations can be embedded right into the browser. (This means you can have the output of your computation be an interactive applet!)
+
+## Running it
+
+You can run `shell-ws` right now if you have Nix installed:
+
+```
+nix run github:quelklef/shell-ws
 ```
 
-That starts the Rust kernel on `http://127.0.0.1:4000` and the Vite UI on `http://127.0.0.1:5173`.
-
-To run the built app after a production build:
-
-```bash
-nix develop -c just build
-nix develop -c cargo run --manifest-path kernel/Cargo.toml
-```
-
-The kernel serves `ui/dist` when it exists, so `http://127.0.0.1:4000` becomes the single app entrypoint.
-
-## Test
-
-```bash
-nix develop -c just test
-```
+Then, open your browser to `localhost:4000` (or whatever `nix run` reports)
